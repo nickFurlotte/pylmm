@@ -33,6 +33,25 @@ from scipy import stats
 import matplotlib.pyplot as pl
 import pdb
 
+def calculateKinship(W):
+      """
+	 W is an n x m matrix encoding SNP minor alleles.
+      """
+      n = W.shape[0]
+      m = W.shape[1]
+      keep = []
+      for i in range(m):
+	 mn = W[True - np.isnan(W[:,i]),i].mean()
+	 W[np.isnan(W[:,i]),i] = mn
+	 vr = W[:,i].var()
+	 if vr == 0: continue
+
+	 keep.append(i)
+	 W[:,i] = (W[:,i] - mn) / np.sqrt(vr)
+
+      W = W[:,keep]
+      K = np.dot(W,W.T) * 1.0/float(m)
+      return K
 
 class LMM:
 
@@ -60,7 +79,7 @@ class LMM:
       When this parameter is not provided, the constructor will set X0 to an n x 1 matrix of all ones to represent a mean effect.
       """
 
-      if not X0 == None: X0 = np.ones(len(Y)).reshape(len(Y),1)
+      if X0 == None: X0 = np.ones(len(Y)).reshape(len(Y),1)
 
       x = Y != -9
       if not x.sum() == len(Y):
@@ -199,7 +218,6 @@ class LMM:
 	If h == None, the optimal h stored in optH is used.
 
       """
-
       if stack: X = np.hstack([self.X0t,np.dot(self.Kve.T, X)])
       if h == None: h = self.optH
 
