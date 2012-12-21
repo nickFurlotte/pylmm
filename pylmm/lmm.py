@@ -53,6 +53,75 @@ def calculateKinship(W):
       K = np.dot(W,W.T) * 1.0/float(m)
       return K
 
+def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
+      """
+        Performs a basic GWAS scan using the LMM.  This function
+        uses the LMM module to assess association at each SNP and 
+        does some simple cleanup, such as removing missing individuals 
+        per SNP and re-computing the eigen-decomp
+
+	Y - n x 1 phenotype vector 
+        X - n x m SNP matrix
+	K - n x n kinship matrix
+        Kva,Kve = linalg.eigh(K) - or the eigen vectors and values for K
+        X0 - n x q covariate matrix
+	REML - use restricted maximum likelihood 
+        refit - refit the variance component for each SNP
+      """
+      n = X.shape[0]
+      m = X.shape[1]
+
+      if X0 == None: X0 = np.ones((n,1))
+      
+      # Remove missing values in Y and adjust associated parameters
+      v = np.isnan(Y)
+      if v.sum():
+	 keep = True - v
+	 Y = Y[keep]
+	 X = X[keep,:]
+	 X0 = X0[keep,:]
+	 K = K[keep,:][:,keep]
+	 Kva = []
+	 Kve = []
+
+      L = LMM(Y,K,Kva,Kve,X0)
+      if not refit: L.fit()
+
+      PS = []
+      TS = []
+
+      for i in range(m):
+	 x = X[:,i].reshape((n,1))
+	 v = np.isnan(x).reshape((-1,))
+	 if v.sum():
+	    keep = True - v
+	    xs = x[keep,:]
+	    if xs.var() == 0: 
+	       PS.append(np.nan) 
+	       TS.append(np.nan) 
+	       continue
+
+	    Ys = Y[keep]
+	    X0s = X0[keep,:]
+	    Ks = K[keep,:][:,keep]
+	    Ls = LMM(Ys,Ks,X0=X0s)
+	    if refit: Ls.fit(X=xs)
+	    else: Ls.fit()
+	    ts,ps = Ls.association(xs,REML=REML)
+	 else: 
+	    if x.var() == 0: 
+	       PS.append(np.nan) 
+	       TS.append(np.nan) 
+	       continue
+
+	    if refit: L.fit(X=x)
+	    ts,ps = L.association(x,REML=REML)
+	    
+	 PS.append(ps)
+	 TS.append(ts)
+
+      return TS,PS
+
 class LMM:
 
    """
@@ -210,6 +279,7 @@ class LMM:
       self.optSigma = sigma
 
       return hmax,beta,sigma,L
+
 
    def association(self,X, h = None, stack=True,REML=True):
 
