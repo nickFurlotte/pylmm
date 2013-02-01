@@ -25,9 +25,10 @@ L.fit()
 
 # Manually calculate the association at one SNP
 X = snps[:,0]
-X[np.isnan(X)] = X[True - np.isnan(X)] # Fill missing with MAF
+X[np.isnan(X)] = X[True - np.isnan(X)].mean() # Fill missing with MAF
 X = X.reshape(len(X),1)
-ts,ps = L.association(X)
+if X.var() == 0: ts,ps = (np.nan,np.nan)
+else: ts,ps = L.association(X)
 
 # If I want to refit the variance component
 L.fit(X=X)
