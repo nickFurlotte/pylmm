@@ -1,37 +1,47 @@
-# pyLMM software Copyright 2012, Nicholas A. Furlotte
-# Version 0.1
 
-#License Details
-#---------------
+# pyLMM is a python-based linear mixed-model solver with applications to GWAS
 
-# The program is free for academic use. Please contact Nick Furlotte
-# <nick.furlotte@gmail.com> if you are interested in using the software for
-# commercial purposes.
+# Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
 
-# The software must not be modified and distributed without prior
-# permission of the author.
-# Any instance of this software must retain the above copyright notice.
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
 
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import sys
 import time
 import numpy as np
-import numpy.linalg as linalg
+from scipy import linalg
 from scipy import optimize
 from scipy import stats
-import matplotlib.pyplot as pl
 import pdb
+
+def matrixMult(A,B):
+   #return np.dot(A,B)
+
+   if not A.flags['F_CONTIGUOUS']:
+      AA = A.T
+      transA = True
+   else:
+      AA = A
+      transA = False
+
+   if not B.flags['F_CONTIGUOUS']:
+      BB = B.T
+      transB = True
+   else:
+      BB = B
+      transB = False
+
+   return linalg.fblas.dgemm(alpha=1.,a=AA,b=BB,trans_a=transA,trans_b=transB)
 
 def calculateKinship(W):
       """
@@ -50,7 +60,7 @@ def calculateKinship(W):
 	 W[:,i] = (W[:,i] - mn) / np.sqrt(vr)
 
       W = W[:,keep]
-      K = np.dot(W,W.T) * 1.0/float(m)
+      K = matrixMult(W,W.T) * 1.0/float(m)
       return K
 
 def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
@@ -183,8 +193,8 @@ class LMM:
 	 eigenvector matrix of K (the kinship).
       """
 
-      self.Yt = np.dot(self.Kve.T, self.Y)
-      self.X0t = np.dot(self.Kve.T, self.X0)
+      self.Yt = matrixMult(self.Kve.T, self.Y)
+      self.X0t = matrixMult(self.Kve.T, self.X0)
 
    def getMLSoln(self,h,X):
 
@@ -198,11 +208,11 @@ class LMM:
    
       S = 1.0/(h*self.Kva + (1.0 - h))
       Xt = X.T*S
-      XX = np.dot(Xt,X)
+      XX = matrixMult(Xt,X)
       XX_i = linalg.inv(XX)
-      beta =  np.dot(np.dot(XX_i,Xt),self.Yt)
-      Yt = self.Yt - np.dot(X,beta)
-      Q = np.dot(Yt.T*S,Yt)
+      beta =  matrixMult(matrixMult(XX_i,Xt),self.Yt)
+      Yt = self.Yt - matrixMult(X,beta)
+      Q = matrixMult(Yt.T*S,Yt)
       sigma = Q * 1.0 / (float(len(self.Yt)) - float(X.shape[1]))
       return beta,sigma,Q,XX_i,XX
 
@@ -217,7 +227,7 @@ class LMM:
       """
 
       if X == None: X = self.X0t
-      elif stack: X = np.hstack([self.X0t,np.dot(self.Kve.T, X)])
+      elif stack: X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
 
       n = float(self.N)
       q = float(X.shape[1])
@@ -226,7 +236,7 @@ class LMM:
       LL = -0.5 * LL
 
       if REML:
-	 LL_REML_part = q*np.log(2.0*np.pi*sigma) + np.log(linalg.det(np.dot(X.T,X))) - np.log(linalg.det(XX))
+	 LL_REML_part = q*np.log(2.0*np.pi*sigma) + np.log(linalg.det(matrixMult(X.T,X))) - np.log(linalg.det(XX))
 	 LL = LL + 0.5*LL_REML_part
 
       return LL,beta,sigma,XX_i
@@ -264,7 +274,7 @@ class LMM:
       """
    
       if X == None: X = self.X0t
-      else: X = np.hstack([self.X0t,np.dot(self.Kve.T, X)])
+      else: X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
       H = np.array(range(ngrids)) / float(ngrids)
       L = np.array([self.LL(h,X,stack=False,REML=REML)[0] for h in H])
       self.LLs = L
@@ -281,31 +291,34 @@ class LMM:
       return hmax,beta,sigma,L
 
 
-   def association(self,X, h = None, stack=True,REML=True):
+   def association(self,X, h = None, stack=True,REML=True, returnBeta=False):
 
       """
 	Calculates association statitics for the SNPs encoded in the vector X of size n.
 	If h == None, the optimal h stored in optH is used.
 
       """
-      if stack: X = np.hstack([self.X0t,np.dot(self.Kve.T, X)])
+      if stack: X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
       if h == None: h = self.optH
 
-      L,beta,sigma,betaSTDERR = self.LL(h,X,stack=False,REML=REML)
+      L,beta,sigma,betaVAR = self.LL(h,X,stack=False,REML=REML)
       q  = len(beta)
-      ts,ps = self.tstat(beta[q-1],betaSTDERR[q-1,q-1],sigma,q)
+      ts,ps = self.tstat(beta[q-1],betaVAR[q-1,q-1],sigma,q)
+      
+      if returnBeta: return ts,ps,beta[q-1].sum(),betaVAR[q-1,q-1].sum()*sigma
       return ts,ps
 
-   def tstat(self,beta,stderr,sigma,q): 
+   def tstat(self,beta,var,sigma,q): 
 
 	 """
 	    Calculates a t-statistic and associated p-value given the estimate of beta and its standard error.
 	    This is actually an F-test, but when only one hypothesis is being performed, it reduces to a t-test.
 	 """
 
-	 ts = beta / np.sqrt(stderr * sigma)	 
+	 ts = beta / np.sqrt(var * sigma)	 
 	 ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
-	 return ts,ps
+	 if not len(ts) == 1 or not len(ps) == 1: raise Exception("Something bad happened :(")
+	 return ts.sum(),ps.sum()
 
    def plotFit(self,color='b-',title=''):
 
@@ -318,6 +331,8 @@ class LMM:
 	 For diagnostic purposes this lets you see if there is one distinct maximum or multiple 
 	 and what the variance of the parameter looks like.
       """
+      import matplotlib.pyplot as pl
+
       mx = self.LLs.max()
       p = np.exp(self.LLs - mx)
       p = p/p.sum()

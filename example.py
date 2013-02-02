@@ -4,7 +4,7 @@ import sys
 import time
 
 import numpy as np
-from pyLMM import lmm
+from pylmm import lmm
 
 
 Y = np.genfromtxt('data/hmdp.liver.exprs.1')

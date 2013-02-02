@@ -1,4 +1,22 @@
 
+# pyLMM is a python-based linear mixed-model solver with applications to GWAS
+
+# Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import os
 import sys
 import numpy as np
@@ -6,7 +24,7 @@ import struct
 import pdb
 
 class plink:
-   def __init__(self,fbase,kFile=None,type='b',normGenotype=True):
+   def __init__(self,fbase,kFile=None,phenoFile=None,type='b',normGenotype=True,readKFile=False):
 
       self.fbase = fbase
       self.type = type
@@ -14,18 +32,23 @@ class plink:
       self.kFile = kFile
       self.phenos = None
       self.normGenotype = normGenotype
+      self.phenoFile = phenoFile
+      # Originally I was using the fastLMM style that has indiv IDs embedded.
+      # NOW I want to use this module to just read SNPs so I'm allowing 
+      # the programmer to turn off the kinship reading.
+      self.readKFile = readKFile
 
       if self.kFile: 
 	 self.kFile = kFile
-	 self.K = self.readKinship(self.kFile)
+	 if self.readKFile: self.K = self.readKinship(self.kFile)
       elif os.path.isfile("%s.kin" % fbase): 
 	 self.kFile = "%s.kin" %fbase
-	 self.K = self.readKinship(self.kFile)
+	 if self.readKFile: self.K = self.readKinship(self.kFile)
       else: 
 	 self.kFile = None
 	 self.K = None
 
-      self.getPhenos()
+      self.getPhenos(self.phenoFile)
 
       self.fhandle = None
       self.snpFileHandle = None
@@ -112,7 +135,7 @@ class plink:
       return G
 
    def getPhenos(self,phenoFile=None):
-      if not phenoFile: phenoFile = self.fbase+".phenos"
+      if not phenoFile: self.phenoFile = phenoFile = self.fbase+".phenos"
       if not os.path.isfile(phenoFile): 
 	 sys.stderr.write("Could not find phenotype file: %s\n" % (phenoFile))
 	 return
@@ -122,7 +145,7 @@ class plink:
       for line in f:
 	 v = line.strip().split()
 	 keys.append((v[0],v[1]))
-	 P.append([float(x) for x in v[2:]])
+	 P.append([(x == 'NA' or x == '-9') and np.nan or float(x) for x in v[2:]])
       f.close()
       P = np.array(P)
 
@@ -197,6 +220,32 @@ class plink:
       self.indivs_removed = X
       if len(self.indivs_removed): sys.stderr.write("Removed %d individuals that did not appear in Kinship\n" % (len(self.indivs_removed)))
       return K 
+
+   def getCovariates(self,covFile=None):
+      if not os.path.isfile(covFile): 
+	 sys.stderr.write("Could not find covariate file: %s\n" % (phenoFile))
+	 return
+      f = open(covFile,'r')
+      keys = []
+      P = []
+      for line in f:
+	 v = line.strip().split()
+	 keys.append((v[0],v[1]))
+	 P.append([x == 'NA' and np.nan or float(x) for x in v[2:]])
+      f.close()
+      P = np.array(P)
+
+      # reorder to match self.indivs
+      D = {}
+      L = []
+      for i in range(len(keys)): D[keys[i]] = i
+      for i in range(len(self.indivs)):
+	 if not D.has_key(self.indivs[i]): continue 
+	 L.append(D[self.indivs[i]])
+      P = P[L,:]
+
+      return P
+
 
       
 
