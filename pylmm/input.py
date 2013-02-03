@@ -1,5 +1,5 @@
 
-# pyLMM is a python-based linear mixed-model solver with applications to GWAS
+# pylmm is a python-based linear mixed-model solver with applications to GWAS
 
 # Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
 #

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# pyLMM is a python-based linear mixed-model solver with applications to GWAS
+# pylmm is a python-based linear mixed-model solver with applications to GWAS
 
 # Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
 #
@@ -163,7 +163,7 @@ else:
 
 # CREATE LMM object for association
 n = K.shape[0]
-L = LMM(Y,K,Kva,Kve,X0)
+L = LMM(Y,K,Kva,Kve,X0,verbose=options.verbose)
 # Fit the null model -- if refit is true we will refit for each SNP, so no reason to run here
 if not options.refit: 
    if options.verbose: sys.stderr.write("Computing fit for null model\n")
@@ -189,7 +189,7 @@ for snp,id in IN:
    if v.sum():
       keeps = True - v
       xs = x[keeps,:]
-      if keeps.sum() <= 1 or xs.var() == 0: 
+      if keeps.sum() <= 1 or xs.var() <= 1e-6: 
 	 PS.append(np.nan)
 	 TS.append(np.nan)
 	 outputResult(id,np.nan,np.nan,np.nan,np.nan)
@@ -201,9 +201,12 @@ for snp,id in IN:
       Ys = Y[keeps]
       X0s = X0[keeps,:]
       Ks = K[keeps,:][:,keeps]
-      Ls = LMM(Ys,Ks,X0=X0s)
+      Ls = LMM(Ys,Ks,X0=X0s,verbose=options.verbose)
       if options.refit: Ls.fit(X=xs,REML=options.REML)
-      else: Ls.fit(REML=options.REML)
+      else: 
+	 #try:
+	 Ls.fit(REML=options.REML)
+	 #except: pdb.set_trace()
       ts,ps,beta,betaVar = Ls.association(xs,REML=options.REML,returnBeta=True)
    else: 
       if x.var() == 0: 

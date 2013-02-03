@@ -1,5 +1,5 @@
 
-# pyLMM is a python-based linear mixed-model solver with applications to GWAS
+# pylmm is a python-based linear mixed-model solver with applications to GWAS
 
 # Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
 #
@@ -24,9 +24,13 @@ from scipy import optimize
 from scipy import stats
 import pdb
 
+np.seterr('raise')
+
 def matrixMult(A,B):
    #return np.dot(A,B)
 
+   # If the matrices are in Fortran order then the computations will be faster
+   # when using dgemm.  Otherwise, the function will copy the matrix and that takes time.
    if not A.flags['F_CONTIGUOUS']:
       AA = A.T
       transA = True
@@ -148,7 +152,7 @@ class LMM:
 	 is not done consistently.
 
    """
-   def __init__(self,Y,K,Kva=[],Kve=[],X0=None):
+   def __init__(self,Y,K,Kva=[],Kve=[],X0=None,verbose=False):
 
       """
       The constructor takes a phenotype vector or array of size n.
@@ -159,10 +163,12 @@ class LMM:
       """
 
       if X0 == None: X0 = np.ones(len(Y)).reshape(len(Y),1)
+      self.verbose = verbose
 
-      x = Y != -9
+      #x = Y != -9
+      x = True - np.isnan(Y)
       if not x.sum() == len(Y):
-	 sys.stderr.write("Removing %d missing values from Y\n" % ((True - x).sum()))
+	 if self.verbose: sys.stderr.write("Removing %d missing values from Y\n" % ((True - x).sum()))
 	 Y = Y[x]
 	 K = K[x,:][:,x]
 	 X0 = X0[x,:]
@@ -171,17 +177,22 @@ class LMM:
       self.nonmissing = x
 
       if len(Kva) == 0 or len(Kve) == 0:
-	 sys.stderr.write("Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0],K.shape[1]) )
+	 if self.verbose: sys.stderr.write("Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0],K.shape[1]) )
 	 begin = time.time()
 	 Kva,Kve = linalg.eigh(K)
 	 end = time.time()
-	 sys.stderr.write("Total time: %0.3f\n" % (end - begin))
+	 if self.verbose: sys.stderr.write("Total time: %0.3f\n" % (end - begin))
+      
       self.K = K
       self.Kva = Kva
       self.Kve = Kve
       self.Y = Y
       self.X0 = X0
       self.N = self.K.shape[0]
+
+      if sum(self.Kva < 1e-6):
+         if self.verbose: sys.stderr.write("Cleaning %d eigen values\n" % (sum(self.Kva < 0)))
+         self.Kva[self.Kva < 1e-6] = 1e-6
 
       self.transform()
 
@@ -195,6 +206,8 @@ class LMM:
 
       self.Yt = matrixMult(self.Kve.T, self.Y)
       self.X0t = matrixMult(self.Kve.T, self.X0)
+      self.X0t_stack = np.hstack([self.X0t, np.ones((self.N,1))])
+      self.q = self.X0t.shape[1]
 
    def getMLSoln(self,h,X):
 
@@ -212,11 +225,14 @@ class LMM:
       XX_i = linalg.inv(XX)
       beta =  matrixMult(matrixMult(XX_i,Xt),self.Yt)
       Yt = self.Yt - matrixMult(X,beta)
-      Q = matrixMult(Yt.T*S,Yt)
-      sigma = Q * 1.0 / (float(len(self.Yt)) - float(X.shape[1]))
+      Q = np.dot(Yt.T*S,Yt)
+      sigma = Q * 1.0 / (float(self.N) - float(X.shape[1]))
       return beta,sigma,Q,XX_i,XX
 
-   def LL_brent(self,h,X=None,REML=False): return -self.LL(h,X,stack=False,REML=REML)[0]
+   def LL_brent(self,h,X=None,REML=False): 
+      if h < 0: return 1e6
+      return -self.LL(h,X,stack=False,REML=REML)[0]
+	 
    def LL(self,h,X=None,stack=True,REML=False):
 
       """
@@ -227,7 +243,9 @@ class LMM:
       """
 
       if X == None: X = self.X0t
-      elif stack: X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
+      elif stack: 
+	 self.X0t_stack[:,(self.q)] = matrixMult(self.Kve.T,X)[:,0]
+	 X = self.X0t_stack
 
       n = float(self.N)
       q = float(X.shape[1])
@@ -253,10 +271,12 @@ class LMM:
       n = len(self.LLs)
       HOpt = []
       for i in range(1,n-2):
-	 if self.LLs[i-1] < self.LLs[i] and self.LLs[i] > self.LLs[i+1]: HOpt.append(optimize.brent(self.LL_brent,args=(X,REML),brack=(H[i-1],H[i+1])))
+          if self.LLs[i-1] < self.LLs[i] and self.LLs[i] > self.LLs[i+1]: 
+	    HOpt.append(optimize.brent(self.LL_brent,args=(X,REML),brack=(H[i-1],H[i+1])))
+	    if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
 
       if len(HOpt) > 1: 
-	 sys.stderr.write("ERR: Found multiple maximum.  Returning first...\n")
+	 if self.verbose: sys.stderr.write("NOTE: Found multiple optima.  Returning first...\n")
 	 return HOpt[0]
       elif len(HOpt) == 1: return HOpt[0]
       elif self.LLs[0] > self.LLs[n-1]: return H[0]
@@ -274,7 +294,11 @@ class LMM:
       """
    
       if X == None: X = self.X0t
-      else: X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
+      else: 
+	 #X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
+	 self.X0t_stack[:,(self.q)] = matrixMult(self.Kve.T,X)[:,0]
+	 X = self.X0t_stack
+
       H = np.array(range(ngrids)) / float(ngrids)
       L = np.array([self.LL(h,X,stack=False,REML=REML)[0] for h in H])
       self.LLs = L
@@ -298,7 +322,11 @@ class LMM:
 	If h == None, the optimal h stored in optH is used.
 
       """
-      if stack: X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
+      if stack: 
+	 #X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
+	 self.X0t_stack[:,(self.q)] = matrixMult(self.Kve.T,X)[:,0]
+	 X = self.X0t_stack
+	 
       if h == None: h = self.optH
 
       L,beta,sigma,betaVAR = self.LL(h,X,stack=False,REML=REML)
