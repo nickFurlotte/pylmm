@@ -24,7 +24,7 @@ from scipy import optimize
 from scipy import stats
 import pdb
 
-np.seterr('raise')
+#np.seterr('raise')
 
 def matrixMult(A,B):
    #return np.dot(A,B)
