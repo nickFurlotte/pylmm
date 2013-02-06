@@ -50,6 +50,9 @@ def matrixMult(A,B):
 def calculateKinship(W):
       """
 	 W is an n x m matrix encoding SNP minor alleles.
+
+	 This function takes a matrix oF SNPs, imputes missing values with the maf,
+	 normalizes the resulting vectors and returns the RRM matrix.
       """
       n = W.shape[0]
       m = W.shape[1]
@@ -230,6 +233,8 @@ class LMM:
       return beta,sigma,Q,XX_i,XX
 
    def LL_brent(self,h,X=None,REML=False): 
+      #brent will not be bounded by the specified bracket.
+      # I return a large number if we encounter h < 0 to avoid errors in LL computation during the search.
       if h < 0: return 1e6
       return -self.LL(h,X,stack=False,REML=REML)[0]
 	 
@@ -313,7 +318,6 @@ class LMM:
       self.optSigma = sigma
 
       return hmax,beta,sigma,L
-
 
    def association(self,X, h = None, stack=True,REML=True, returnBeta=False):
 
