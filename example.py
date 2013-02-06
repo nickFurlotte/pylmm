@@ -1,5 +1,8 @@
 #!/usr/bin/python
 
+# This script illustrates how the pylmm module can be used to compute association 
+# statistics.  
+
 import sys
 import time
 
