@@ -1,18 +1,22 @@
 
+Prerequisites:
+
+Numpy - http://www.numpy.org/
+http://www.scipy.org/
+
 To INSTALL the alpha version of pylmm
 
-1) get pylmm and place it in some directory.  For example $HOME/pylmm
-2) add the following line to your .bash_profile or .bash_rc file in your home directory.
+1) get pylmm and place it in some directory.  For example $HOME/pylmm, lets
+call this directory $PYLMMBASE
 
-   export $PYTHONPATH=$PYTHONPATH:$PYLMM_LOCATION/pylmm
+2) You should place the module files under $PYLMMBASE/pylmm into some directory that is in your python path.  Or you could just add the following line to your .bash_profile or .bash_rc file in your home directory.
+
+   export $PYTHONPATH=$PYTHONPATH:$PYLMMBASE/pylmm
    
-replace $PYLMM_LOCATION with the location of the root directory for pylmm
-($HOME/pylmm in the example so that the full directory would be
-$HOME/pylmm/pylmm).
+3) If you placed the code in your python path or if you have executed the
+export command, then you should be able to access the modules.
 
-3) Exit the shell and log back in.  Or if you are using a mac, close the shell
-and open a new one.  Then open a python shell by simply typing 'python' in the shell and then say
-
+Try This: 
 import pylmm
 
 FOR HOFFMAN USERS:
@@ -26,7 +30,14 @@ If this works, then you installed it correctly.  Try to run the example.py
 file in the shell.  The output is not interesting, but if you don't get any
 errors, then everything probably worked.
 
+------ USING the Executables -------------------
+The executable scripts can be run by invoking python
 
+python $PYLMMBASE/pylmmGWAS.py --help
+
+and 
+
+python $PYLMMBASE/pylmmKinship.py --help
 
 
 
