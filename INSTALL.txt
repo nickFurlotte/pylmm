@@ -11,7 +11,7 @@ call this directory $PYLMMBASE
 
 2) You should place the module files under $PYLMMBASE/pylmm into some directory that is in your python path.  Or you could just add the following line to your .bash_profile or .bash_rc file in your home directory.
 
-   export $PYTHONPATH=$PYTHONPATH:$PYLMMBASE/pylmm
+   export PYTHONPATH=$PYTHONPATH:$PYLMMBASE/pylmm
    
 3) If you placed the code in your python path or if you have executed the
 export command, then you should be able to access the modules.
