@@ -38,9 +38,7 @@ class plink:
       # the programmer to turn off the kinship reading.
       self.readKFile = readKFile
 
-      if self.kFile: 
-	 self.kFile = kFile
-	 if self.readKFile: self.K = self.readKinship(self.kFile)
+      if self.kFile: self.K = self.readKinship(self.kFile)
       elif os.path.isfile("%s.kin" % fbase): 
 	 self.kFile = "%s.kin" %fbase
 	 if self.readKFile: self.K = self.readKinship(self.kFile)

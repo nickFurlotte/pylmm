@@ -189,9 +189,9 @@ class LMM:
       self.K = K
       self.Kva = Kva
       self.Kve = Kve
-      self.Y = Y
-      self.X0 = X0
       self.N = self.K.shape[0]
+      self.Y = Y.reshape((self.N,1))
+      self.X0 = X0
 
       if sum(self.Kva < 1e-6):
          if self.verbose: sys.stderr.write("Cleaning %d eigen values\n" % (sum(self.Kva < 0)))
@@ -312,10 +312,10 @@ class LMM:
       L,beta,sigma,betaSTDERR = self.LL(hmax,X,stack=False,REML=REML)
       
       self.H = H
-      self.optH = hmax
+      self.optH = hmax.sum()
       self.optLL = L
       self.optBeta = beta
-      self.optSigma = sigma
+      self.optSigma = sigma.sum()
 
       return hmax,beta,sigma,L
 
