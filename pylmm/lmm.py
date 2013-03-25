@@ -33,7 +33,12 @@ import pdb
 #np.seterr('raise')
 
 def matrixMult(A,B):
-   #return np.dot(A,B)
+
+   # If there is no fblas then we will revert to np.dot()
+   try:
+      linalg.fblas
+   except AttributeError:
+      return np.dot(A,B)
 
    # If the matrices are in Fortran order then the computations will be faster
    # when using dgemm.  Otherwise, the function will copy the matrix and that takes time.

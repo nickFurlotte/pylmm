@@ -92,10 +92,14 @@ while i < IN.numSNPs:
    if j < options.computeSize: W = W[:,range(0,j)] 
 
    if options.verbose: sys.stderr.write("Processing first %d SNPs\n" % i)
-   if K == None: K = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
-   #if K == None: K = np.dot(W,W.T) # calculateKinship(W) * j
+   if K == None: 
+      try: 
+	 K = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
+      except AttributeError: K = np.dot(W,W.T) 
    else:
-      K_j = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
+      try: 
+	 K_j = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
+      except AttributeError: K_j = np.dot(W,W.T)
       K = K + K_j
 
 K = K / float(IN.numSNPs)

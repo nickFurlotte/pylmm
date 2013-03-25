@@ -134,7 +134,9 @@ class plink:
       m = G[x].mean()
       s = np.sqrt(G[x].var())
       G[np.isnan(G)] = m
-      G = (G - m) / s
+      if s == 0: G = G - m
+      else: G = (G - m) / s
+
       return G
 
    def getPhenos(self,phenoFile=None):
