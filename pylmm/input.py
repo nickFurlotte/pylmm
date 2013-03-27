@@ -33,7 +33,12 @@ class plink:
 
       self.fbase = fbase
       self.type = type
-      self.indivs = self.getIndivs(self.fbase,type)
+      if not type == 'emma': self.indivs = self.getIndivs(self.fbase,type)
+      else: 
+	 # Just read a line from the SNP file and see how many individuals we have
+	 f = open(fbase,'r')
+	 self.indivs = range(len(f.readline().strip().split()))
+	 f.close()
       self.kFile = kFile
       self.phenos = None
       self.normGenotype = normGenotype
@@ -61,10 +66,39 @@ class plink:
       if self.snpFileHandle: self.snpFileHandle.close()
 
    def getSNPIterator(self):
-      if not self.type == 'b': 
-	 sys.stderr.write("Have only implemented this for binary plink files (bed)\n")
+      if self.type == 'b': return self.getSNPIterator_bed()
+      elif self.type == 't': return self.getSNPIterator_tped()
+      elif self.type == 'emma': return self.getSNPIterator_emma()
+      else:
+	 sys.stderr.write("Please set type to either b or t\n")
 	 return
 
+   def getSNPIterator_emma(self):
+      self.have_read = 0
+      self.numSNPs = -1
+      file = self.fbase
+      self.fhandle = open(file,'r')
+
+      return self
+
+   def getSNPIterator_tped(self):
+      # get the number of snps
+      file = self.fbase + '.bim'
+      if not os.path.isfile(file): file = self.fbase + '.map'
+      i = 0
+      f = open(file,'r')
+      for line in f: i += 1
+      f.close()
+      self.numSNPs = i
+      self.have_read = 0
+      self.snpFileHandle = open(file,'r')
+
+      file = self.fbase + '.tped'
+      self.fhandle = open(file,'r')
+
+      return self
+
+   def getSNPIterator_bed(self):
       # get the number of snps
       file = self.fbase + '.bim'
       i = 0
@@ -93,10 +127,48 @@ class plink:
 
    def next(self):
       if self.have_read == self.numSNPs: raise StopIteration
-      X = self.fhandle.read(self.BytestoRead)
-      XX = [bin(ord(x)) for x in struct.unpack(self._formatStr,X)]
       self.have_read += 1
-      return self.formatBinaryGenotypes(XX,self.normGenotype),self.snpFileHandle.readline().strip().split()[1]
+
+      if self.type == 'b':
+	 X = self.fhandle.read(self.BytestoRead)
+	 XX = [bin(ord(x)) for x in struct.unpack(self._formatStr,X)]
+	 return self.formatBinaryGenotypes(XX,self.normGenotype),self.snpFileHandle.readline().strip().split()[1]
+
+      elif self.type == 't': 
+	 X = self.fhandle.readline()
+	 XX = X.strip().split()
+	 chrm,rsid,pos1,pos2 = tuple(XX[:4])
+	 XX = XX[4:]
+	 G = self.getGenos_tped(XX)
+	 if self.normGenotype: G = self.normalizeGenotype(G)
+	 return G,self.snpFileHandle.readline().strip().split()[1]
+
+      elif self.type == 'emma':
+	 X = self.fhandle.readline()
+	 if X == '': raise StopIteration
+	 XX = X.strip().split()
+	 G = []
+	 for x in XX:
+	    try:
+	       G.append(float(x))
+	    except: G.append(np.nan)
+	 G = np.array(G)
+	 if self.normGenotype: G = self.normalizeGenotype(G)
+	 return G,"SNP_%d" % self.have_read
+
+      else: sys.stderr.write("Do not understand type %s\n" % (self.type))
+
+   def getGenos_tped(self,X):
+      G = []
+      for i in range(0,len(X)-1,2):
+	 a = X[i]
+	 b = X[i+1]
+	 if a == b == '0': g = np.nan
+	 if a == b == '1': g = 0
+	 if a == b == '2': g = 1
+	 if a != b: g = 0.5
+	 G.append(g)
+      return np.array(G)
 
    def formatBinaryGenotypes(self,X,norm=True):
 	 D = { \
@@ -106,15 +178,6 @@ class plink:
 	       '01': np.nan \
 	    }
 
-	 D_tped = { \
-	       '00': '1 1', \
-	       '10': '1 2', \
-	       '11': '2 2', \
-	       '01': '0 0' \
-	    }
-
-	 #D = D_tped
-	       
 	 G = []
 	 for x in X:
 	    if not len(x) == 10:
@@ -142,7 +205,7 @@ class plink:
    def getPhenos(self,phenoFile=None):
       if not phenoFile: self.phenoFile = phenoFile = self.fbase+".phenos"
       if not os.path.isfile(phenoFile): 
-	 sys.stderr.write("Could not find phenotype file: %s\n" % (phenoFile))
+	 #sys.stderr.write("Could not find phenotype file: %s\n" % (phenoFile))
 	 return
       f = open(phenoFile,'r')
       keys = []
@@ -155,13 +218,14 @@ class plink:
       P = np.array(P)
 
       # reorder to match self.indivs
-      D = {}
-      L = []
-      for i in range(len(keys)): D[keys[i]] = i
-      for i in range(len(self.indivs)):
-	 if not D.has_key(self.indivs[i]): continue 
-	 L.append(D[self.indivs[i]])
-      P = P[L,:]
+      if not self.type == 'emma':
+	 D = {}
+	 L = []
+	 for i in range(len(keys)): D[keys[i]] = i
+	 for i in range(len(self.indivs)):
+	    if not D.has_key(self.indivs[i]): continue 
+	    L.append(D[self.indivs[i]])
+	 P = P[L,:]
 
       self.phenos = P
       return P

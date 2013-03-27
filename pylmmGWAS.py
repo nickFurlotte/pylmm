@@ -25,13 +25,15 @@
 
 import pdb
 import time
+import sys
 
 def printOutHead(): out.write("\t".join(["SNP_ID","BETA","BETA_SD","F_STAT","P_VALUE"]) + "\n")
 def outputResult(id,beta,betaSD,ts,ps):
    out.write("\t".join([str(x) for x in [id,beta,betaSD,ts,ps]]) + "\n")
 
+
 from optparse import OptionParser,OptionGroup
-usage = """usage: %prog [options] --kfile kinshipFile --[t | b | p]file plinkFileBase outfileBase
+usage = """usage: %prog [options] --kfile kinshipFile --[tfile | bfile] plinkFileBase outfileBase
 
 This program provides basic genome-wide association (GWAS) functionality.  You provide a phenotype and genotype file as well as a pre-computed (use pylmmKinship.py) kinship matrix and the program outputs a result file with information about each SNP, including the association p-value.  
 The input file are all standard plink formatted with the first two columns specifiying the individual and family ID.  For the phenotype file, we accept either NA or -9 to denote missing values.  
@@ -40,27 +42,34 @@ Basic usage:
 
       python pylmmGWAS.py -v --bfile plinkFile --kfile preComputedKinship.kin --phenofile plinkFormattedPhenotypeFile resultFile
 
-NOTE: The current running version only supports binary PED files (PLINK).  It is simple to convert between ped or tped and bed using PLINK.  Sorry for the inconvinience.
-
 	    """
 parser = OptionParser(usage=usage)
 
 basicGroup = OptionGroup(parser, "Basic Options")
 advancedGroup = OptionGroup(parser, "Advanced Options")
 
-basicGroup.add_option("--pfile", dest="pfile",
-                  help="The base for a PLINK ped file")
+#basicGroup.add_option("--pfile", dest="pfile",
+#                  help="The base for a PLINK ped file")
 basicGroup.add_option("--tfile", dest="tfile",
                   help="The base for a PLINK tped file")
 basicGroup.add_option("--bfile", dest="bfile",
                   help="The base for a PLINK binary bed file")
 basicGroup.add_option("--phenofile", dest="phenoFile", default=None,
-                  help="Without this argument the program will look for a file with .pheno that has the plinkFileBase root.  If you want to specify an alternative phenotype file, then use this argument.  The order does not matter for this file. ")
+                  help="Without this argument the program will look for a file with .pheno that has the plinkFileBase root.  If you want to specify an alternative phenotype file, then use this argument.  This file should be in plink format. ")
+
+# EMMA Options
+basicGroup.add_option("--emmaSNP", dest="emmaFile", default=None,
+                  help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with individuals on the rows and snps on the columns.")
+basicGroup.add_option("--emmaPHENO", dest="emmaPheno", default=None,
+                  help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with each phenotype as one row.")
+
 basicGroup.add_option("--kfile", dest="kfile",
                   help="The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.")
 basicGroup.add_option("--covfile", dest="covfile",
                   help="The location of a covariate file file.  This is a plink formatted covariate file.")
 basicGroup.add_option("-p", type="int", dest="pheno", help="The phenotype index to be used in association.", default=0)
+
+
 
 advancedGroup.add_option("--removeMissingGenotypes",
                   action="store_false", dest="normalizeGenotype", default=True,
@@ -74,7 +83,7 @@ advancedGroup.add_option("--REML",
                   help="Use restricted maximum-likelihood (REML) (default is maximum-likelihood).")
 #advancedGroup.add_option("-e", "--efile", dest="saveEig", help="Save eigendecomposition to this file.")
 advancedGroup.add_option("--eigen", dest="eigenfile",
-                  help="The location of the precomputed eigendecomposition for the kinship file")
+                  help="The location of the precomputed eigendecomposition for the kinship file.  These can be computed with pylmmKinship.py.")
 advancedGroup.add_option("--noMean", dest="noMean", default=False,action="store_true",
                   help="This option only applies when --cofile is used.  When covfile is provided, the program will automatically add a global mean covariate to the model unless this option is specified.")
 
@@ -85,6 +94,7 @@ advancedGroup.add_option("-v", "--verbose",
 parser.add_option_group(basicGroup)
 parser.add_option_group(advancedGroup)
 
+
 (options, args) = parser.parse_args()
 
 import sys
@@ -94,23 +104,44 @@ from scipy import linalg
 from pylmm.lmm import LMM
 from pylmm import input
 
-if len(args) != 1: parser.error("Incorrect number of arguments")
+if len(args) != 1:  
+   parser.print_help()
+   sys.exit()
+
 outFile = args[0]
 
-if not options.pfile and not options.tfile and not options.bfile: 
-   parser.error("You must provide at least one PLINK input file base")
+if not options.tfile and not options.bfile and not options.emmaFile: 
+#if not options.pfile and not options.tfile and not options.bfile: 
+   parser.error("You must provide at least one PLINK input file base (--tfile or --bfile) or an EMMA formatted file (--emmaSNP).")
 if not options.kfile:
    parser.error("Please provide a pre-computed kinship file")
 
 # READING PLINK input
-if options.verbose: sys.stderr.write("Reading PLINK input...\n")
+if options.verbose: sys.stderr.write("Reading SNP input...\n")
 if options.bfile: IN = input.plink(options.bfile,type='b', phenoFile=options.phenoFile,normGenotype=options.normalizeGenotype)
 elif options.tfile: IN = input.plink(options.tfile,type='t', phenoFile=options.phenoFile,normGenotype=options.normalizeGenotype)
-elif options.pfile: IN = input.plink(options.pfile,type='p', phenoFile=options.phenoFile,normGenotype=options.normalizeGenotype)
+#elif options.pfile: IN = input.plink(options.pfile,type='p', phenoFile=options.phenoFile,normGenotype=options.normalizeGenotype)
+elif options.emmaFile: IN = input.plink(options.emmaFile,type='emma', phenoFile=options.phenoFile,normGenotype=options.normalizeGenotype)
 else: parser.error("You must provide at least one PLINK input file base")
 
-if not os.path.isfile(options.phenoFile or IN.fbase + '.phenos'):
-   parser.error("No .pheno file exist for %s" % (options.phenoFile or IN.fbase + '.phenos'))
+if not os.path.isfile(options.phenoFile or IN.fbase + '.phenos') and not os.path.isfile(options.emmaPheno):
+   parser.error("No .pheno file exist for %s.  Please provide a phenotype file using the --phenofile or --emmaPHENO argument." % (options.phenoFile or IN.fbase + '.phenos'))
+
+# Read the emma phenotype file if provided.
+# Format should be rows are phenotypes and columns are individuals.
+if options.emmaPheno:
+   f = open(options.emmaPheno,'r')
+   P = []
+   for line in f:
+      v = line.strip().split()
+      p = []
+      for x in v:
+	 try:
+	    p.append(float(x))
+	 except: p.append(np.nan)
+      P.append(p)
+   f.close()
+   IN.phenos = np.array(P).T
 
 # READING Covariate File
 if options.covfile: 
@@ -121,6 +152,7 @@ if options.covfile:
    if options.noMean: X0 = P
    else: X0 = np.hstack([np.ones((IN.phenos.shape[0],1)),P])
 
+   # TODO: Replace this with a mechanism ot remove the individuals with missing covariates and realign all other parameters.
    if np.isnan(X0).sum(): 
       parser.error("The covariate file %s contains missing values. At this time we are not dealing with this case.  Either remove those individuals with missing values or replace them in some way.")
 else: X0 = np.ones((IN.phenos.shape[0],1))
@@ -142,7 +174,6 @@ end = time.time()
 #K = np.loadtxt(options.kfile)
 #K = np.genfromtxt(options.kfile)
 if options.verbose: sys.stderr.write("Read the %d x %d kinship matrix in %0.3fs \n" % (K.shape[0],K.shape[1],end-begin))
-
 
 # PROCESS the phenotype data -- Remove missing phenotype values
 # Keep will now index into the "full" data to select what we keep (either everything or a subset of non missing data
