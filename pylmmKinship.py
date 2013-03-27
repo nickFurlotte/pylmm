@@ -23,10 +23,12 @@
 #NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 #SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from optparse import OptionParser,OptionGroup
-usage = """usage: %prog [options] --[t | b | p]file plinkFileBase outfile
+import sys
+import pdb
 
-NOTE: The current running version only supports binary PED files (PLINK).  It is simple to convert between ped or tped and bed using PLINK.  Sorry for the inconvinience.
+from optparse import OptionParser,OptionGroup
+usage = """usage: %prog [options] --[tfile | bfile] plinkFileBase outfile
+
 """
 
 parser = OptionParser(usage=usage)
@@ -34,12 +36,16 @@ parser = OptionParser(usage=usage)
 basicGroup = OptionGroup(parser, "Basic Options")
 #advancedGroup = OptionGroup(parser, "Advanced Options")
 
-basicGroup.add_option("--pfile", dest="pfile",
-                  help="The base for a PLINK ped file")
+#basicGroup.add_option("--pfile", dest="pfile",
+#                  help="The base for a PLINK ped file")
 basicGroup.add_option("--tfile", dest="tfile",
                   help="The base for a PLINK tped file")
 basicGroup.add_option("--bfile", dest="bfile",
                   help="The base for a PLINK binary ped file")
+basicGroup.add_option("--emmaSNP", dest="emmaFile", default=None,
+                  help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with individuals on the rows and snps on the columns.")
+basicGroup.add_option("--emmaNumSNPs", dest="numSNPs", type="int", default=0,
+		     help="When providing the emmaSNP file you need to specify how many snps are in the file")
 
 basicGroup.add_option("-e", "--efile", dest="saveEig", help="Save eigendecomposition to this file.")
 basicGroup.add_option("-n", default=1000,dest="computeSize", type="int", help="The maximum number of SNPs to read into memory at once (default 1000).  This is important when there is a large number of SNPs, because memory could be an issue.")
@@ -52,7 +58,10 @@ parser.add_option_group(basicGroup)
 #parser.add_option_group(advancedGroup)
 
 (options, args) = parser.parse_args()
-if len(args) != 1: parser.error("Incorrect number of arguments")
+if len(args) != 1: 
+   parser.print_help()
+   sys.exit()
+
 outFile = args[0]
 
 import sys
@@ -62,20 +71,25 @@ from scipy import linalg
 from pylmm.lmm import calculateKinship
 from pylmm import input
 
-if not options.pfile and not options.tfile and not options.bfile: 
-   parser.error("You must provide at least one PLINK input file base")
+if not options.tfile and not options.bfile and not options.emmaFile: 
+   parser.error("You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP).")
 
 if options.verbose: sys.stderr.write("Reading PLINK input...\n")
 if options.bfile: IN = input.plink(options.bfile,type='b')
 elif options.tfile: IN = input.plink(options.tfile,type='t')
-elif options.pfile: IN = input.plink(options.pfile,type='p')
-else: parser.error("You must provide at least one PLINK input file base")
+#elif options.pfile: IN = input.plink(options.pfile,type='p')
+elif options.emmaFile: 
+   if not options.numSNPs: parser.error("You must provide the number of SNPs when specifying an emma formatted file.")
+   IN = input.plink(options.emmaFile,type='emma')
+else: parser.error("You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP).")
 
 n = len(IN.indivs)
 m = options.computeSize
 W = np.ones((n,m)) * np.nan
 
 IN.getSNPIterator()
+# Annoying hack to get around the fact that it is expensive to determine the number of SNPs in an emma file
+if options.emmaFile: IN.numSNPs = options.numSNPs
 i = 0
 K = None
 while i < IN.numSNPs:
