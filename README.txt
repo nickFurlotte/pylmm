@@ -7,4 +7,4 @@ EXAMPLE COMMAND:
 
 python pylmmGWAS.py -v --bfile data/snps.132k.clean.noX --kfile data/snps.132k.clean.noX.pylmm.kin --phenofile data/snps.132k.clean.noX.fake.phenos out.foo
 
-pylmmGWAS.py reads PLINK formmated input file (currently only BED).  The kinship matrix file can be calculated using pylmmKinship.py which also takes PLINK files as input.  However, the kinship matrix file is just a plain text matrix, so any program that calculates such a matrix could be used.
+pylmmGWAS.py reads PLINK formmated input file (BED or TPED only).  There is also an option to use "EMMA" formatted files.  We included this in order to make it easier for people using EMMA currently to try pylmm.  The kinship matrix file can be calculated using pylmmKinship.py which also takes PLINK or EMMA files as input.  The kinship matrix output is just a plain text file and follows the same format as that used by EMMA, so that you can use pre-computed kinship matrices from EMMA as well, or any other program for that matter.

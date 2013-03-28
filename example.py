@@ -1,5 +1,29 @@
 #!/usr/bin/python
 
+# pylmm is a python-based linear mixed-model solver with applications to GWAS
+
+# Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
+
+#The program is free for academic use. Please contact Nick Furlotte
+#<nick.furlotte@gmail.com> if you are interested in using the software for
+#commercial purposes.
+
+#The software must not be modified and distributed without prior
+#permission of the author.
+
+#THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+#A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+#CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+#EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+#PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+#LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+#NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+#SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
 # This script illustrates how the pylmm module can be used to compute association 
 # statistics.  
 
@@ -8,7 +32,6 @@ import time
 
 import numpy as np
 from pylmm import lmm
-
 
 Y = np.genfromtxt('data/hmdp.liver.exprs.1')
 
