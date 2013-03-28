@@ -29,7 +29,7 @@ import struct
 import pdb
 
 class plink:
-   def __init__(self,fbase,kFile=None,phenoFile=None,type='b',normGenotype=True,readKFile=False):
+   def __init__(self,fbase,kFile=None,phenoFile=None,type='b',normGenotype=True,readKFile=False,fastLMM_kinship=False):
 
       self.fbase = fbase
       self.type = type
@@ -47,6 +47,7 @@ class plink:
       # NOW I want to use this module to just read SNPs so I'm allowing 
       # the programmer to turn off the kinship reading.
       self.readKFile = readKFile
+      self.fastLMM_kinship_style = fastLMM_kinship
 
       if self.kFile: self.K = self.readKinship(self.kFile)
       elif os.path.isfile("%s.kin" % fbase): 
@@ -264,30 +265,37 @@ class plink:
 
       f = open(kFile,'r')
       # read indivs 
-      v = f.readline().strip().split("\t")[1:]
-      keys = [tuple(y.split()) for y in v]
-      D = {}
-      for i in range(len(keys)): D[keys[i]] = i
+      if self.fastLMM_kinship_style:
+	 v = f.readline().strip().split("\t")[1:]
+	 keys = [tuple(y.split()) for y in v]
+	 D = {}
+	 for i in range(len(keys)): D[keys[i]] = i
 
       # read matrix
       K = []
-      for line in f: K.append([float(x) for x in line.strip().split("\t")[1:]])
+      if self.fastLMM_kinship_style:
+	 for line in f: K.append([float(x) for x in line.strip().split("\t")[1:]])
+      else: 
+	 for line in f: K.append([float(x) for x in line.strip().split()])
       f.close()
       K  = np.array(K)
+      
 
-      # reorder to match self.indivs
-      L = []
-      KK = []
-      X = []
-      for i in range(len(self.indivs)):
-	 if not D.has_key(self.indivs[i]): X.append(self.indivs[i])
-	 else: 
-	    KK.append(self.indivs[i])
-	    L.append(D[self.indivs[i]])
-      K = K[L,:][:,L]
-      self.indivs = KK
-      self.indivs_removed = X
-      if len(self.indivs_removed): sys.stderr.write("Removed %d individuals that did not appear in Kinship\n" % (len(self.indivs_removed)))
+      if self.fastLMM_kinship_style:
+	 # reorder to match self.indivs
+	 L = []
+	 KK = []
+	 X = []
+	 for i in range(len(self.indivs)):
+	    if not D.has_key(self.indivs[i]): X.append(self.indivs[i])
+	    else: 
+	       KK.append(self.indivs[i])
+	       L.append(D[self.indivs[i]])
+	 K = K[L,:][:,L]
+	 self.indivs = KK
+	 self.indivs_removed = X
+	 if len(self.indivs_removed): sys.stderr.write("Removed %d individuals that did not appear in Kinship\n" % (len(self.indivs_removed)))
+      
       return K 
 
    def getCovariates(self,covFile=None):
