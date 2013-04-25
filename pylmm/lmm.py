@@ -105,6 +105,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
       v = np.isnan(Y)
       if v.sum():
 	 keep = True - v
+	 keep = keep.reshape((-1,))
 	 Y = Y[keep]
 	 X = X[keep,:]
 	 X0 = X0[keep,:]
@@ -112,11 +113,17 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 	 Kva = []
 	 Kve = []
 
+
+      if len(Y) == 0: return np.ones(m)*np.nan,np.ones(m)*np.nan
+
       L = LMM(Y,K,Kva,Kve,X0)
       if not refit: L.fit()
 
       PS = []
       TS = []
+
+      n = X.shape[0]
+      m = X.shape[1]
 
       for i in range(m):
 	 x = X[:,i].reshape((n,1))
@@ -266,6 +273,7 @@ class LMM:
       n = float(self.N)
       q = float(X.shape[1])
       beta,sigma,Q,XX_i,XX = self.getMLSoln(h,X)
+      if n == 0 or Q < 0: pdb.set_trace()
       LL = n*np.log(2*np.pi) + np.log(h*self.Kva + (1.0-h)).sum() + n + n*np.log(1.0/n * Q)
       LL = -0.5 * LL
 
@@ -273,6 +281,8 @@ class LMM:
 	 LL_REML_part = q*np.log(2.0*np.pi*sigma) + np.log(linalg.det(matrixMult(X.T,X))) - np.log(linalg.det(XX))
 	 LL = LL + 0.5*LL_REML_part
 
+
+      LL = LL.sum()
       return LL,beta,sigma,XX_i
 
    def getMax(self,H, X=None,REML=False):
@@ -289,7 +299,8 @@ class LMM:
       for i in range(1,n-2):
           if self.LLs[i-1] < self.LLs[i] and self.LLs[i] > self.LLs[i+1]: 
 	    HOpt.append(optimize.brent(self.LL_brent,args=(X,REML),brack=(H[i-1],H[i+1])))
-	    if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
+	    if np.isnan(HOpt[-1]): HOpt[-1] = [self.LLs[i-1]]
+	    #if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
 
       if len(HOpt) > 1: 
 	 if self.verbose: sys.stderr.write("NOTE: Found multiple optima.  Returning first...\n")

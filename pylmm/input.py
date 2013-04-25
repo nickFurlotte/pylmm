@@ -214,7 +214,7 @@ class plink:
       for line in f:
 	 v = line.strip().split()
 	 keys.append((v[0],v[1]))
-	 P.append([(x == 'NA' or x == '-9') and np.nan or float(x) for x in v[2:]])
+	 P.append([(x.strip() == 'NA' or x.strip() == '-9') and np.nan or float(x) for x in v[2:]])
       f.close()
       P = np.array(P)
 
