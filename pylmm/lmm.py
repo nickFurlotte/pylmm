@@ -299,7 +299,8 @@ class LMM:
       for i in range(1,n-2):
           if self.LLs[i-1] < self.LLs[i] and self.LLs[i] > self.LLs[i+1]: 
 	    HOpt.append(optimize.brent(self.LL_brent,args=(X,REML),brack=(H[i-1],H[i+1])))
-	    if np.isnan(HOpt[-1]): HOpt[-1] = [self.LLs[i-1]]
+	    if np.isnan(HOpt[-1]): HOpt[-1] = H[i-1]
+	    #if np.isnan(HOpt[-1]): HOpt[-1] = self.LLs[i-1]
 	    #if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
 
       if len(HOpt) > 1: 
