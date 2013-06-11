@@ -371,7 +371,9 @@ class LMM:
 	 """
 
 	 ts = beta / np.sqrt(var * sigma)	 
-	 ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
+	 #ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
+	 # sf == survival function - this is more accurate -- could also use logsf if the precision is not good enough
+	 ps = 2.0*(stats.t.sf(np.abs(ts), self.N-q))
 	 if not len(ts) == 1 or not len(ps) == 1: raise Exception("Something bad happened :(")
 	 return ts.sum(),ps.sum()
 
@@ -396,4 +398,15 @@ class LMM:
       pl.xlabel("Heritability")
       pl.ylabel("Probability of data")
       pl.title(title)
+   
+   def meanAndVar(self):
+
+      mx = self.LLs.max()
+      p = np.exp(self.LLs - mx)
+      p = p/p.sum()
+
+      mn = (self.H * p).sum()
+      vx = ((self.H - mn)**2 * p).sum()
+
+      return mn,vx
 
