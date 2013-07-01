@@ -157,6 +157,36 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 
       return TS,PS
 
+#class LMM_withK2(LMM):
+
+#   # I want this to have the same arguments as basic LMM
+#   def __init__(self,Y,K,K2,Kva=[],Kve=[],X0=None,verbose=False):
+#      # Do super init to clean out Y and get everything aligned.
+      # Its actually not necessary to get the eigendecomp but I will leave it for now
+#      self.super().__init__(Y,K,Kva,Kve,X0=X0)
+#      if not self.nonmissing.sum() == len(self.nonmissing): K2 = K2[x,:][:,x]
+#      self.K2 = K2
+#      self.X0_stack = np.hstack([self.X0, np.ones((self.N,1))])
+
+#   def fit(self,X=None,ngrids=100,REML=True,wgrids=100):
+
+#      if X == None: X = self.X0
+#      else: 
+	 #X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
+#	 self.X0_stack[:,(self.q)] = X[:,0]
+#	 X = self.X0_stack
+
+#      W = np.array(range(wgrids)) / float(wgrids)
+
+#      for i in W:
+#	 K = w*self.K + (1.0 - w)*self.K2
+#	 L = self.__class__(self.Y,K,X0=X)
+#	 hmax,beta,sigma,L = L.fit()
+
+      
+#   def association(self,X, h = None, stack=True,REML=True, returnBeta=False): pass
+#      
+
 class LMM:
 
    """
@@ -186,8 +216,8 @@ class LMM:
       if X0 == None: X0 = np.ones(len(Y)).reshape(len(Y),1)
       self.verbose = verbose
 
-      #x = Y != -9
       x = True - np.isnan(Y)
+      x = x.reshape(-1,)
       if not x.sum() == len(Y):
 	 if self.verbose: sys.stderr.write("Removing %d missing values from Y\n" % ((True - x).sum()))
 	 Y = Y[x]
@@ -273,7 +303,7 @@ class LMM:
       n = float(self.N)
       q = float(X.shape[1])
       beta,sigma,Q,XX_i,XX = self.getMLSoln(h,X)
-      if n == 0 or Q < 0: pdb.set_trace()
+      #if n == 0 or Q < 0: pdb.set_trace()
       LL = n*np.log(2*np.pi) + np.log(h*self.Kva + (1.0-h)).sum() + n + n*np.log(1.0/n * Q)
       LL = -0.5 * LL
 
@@ -320,7 +350,7 @@ class LMM:
 	 This function calculates the LLs over a grid and then uses .getMax(...) to find the optimum.
 	 Given this optimum, the function computes the LL and associated ML solutions.
       """
-   
+      
       if X == None: X = self.X0t
       else: 
 	 #X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])

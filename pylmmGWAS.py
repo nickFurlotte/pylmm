@@ -47,6 +47,7 @@ parser = OptionParser(usage=usage)
 
 basicGroup = OptionGroup(parser, "Basic Options")
 advancedGroup = OptionGroup(parser, "Advanced Options")
+experimentalGroup = OptionGroup(parser, "Experimental Options")
 
 #basicGroup.add_option("--pfile", dest="pfile",
 #                  help="The base for a PLINK ped file")
@@ -91,9 +92,13 @@ advancedGroup.add_option("-v", "--verbose",
                   action="store_true", dest="verbose", default=False,
                   help="Print extra info")
 
+# Experimental Group Options
+experimentalGroup.add_option("--kfile2", dest="kfile2", 
+                  help="The location of a second kinship file.  This file has the same format as the first kinship.  This might be used if you want to correct for another form of confounding.")
+
 parser.add_option_group(basicGroup)
 parser.add_option_group(advancedGroup)
-
+parser.add_option_group(experimentalGroup)
 
 (options, args) = parser.parse_args()
 
@@ -175,6 +180,21 @@ end = time.time()
 #K = np.genfromtxt(options.kfile)
 if options.verbose: sys.stderr.write("Read the %d x %d kinship matrix in %0.3fs \n" % (K.shape[0],K.shape[1],end-begin))
 
+if options.kfile2:
+   if options.verbose: sys.stderr.write("Reading second kinship...\n")
+   begin = time.time()
+   # This method seems to be the fastest and works if you already know the size of the matrix
+   if options.kfile2[-3:] == '.gz':
+      import gzip
+      f = gzip.open(options.kfile2,'r')
+      F = f.read() # might exhaust mem if the file is huge
+      K2 = np.fromstring(F,sep=' ') # Assume that space separated
+      f.close()
+   else: K2 = np.fromfile(open(options.kfile2,'r'),sep=" ")
+   K2.resize((len(IN.indivs),len(IN.indivs)))
+   end = time.time()
+   if options.verbose: sys.stderr.write("Read the %d x %d second kinship matrix in %0.3fs \n" % (K2.shape[0],K2.shape[1],end-begin))
+
 # PROCESS the phenotype data -- Remove missing phenotype values
 # Keep will now index into the "full" data to select what we keep (either everything or a subset of non missing data
 Y = IN.phenos[:,options.pheno]
@@ -185,6 +205,7 @@ if v.sum():
    Y = Y[keep]
    X0 = X0[keep,:]
    K = K[keep,:][:,keep]
+   if options.kfile2: K2 = K2[keep,:][:,keep]
    Kva = []
    Kve = []
 
@@ -200,12 +221,15 @@ else:
 
 # CREATE LMM object for association
 n = K.shape[0]
-L = LMM(Y,K,Kva,Kve,X0,verbose=options.verbose)
+if not options.kfile2:  L = LMM(Y,K,Kva,Kve,X0,verbose=options.verbose)
+else:  L = LMM_withK2(Y,K,Kva,Kve,X0,verbose=options.verbose,K2=K2)
+
 # Fit the null model -- if refit is true we will refit for each SNP, so no reason to run here
 if not options.refit: 
    if options.verbose: sys.stderr.write("Computing fit for null model\n")
    L.fit()
-   if options.verbose: sys.stderr.write("\t heritability=%0.3f, sigma=%0.3f\n" % (L.optH,L.optSigma))
+   if options.verbose and not options.kfile2: sys.stderr.write("\t heritability=%0.3f, sigma=%0.3f\n" % (L.optH,L.optSigma))
+   if options.verbose and options.kfile2: sys.stderr.write("\t heritability=%0.3f, sigma=%0.3f, w=%0.3f\n" % (L.optH,L.optSigma,L.optW))
 
 # Buffers for pvalues and t-stats
 PS = []
@@ -238,7 +262,9 @@ for snp,id in IN:
       Ys = Y[keeps]
       X0s = X0[keeps,:]
       Ks = K[keeps,:][:,keeps]
-      Ls = LMM(Ys,Ks,X0=X0s,verbose=options.verbose)
+      if options.kfile2: K2s = K2[keeps,:][:,keeps]
+      if options.kfile2: Ls = LMM_withK2(Ys,Ks,X0=X0s,verbose=options.verbose,K2=K2s)
+      else: Ls = LMM(Ys,Ks,X0=X0s,verbose=options.verbose)
       if options.refit: Ls.fit(X=xs,REML=options.REML)
       else: 
 	 #try:
