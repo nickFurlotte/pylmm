@@ -157,36 +157,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 
       return TS,PS
 
-#class LMM_withK2(LMM):
-
-#   # I want this to have the same arguments as basic LMM
-#   def __init__(self,Y,K,K2,Kva=[],Kve=[],X0=None,verbose=False):
-#      # Do super init to clean out Y and get everything aligned.
-      # Its actually not necessary to get the eigendecomp but I will leave it for now
-#      self.super().__init__(Y,K,Kva,Kve,X0=X0)
-#      if not self.nonmissing.sum() == len(self.nonmissing): K2 = K2[x,:][:,x]
-#      self.K2 = K2
-#      self.X0_stack = np.hstack([self.X0, np.ones((self.N,1))])
-
-#   def fit(self,X=None,ngrids=100,REML=True,wgrids=100):
-
-#      if X == None: X = self.X0
-#      else: 
-	 #X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
-#	 self.X0_stack[:,(self.q)] = X[:,0]
-#	 X = self.X0_stack
-
-#      W = np.array(range(wgrids)) / float(wgrids)
-
-#      for i in W:
-#	 K = w*self.K + (1.0 - w)*self.K2
-#	 L = self.__class__(self.Y,K,X0=X)
-#	 hmax,beta,sigma,L = L.fit()
-
-      
-#   def association(self,X, h = None, stack=True,REML=True, returnBeta=False): pass
-#      
-
+     
 class LMM:
 
    """
