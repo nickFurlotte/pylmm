@@ -184,7 +184,8 @@ class LMM:
       When this parameter is not provided, the constructor will set X0 to an n x 1 matrix of all ones to represent a mean effect.
       """
 
-      if X0 == None: X0 = np.ones(len(Y)).reshape(len(Y),1)
+      if X0 == None: 
+	 X0 = np.ones(len(Y)).reshape(len(Y),1)
       self.verbose = verbose
 
       x = True - np.isnan(Y)
@@ -364,7 +365,7 @@ class LMM:
       if returnBeta: return ts,ps,beta[q-1].sum(),betaVAR[q-1,q-1].sum()*sigma
       return ts,ps
 
-   def tstat(self,beta,var,sigma,q): 
+   def tstat(self,beta,var,sigma,q,log=False): 
 
 	 """
 	    Calculates a t-statistic and associated p-value given the estimate of beta and its standard error.
@@ -374,8 +375,12 @@ class LMM:
 	 ts = beta / np.sqrt(var * sigma)	 
 	 #ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
 	 # sf == survival function - this is more accurate -- could also use logsf if the precision is not good enough
-	 ps = 2.0*(stats.t.sf(np.abs(ts), self.N-q))
-	 if not len(ts) == 1 or not len(ps) == 1: raise Exception("Something bad happened :(")
+	 if log:
+	    ps = 2.0 + (stats.t.logsf(np.abs(ts), self.N-q))
+	 else:
+	    ps = 2.0*(stats.t.sf(np.abs(ts), self.N-q))
+	 if not len(ts) == 1 or not len(ps) == 1: 
+	    raise Exception("Something bad happened :(")
 	 return ts.sum(),ps.sum()
 
    def plotFit(self,color='b-',title=''):
