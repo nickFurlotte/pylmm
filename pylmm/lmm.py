@@ -58,7 +58,7 @@ def matrixMult(A,B):
 
    return linalg.fblas.dgemm(alpha=1.,a=AA,b=BB,trans_a=transA,trans_b=transB)
 
-def calculateKinship(W):
+def calculateKinship(W,center=False):
       """
 	 W is an n x m matrix encoding SNP minor alleles.
 
@@ -79,6 +79,11 @@ def calculateKinship(W):
 
       W = W[:,keep]
       K = matrixMult(W,W.T) * 1.0/float(m)
+      if center:
+	 P = np.diag(np.repeat(1,n)) - 1/float(n) * np.ones((n,n))
+	 S = np.trace(matrixMult(matrixMult(P,K),P))
+	 K_n = (n - 1)*K / S
+	 return K_n
       return K
 
 def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
