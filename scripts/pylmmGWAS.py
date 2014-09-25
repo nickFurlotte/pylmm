@@ -63,6 +63,8 @@ basicGroup.add_option("--emmaSNP", dest="emmaFile", default=None,
                   help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with individuals on the columns and snps on the rows.")
 basicGroup.add_option("--emmaPHENO", dest="emmaPheno", default=None,
                   help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with each phenotype as one row.")
+basicGroup.add_option("--emmaCOV", dest="emmaCov", default=None,
+                  help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with each covariate as one row.")
 
 basicGroup.add_option("--kfile", dest="kfile",
                   help="The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.")
@@ -154,8 +156,18 @@ if options.covfile:
    # Read the covariate file -- write this into input.plink
    P = IN.getCovariates(options.covfile) 
 
-   if options.noMean: X0 = P
-   else: X0 = np.hstack([np.ones((IN.phenos.shape[0],1)),P])
+   if options.noMean: 
+      X0 = P
+   else: 
+      X0 = np.hstack([np.ones((IN.phenos.shape[0],1)),P])
+elif options.emmaCov:
+   if options.verbose: 
+      sys.stderr.write("Reading covariate file...\n")
+   P = IN.getCovariatesEMMA(options.emmaCov) 
+   if options.noMean: 
+      X0 = P
+   else: 
+      X0 = np.hstack([np.ones((IN.phenos.shape[0],1)),P])
 
    # TODO: Replace this with a mechanism ot remove the individuals with missing covariates and realign all other parameters.
    if np.isnan(X0).sum(): 
@@ -172,7 +184,8 @@ if options.kfile[-3:] == '.gz':
    F = f.read() # might exhaust mem if the file is huge
    K = np.fromstring(F,sep=' ') # Assume that space separated
    f.close()
-else: K = np.fromfile(open(options.kfile,'r'),sep=" ")
+else: 
+   K = np.fromfile(open(options.kfile,'r'),sep=" ")
 K.resize((len(IN.indivs),len(IN.indivs)))
 end = time.time()
 # Other slower ways
@@ -244,7 +257,6 @@ for snp,id in IN:
       sys.stderr.write("At SNP %d\n" % count)
       
    x = snp[keep].reshape((n,1))
-   #x[[1,50,100,200,3000],:] = np.nan
    v = np.isnan(x).reshape((-1,))
    # Check SNPs for missing values
    if v.sum():

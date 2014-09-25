@@ -300,6 +300,16 @@ class plink:
       
       return K 
 
+   def getCovariatesEMMA(self,emmaFile):
+      f = open(emmaFile,'r')
+      P = []
+      for line in f:
+         v = [x == 'NA' and np.nan or float(x) for x in line.strip().split()]
+         P.append(v)
+      f.close()
+      P = np.array(P).T
+      return P
+
    def getCovariates(self,covFile=None):
       if not os.path.isfile(covFile): 
 	 sys.stderr.write("Could not find covariate file: %s\n" % (covFile))
