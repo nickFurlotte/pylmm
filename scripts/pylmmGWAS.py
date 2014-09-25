@@ -152,10 +152,9 @@ if options.emmaPheno:
 
 # READING Covariate File
 if options.covfile: 
-   if options.verbose: sys.stderr.write("Reading covariate file...\n")
-   # Read the covariate file -- write this into input.plink
+   if options.verbose: 
+      sys.stderr.write("Reading covariate file...\n")
    P = IN.getCovariates(options.covfile) 
-
    if options.noMean: 
       X0 = P
    else: 
@@ -168,11 +167,11 @@ elif options.emmaCov:
       X0 = P
    else: 
       X0 = np.hstack([np.ones((IN.phenos.shape[0],1)),P])
+else: 
+   X0 = np.ones((IN.phenos.shape[0],1))
 
-   # TODO: Replace this with a mechanism ot remove the individuals with missing covariates and realign all other parameters.
-   if np.isnan(X0).sum(): 
+if np.isnan(X0).sum(): 
       parser.error("The covariate file %s contains missing values. At this time we are not dealing with this case.  Either remove those individuals with missing values or replace them in some way.")
-else: X0 = np.ones((IN.phenos.shape[0],1))
 
 # READING Kinship - major bottleneck for large datasets
 if options.verbose: sys.stderr.write("Reading kinship...\n")
