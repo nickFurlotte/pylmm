@@ -28,7 +28,6 @@ import numpy as np
 from scipy import linalg
 from scipy import optimize
 from scipy import stats
-import pdb
 
 #np.seterr('raise')
 
@@ -280,7 +279,6 @@ class LMM:
       n = float(self.N)
       q = float(X.shape[1])
       beta,sigma,Q,XX_i,XX = self.getMLSoln(h,X)
-      #if n == 0 or Q < 0: pdb.set_trace()
       LL = n*np.log(2*np.pi) + np.log(h*self.Kva + (1.0-h)).sum() + n + n*np.log(1.0/n * Q)
       LL = -0.5 * LL
 
