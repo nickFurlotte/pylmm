@@ -60,7 +60,7 @@ basicGroup.add_option("--phenofile", dest="phenoFile", default=None,
 
 # EMMA Options
 basicGroup.add_option("--emmaSNP", dest="emmaFile", default=None,
-                  help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with individuals on the rows and snps on the columns.")
+                  help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with individuals on the columns and snps on the rows.")
 basicGroup.add_option("--emmaPHENO", dest="emmaPheno", default=None,
                   help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with each phenotype as one row.")
 
