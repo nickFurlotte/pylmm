@@ -1,7 +1,7 @@
 
 # pylmm is a python-based linear mixed-model solver with applications to GWAS
 
-# Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
+# Copyright (C) 2014  Nicholas A. Furlotte (nick.furlotte@gmail.com)
 
 #The program is free for academic use. Please contact Nick Furlotte
 #<nick.furlotte@gmail.com> if you are interested in using the software for
@@ -300,9 +300,19 @@ class plink:
       
       return K 
 
+   def getCovariatesEMMA(self,emmaFile):
+      f = open(emmaFile,'r')
+      P = []
+      for line in f:
+         v = [x == 'NA' and np.nan or float(x) for x in line.strip().split()]
+         P.append(v)
+      f.close()
+      P = np.array(P).T
+      return P
+
    def getCovariates(self,covFile=None):
       if not os.path.isfile(covFile): 
-	 sys.stderr.write("Could not find covariate file: %s\n" % (phenoFile))
+	 sys.stderr.write("Could not find covariate file: %s\n" % (covFile))
 	 return
       f = open(covFile,'r')
       keys = []

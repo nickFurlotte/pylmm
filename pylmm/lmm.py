@@ -1,7 +1,7 @@
 
 # pylmm is a python-based linear mixed-model solver with applications to GWAS
 
-# Copyright (C) 2013  Nicholas A. Furlotte (nick.furlotte@gmail.com)
+# Copyright (C) 2014  Nicholas A. Furlotte (nick.furlotte@gmail.com)
 
 #The program is free for academic use. Please contact Nick Furlotte
 #<nick.furlotte@gmail.com> if you are interested in using the software for
@@ -28,7 +28,6 @@ import numpy as np
 from scipy import linalg
 from scipy import optimize
 from scipy import stats
-import pdb
 
 #np.seterr('raise')
 
@@ -88,6 +87,7 @@ def calculateKinship(W,center=False):
 
 def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
       """
+
         Performs a basic GWAS scan using the LMM.  This function
         uses the LMM module to assess association at each SNP and 
         does some simple cleanup, such as removing missing individuals 
@@ -100,11 +100,13 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
         X0 - n x q covariate matrix
 	REML - use restricted maximum likelihood 
         refit - refit the variance component for each SNP
+
       """
       n = X.shape[0]
       m = X.shape[1]
 
-      if X0 == None: X0 = np.ones((n,1))
+      if X0 == None: 
+         X0 = np.ones((n,1))
       
       # Remove missing values in Y and adjust associated parameters
       v = np.isnan(Y)
@@ -118,8 +120,8 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 	 Kva = []
 	 Kve = []
 
-
-      if len(Y) == 0: return np.ones(m)*np.nan,np.ones(m)*np.nan
+      if len(Y) == 0: 
+         return np.ones(m)*np.nan,np.ones(m)*np.nan
 
       L = LMM(Y,K,Kva,Kve,X0)
       if not refit: L.fit()
@@ -145,8 +147,10 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 	    X0s = X0[keep,:]
 	    Ks = K[keep,:][:,keep]
 	    Ls = LMM(Ys,Ks,X0=X0s)
-	    if refit: Ls.fit(X=xs)
-	    else: Ls.fit()
+	    if refit: 
+               Ls.fit(X=xs)
+	    else: 
+               Ls.fit()
 	    ts,ps = Ls.association(xs,REML=REML)
 	 else: 
 	    if x.var() == 0: 
@@ -154,7 +158,8 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 	       TS.append(np.nan) 
 	       continue
 
-	    if refit: L.fit(X=x)
+	    if refit: 
+               L.fit(X=x)
 	    ts,ps = L.association(x,REML=REML)
 	    
 	 PS.append(ps)
@@ -162,7 +167,6 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 
       return TS,PS
 
-     
 class LMM:
 
    """
@@ -280,7 +284,6 @@ class LMM:
       n = float(self.N)
       q = float(X.shape[1])
       beta,sigma,Q,XX_i,XX = self.getMLSoln(h,X)
-      #if n == 0 or Q < 0: pdb.set_trace()
       LL = n*np.log(2*np.pi) + np.log(h*self.Kva + (1.0-h)).sum() + n + n*np.log(1.0/n * Q)
       LL = -0.5 * LL
 
