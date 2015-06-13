@@ -28,6 +28,8 @@ You can also clone the repository and do a manual install.
    python setup.py install
 ```
 
+pylmm is offered under the GNU Affero GPL (https://www.gnu.org/licenses/why-affero-gpl.html).
+
 
 
 
