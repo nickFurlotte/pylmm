@@ -49,29 +49,36 @@ def readKinshipFile(fn, n):
     fail) if K is noticeably asymmetric.  (Bug 16, fixed in Phase 5.1: the
     old np.fromfile + resize read silently zero-filled or truncated K.)
     """
-    if fn[-3:] == '.gz':
-        f = gzip.open(fn,'rt')
-    else:
-        f = open(fn,'r')
+    try:
+        if fn[-3:] == '.gz':
+            f = gzip.open(fn,'rt')
+        else:
+            f = open(fn,'r')
+    except OSError as e:
+        raise ValueError("kinship file %s: cannot read (%s)" % (fn, e))
     K = np.zeros((n,n))
     nrows = 0
     nvalues = 0
     lengths = set()
-    with f:
-        for lineno, line in enumerate(f, 1):
-            v = line.split()
-            if not v: continue
-            try:
-                row = np.array(v, dtype=np.float64)
-            except ValueError:
-                bad = next((x for x in v if not _isNumber(x)), v[0])
-                raise ValueError("kinship file %s, line %d: %r is not a number (expected %d rows of %d "
-                                 "whitespace-separated numbers, with no header or comment lines)"
-                                 % (fn, lineno, bad[:40], n, n))
-            if nrows < n and len(row) == n: K[nrows] = row
-            nrows += 1
-            nvalues += len(row)
-            lengths.add(len(row))
+    try:
+        with f:
+            for lineno, line in enumerate(f, 1):
+                v = line.split()
+                if not v: continue
+                try:
+                    row = np.array(v, dtype=np.float64)
+                except ValueError:
+                    bad = next((x for x in v if not _isNumber(x)), v[0])
+                    raise ValueError("kinship file %s, line %d: %r is not a number (expected %d rows of %d "
+                                     "whitespace-separated numbers, with no header or comment lines)"
+                                     % (fn, lineno, bad[:40], n, n))
+                if nrows < n and len(row) == n: K[nrows] = row
+                nrows += 1
+                nvalues += len(row)
+                lengths.add(len(row))
+    except (OSError, UnicodeDecodeError) as e:
+        # missing file, bad gzip, binary content: a usage-style error, not a traceback
+        raise ValueError("kinship file %s: cannot read (%s: %s)" % (fn, type(e).__name__, e))
     if nrows != n or lengths != set([n]):
         lengths = sorted(lengths)
         raise ValueError("kinship file %s: expected a %d x %d matrix (%d values, one row and column per "

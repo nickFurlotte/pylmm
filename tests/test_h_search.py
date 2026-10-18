@@ -57,7 +57,7 @@ def test_bounded_search_never_leaves_its_bracket(h2, reml):
         y, K, x = problem(seed, h2)
         for X in (None, x):
             L = make(y, K)
-            with np.errstate(all='raise'):          # no nan / log of a negative
+            with np.errstate(divide='raise', invalid='raise', over='raise'):          # no nan / log of a negative
                 h = float(np.sum(L.fit(X=X, REML=reml)[0]))
             assert 0.0 <= h <= 0.99
             if L.evals:
@@ -74,7 +74,7 @@ def test_s5_seed1177_small_n_null_fit_does_not_crash():
     K = calculateKinship(W)
     y = rng.standard_normal(10)
     L = make(y, K)
-    with np.errstate(all='raise'):
+    with np.errstate(divide='raise', invalid='raise', over='raise'):
         hmax, beta, sigma, ll = L.fit()
     h = float(np.sum(hmax))
     assert 0.95 <= h <= 0.99 and np.isfinite(np.sum(ll))

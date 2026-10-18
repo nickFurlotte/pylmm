@@ -119,3 +119,23 @@ def test_cli_wrong_size_kfile_is_a_usage_error(tmp_path):
     assert e.value.code == 2
     out = err.getvalue()
     assert 'usage:' in out and fn in out and 'expected a %d x %d matrix' % (n, n) in out
+
+
+def test_missing_file_rejected(tmp_path):
+    fn = str(tmp_path / 'nope.txt')
+    with pytest.raises(ValueError, match='nope.txt'):
+        cli_gwas.readKinshipFile(fn, 3)
+
+
+def test_binary_file_rejected(tmp_path):
+    fn = str(tmp_path / 'k.bin')
+    with open(fn, 'wb') as f:
+        f.write(bytes(range(128, 256)) * 4)
+    with pytest.raises(ValueError, match='k.bin'):
+        cli_gwas.readKinshipFile(fn, 3)
+
+
+def test_plain_file_named_gz_rejected(tmp_path):
+    fn = write(tmp_path, '1 0 0\n0 1 0\n0 0 1\n', name='k.txt.gz')
+    with pytest.raises(ValueError, match='k.txt.gz'):
+        cli_gwas.readKinshipFile(fn, 3)

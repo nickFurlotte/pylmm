@@ -441,6 +441,13 @@ Every cell is back to its full count (80 for S1 and S3, 12 for S2), and
 `raw/full.errors.jsonl` is empty. The rerun added exactly the 107 formerly
 crashed (cell, rep) pairs, with the same seeds.
 
+The new search is strictly "the local optimum within the first grid peak's
+bracket". The old unbounded Brent could in principle escape into a
+neighbouring mode. That was observed in 8.8% of adversarial synthetic
+two-bump profiles, but in 0/2,100 simulated fits and 0/183 real bimodal S2
+fits. On non-crashing fits the largest differences are |Δh| = 7e-8 and
+|Δt| = 2.8e-7.
+
 **Previously completed replicates are unchanged.** Their rows were not
 rerun, and `raw/full.jsonl` is a byte-identical prefix of the new file. As a
 check that the new search reproduces them, we recomputed 124 completed

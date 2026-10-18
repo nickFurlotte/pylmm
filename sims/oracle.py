@@ -265,8 +265,6 @@ def _search_pylmm(ll):
             res = optimize.minimize_scalar(LL_brent, bounds=(H[i - 1], H[i + 1]),
                                            method="bounded", options={"xatol": 1e-10})
             HOpt.append(float(res.x))
-            if np.isnan(HOpt[-1]):
-                HOpt[-1] = H[i - 1]
     if len(HOpt) >= 1:
         h = HOpt[0]                                       # first, not best
     elif L[0] > L[n - 1]:

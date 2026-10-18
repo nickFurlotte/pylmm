@@ -238,7 +238,8 @@ def _peak_0972(h):
 
 @pytest.mark.skipif(not SCIPY_HAS_BRACKETERROR, reason="scipy < 1.11 returns instead of raising")
 def test_bug4_old_unbounded_brent_crashed_with_bracketerror():
-    """Why this case is the regression test: peak at grid index 97 with
+    """Documents scipy's behaviour on the stored profile (not pylmm code, which
+    no longer calls unbounded brent): peak at grid index 97 with
     LL(0.98) > LL(0.96), so the unbounded optimize.brent pylmm used before
     Phase 5.1 stepped to 0.98 + 1.618 * 0.02 = 1.012, got nan, and on
     scipy >= 1.11 raised BracketError."""
@@ -290,7 +291,9 @@ def test_bug4_high_h2_case_matches_oracle():
     """Regression (bug 4, fixed in Phase 5.1) on real likelihoods, null fit
     and per-SNP refit: pylmm matches the oracle with pylmm's conventions
     (eig_clamp=1e-6, the pylmm grid and search) to ~1e-6.  On scipy >= 1.11
-    the old unbounded Brent raised BracketError on this case."""
+    the old unbounded Brent raised BracketError on this case.  The null fit has
+    a high-h2 peak; the refit part uses a random x, so it is only a no-crash,
+    matches-oracle check, not a near-1 peak."""
     from scipy import optimize
     y, K = _high_h2_case()
     L, _ = _reml_grid(y, K)
