@@ -39,6 +39,11 @@ pylmmKinship = "pylmm.cli.kinship:main"
 dev = [
     "pytest>=7",
 ]
+sims = [
+    "matplotlib>=3.5",
+    "pandas>=1.4",
+    "statsmodels>=0.13",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pylmm"]
