@@ -1,5 +1,10 @@
 # S4: bug confirmation and bug ledger
 
+> **Note:** apart from the bug-4 row, the impact numbers in this file come from the
+> enlarged quick run. The full-run figures, which are authoritative, are in
+> `docs/phase4-simulations.md` §5 and `sims/results/synthesis/bug_ledger.csv`.
+> For example, bug 17's worst-case ML bias is +0.16 in the full run, not +0.14.
+
 Question: for each suspected bug in `docs/phase1-baseline.md`, is it real, can a
 user reach it, and how much does it change the results (ĥ, t, p, −log10 p)?
 This ledger is meant to support decisions. For each bug Nick picks Phase 5
