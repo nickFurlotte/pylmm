@@ -227,7 +227,9 @@ def run_cell(params, seed):
 # ---------------------------------------------------------------------------
 
 LABEL = {"lmm": "pylmm (fixed h)", "lmmr": "pylmm (refit)", "ols": "OLS", "orc": "oracle Wald"}
-KEYS = ["source", "h2", "n_causal", "vpe", "contam"]
+# every grid key that varies: m_kin separates the contamination arm's control
+# (contam=0, K from 500 SNPs) from the main cell with the same other params
+KEYS = ["source", "h2", "n_causal", "vpe", "contam", "m_kin"]
 
 
 def power_table(df):
@@ -279,7 +281,8 @@ def _plot_power(tab, source, outdir):
 
     from sims import plots
     plt = plots._plt()
-    t = tab[(tab.source == source) & (tab.contam == 0) & (tab.method != "orc")]
+    t = tab[(tab.source == source) & (tab.contam == 0) & (tab.m_kin == M_KIN)
+            & (tab.method != "orc")]
     h2s = sorted(t.h2.unique())
     if not len(t):
         return
@@ -321,7 +324,7 @@ def _plot_type1(tab, outdir):
 
     from sims import plots
     plt = plots._plt()
-    t = tab[(tab.contam == 0) & tab.method.isin(["lmm", "ols"])]
+    t = tab[(tab.contam == 0) & (tab.m_kin == M_KIN) & tab.method.isin(["lmm", "ols"])]
     g = t.groupby(["source", "h2", "method"]).agg(k=("t1e_1e-05", "mean")).reset_index()
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
     srcs = sorted(g.source.unique())
@@ -351,7 +354,7 @@ def report(df, outdir):
     if "t1e_1e-05" in tab:
         _plot_type1(tab, outdir)
 
-    main = tab[tab.contam == 0]
+    main = tab[(tab.contam == 0) & (tab.m_kin == M_KIN)]
     cols = ["source", "h2", "n_causal", "vpe", "method", "power_bonf", "power_1e-05",
             "power_5e-08", "powcal_0.001", "t1e_1e-05", "t1e_bonf", "lambda_gc",
             "rel_bias", "rel_rmse", "rel_bias_sig"]
@@ -359,7 +362,7 @@ def report(df, outdir):
     short = main[cols].rename(columns={"power_bonf": "pow_bonf", "power_1e-05": "pow_1e-5",
                                        "power_5e-08": "pow_5e-8", "powcal_0.001": "pow_cal1e-3",
                                        "t1e_1e-05": "t1e_1e-5", "rel_bias_sig": "rel_bias|sig"})
-    contam = tab[tab.contam.isin([0, 1]) & (tab.method == "lmm")
+    contam = tab[tab.contam.isin([0, 1]) & (tab.m_kin == M_KIN_CONTAM) & (tab.method == "lmm")
                  & (tab.source.isin(["balding_nichols", "bed"]))
                  & (tab.n_causal == 5) & (tab.h2 == 0.5)]
     extra = []
@@ -370,11 +373,13 @@ def report(df, outdir):
         piv.columns = ["%s_contam%d" % (a, b) for a, b in piv.columns]
         extra.append(("Proximal contamination (pylmm fixed h, K from 500 SNPs; contam=1 adds "
                       "the 5 causal SNPs to K)", piv.reset_index()))
-    notes = ("Pooled over replicates within each cell.  pow_* = fraction of causal SNPs with "
+    notes = ("Main grid (K from %d SNPs); the contamination arm (K from %d SNPs) is in "
+             "its own table below and in power_table.csv (column m_kin).  "
+             "Pooled over replicates within each cell.  pow_* = fraction of causal SNPs with "
              "p <= threshold (Wilson CIs in power_table.csv); pow_cal1e-3 = power at the "
              "threshold giving 1e-3 type-I error on the pooled non-causal SNPs of that "
              "method and cell; t1e = empirical null rejection rate; rel_bias = mean of "
              "beta_hat/beta - 1; rel_bias|sig = same restricted to p <= 1e-5 (winner's "
-             "curse); lambda_gc on non-causal SNPs.  See s3_power.md.")
+             "curse); lambda_gc on non-causal SNPs.  See s3_power.md." % (M_KIN, M_KIN_CONTAM))
     rpt.write_summary(short, outdir, "S3: power of pylmm vs OLS", notes=notes,
                       extra_tables=extra)
