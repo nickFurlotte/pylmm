@@ -286,8 +286,9 @@ def write_headerless_kinship(workdir, gz=False):
     byte-identical to what generate_golden.py feeds to --kfile.
 
     tests/golden/hmdp_K_npdump.txt cannot be passed to --kfile directly:
-    pylmmGWAS.py reads K with np.fromfile(sep=' '), which stops at the first
-    '#', and K.resize() then zero-fills the rest (an all-zero kinship)."""
+    before Phase 5.1 pylmmGWAS.py read K with np.fromfile(sep=' '), which
+    stops at the first '#', and K.resize() then zero-filled the rest (an
+    all-zero kinship); it now rejects the '#' lines (bug 16)."""
     fn = os.path.join(str(workdir), 'hmdp.K.txt')
     np.savetxt(fn, np.loadtxt(HMDP_K_TXT), fmt='%.17g')
     if not gz:
@@ -371,13 +372,13 @@ def write_emma_missing_pheno(workdir):
 
 def check_no_comment_header(args):
     """Refuse to feed a '#'-headed text file to a CLI (see
-    write_headerless_kinship for why that silently corrupts --kfile)."""
+    write_headerless_kinship for why that broke --kfile)."""
     for a in args:
         if os.path.isfile(a) and not a.endswith(('.bed', '.gz')):
             with open(a, 'rb') as f:
                 first = f.read(1)
             assert first != b'#', '%s starts with a # header; the CLI readers ' \
-                'stop at "#" (np.fromfile) -- write a header-less copy' % a
+                'do not accept "#" lines -- write a header-less copy' % a
 
 
 def run_script(script, args, cwd, timeout=CLI_TIMEOUT):

@@ -107,7 +107,7 @@ directory.
 
 | file | contents |
 |---|---|
-| `hmdp_K_npdump.txt` | `hmdp.liver.K.npdump` exported as text (94×94). **Do not pass it to `--kfile`**: `pylmmGWAS.py` reads K with `np.fromfile(sep=' ')`, which stops at the first `#`, and `K.resize()` then zero-fills, silently giving an all-zero kinship (plain OLS). The EMMA CLI runs use a header-less copy of the same values. |
+| `hmdp_K_npdump.txt` | `hmdp.liver.K.npdump` exported as text (94×94). **Do not pass it to `--kfile`**: the Phase 1 `pylmmGWAS.py` read K with `np.fromfile(sep=' ')`, which stops at the first `#`, and `K.resize()` then zero-filled, silently giving an all-zero kinship (plain OLS); since Phase 5.1 the `#` lines are an error (bug 16). The EMMA CLI runs use a header-less copy of the same values. |
 | `kinship_hmdp_snps1000.txt` | `lmm.calculateKinship(W)`, W = hmdp first 1000 SNPs (94×94). |
 | `kinship_hmdp_snps1000_centered.txt` | Same, with `center=True`. |
 | `kinship_bed_snps2000_calc.block100.txt` | `lmm.calculateKinship` on the BED's first 2000 SNPs, read with `input.plink(normGenotype=False)`: the leading `K[:100,:100]` block. |

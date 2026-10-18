@@ -40,7 +40,6 @@ try:                                    # scipy >= 1.11 (not exported publicly)
 except ImportError:                     # pragma: no cover
     BracketError = RuntimeError
     SCIPY_HAS_BRACKETERROR = False
-NUMPY_FROMFILE_RAISES = tuple(int(x) for x in np.__version__.split(".")[:2]) >= (2, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -588,31 +587,21 @@ def test_bug15_gwas_return_type_consistent():
 # bug 16: --kfile read unchecked
 # ---------------------------------------------------------------------------
 
-def test_bug16_current_headered_kinship(tmp_path):
+def test_bug16_headered_kinship_rejected(tmp_path):
+    """Regression (bug 16, fixed in Phase 5.1): on numpy < 2.3 this used to
+    give a silent all-zero K."""
     fn = str(tmp_path / "k.txt")
     with open(fn, "w") as f:
         f.write("# a header line\n1 0\n0 1\n")
-    if NUMPY_FROMFILE_RAISES:                       # numpy >= 2.3: now an error
-        with pytest.raises(ValueError):
-            cli_gwas.readKinshipFile(fn, 2)
-    else:                                           # numpy 1.22 - 2.2: silent all-zero K
-        K = cli_gwas.readKinshipFile(fn, 2)
-        assert not K.any()
+    with pytest.raises(ValueError, match="not a number"):
+        cli_gwas.readKinshipFile(fn, 2)
 
 
-def test_bug16_current_wrong_size_kinship_silently_resized(tmp_path):
-    fn = str(tmp_path / "k.txt")
-    np.savetxt(fn, np.eye(3))
-    K = cli_gwas.readKinshipFile(fn, 4)                 # 9 numbers for a 4 x 4 K
-    # 9 numbers fill rows 0-2 of the 4 x 4 in order; the identity is scrambled, row 3 is zero
-    np.testing.assert_array_equal(K, [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]])
-
-
-@pytest.mark.xfail(strict=True, reason="bug 16: a wrong-size --kfile is zero-filled/truncated, not rejected")
 def test_bug16_wrong_size_kinship_rejected(tmp_path):
+    """Regression (bug 16, fixed in Phase 5.1): 9 numbers for a 4 x 4 K used
+    to be zero-filled into a scrambled matrix."""
     fn = str(tmp_path / "k.txt")
     np.savetxt(fn, np.eye(3))
-    # either fix flips this: raising ValueError, or a CLI-style usage error (sys.exit)
     with pytest.raises((ValueError, SystemExit)):
         cli_gwas.readKinshipFile(fn, 4)
 
