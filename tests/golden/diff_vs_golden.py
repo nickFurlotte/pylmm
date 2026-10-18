@@ -15,7 +15,8 @@ tests/helpers.py.
 
 Py3 shims applied here (generate_golden.py itself stays the py2 generator):
   * np.load of the py2 .npdump pickles needs encoding='latin1';
-  * a failing CLI run is recorded as FAILED instead of aborting.
+  * the CLI runner decodes the -v log to str (py2 Popen output was already
+    str), and a failing CLI run aborts with its output, as in the generator.
 """
 import argparse
 import functools
@@ -49,19 +50,18 @@ np.load = _load_py2_pickles
 
 import generate_golden as gen  # noqa: E402
 
-FAILED = {}
 
-
-def run_cli(args, outfile):
+def run_cli(args, outfile, cwd):
+    """py3 version of generate_golden.run_cli (same checks, text output)."""
+    gen.check_no_comment_header(args)
     env = dict(os.environ)
     env['PYTHONPATH'] = REPO + os.pathsep + env.get('PYTHONPATH', '')
     cmd = [sys.executable] + args + [outfile]
-    p = subprocess.run(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE,
+    p = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, text=True)
     if p.returncode != 0:
-        last = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ''
-        FAILED[os.path.basename(outfile)] = last
-        gen.log('FAILED (%d): %s\n  %s' % (p.returncode, ' '.join(cmd), last))
+        sys.stderr.write(p.stdout)
+        raise RuntimeError('command failed (%d): %s' % (p.returncode, ' '.join(cmd)))
     return p.stdout
 
 
@@ -109,8 +109,8 @@ def read_any(fn):
         labels = header[0].replace(',', ' ').split()[1:]
         if len(labels) == a.shape[1]:
             return {lab: a[:, j] for j, lab in enumerate(labels)}
-    if a.ndim == 2 and name.endswith('diag_rowsums.txt'):
-        return {'diag': a[:, 0], 'rowsums': a[:, 1]}
+    if a.ndim == 2 and name.endswith('diag_Kv.txt'):
+        return {'diag': a[:, 0], 'K.dot(cos)': a[:, 1]}
     return {'all': a.ravel()}
 
 
@@ -153,7 +153,7 @@ def main():
     gen.golden_misc(Y, K, snps)
     work = tempfile.mkdtemp(prefix='pylmm_golden_work_')
     try:
-        gen.golden_cli(work)
+        gen.golden_cli(work, K)
     finally:
         shutil.rmtree(work)
     elapsed = time.time() - t0
@@ -167,9 +167,6 @@ def main():
     print('|---|---|---|---|---|---|---|')
     for name in sorted(os.listdir(HERE)):
         if not (name.endswith('.txt') or name.endswith('.out')) or name == 'env.kv.txt':
-            continue
-        if name in FAILED:
-            print('| %s | | | | | FAILED: %s | |' % (name, FAILED[name].replace('|', '/')))
             continue
         fn = os.path.join(out, name)
         if not os.path.exists(fn):
