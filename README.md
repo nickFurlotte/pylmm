@@ -20,13 +20,15 @@ pylmm needs Python 3.10 or newer. pip installs numpy and scipy for you.
 Install pylmm with pip:
 
 ```
-   pip install git+https://github.com/nickFurlotte/pylmm
+   pip install git+https://github.com/nickFurlotte/pylmm@main
 ```
+`@main` selects the Python 3 branch; the repository's default branch still holds the old Python 2 code.
+A git install clones the whole repository, including about 215MB of example data in `data/`, so it can take a while.
 This installs the `pylmm` module and the two command-line programs `pylmmGWAS` and `pylmmKinship`.
 
 To work from a clone, use [uv](https://docs.astral.sh/uv/) (or run `pip install .`):
 ```
-   git clone https://github.com/nickFurlotte/pylmm
+   git clone -b main https://github.com/nickFurlotte/pylmm
    cd pylmm
    uv sync
 ```
