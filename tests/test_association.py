@@ -1,5 +1,4 @@
 """Per-SNP association through lmm.GWAS and LMM.association."""
-from __future__ import division, print_function
 
 import numpy as np
 import pytest

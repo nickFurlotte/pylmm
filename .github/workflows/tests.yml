@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    env:
+      # Same single-threaded BLAS setting as the py27 baseline image.
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      # NOTE: every job clones the ~215MB example data in data/.  Accepted for
+      # now; it goes away when the example data moves to Zenodo (cleanup phase).
+      - uses: actions/checkout@v7
+
+      # setup-uv stopped publishing floating major tags after v7, so this is
+      # pinned to an exact release; bump it deliberately.
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # Slow full-dataset tests are skipped unless --runslow is given.
+      # The py27 Docker baseline (docker/py27/) is kept for reference only
+      # and is not run in CI.
+      - name: Run tests
+        run: uv run --locked pytest
+
+      - name: Console entry points
+        run: |
+          uv run --locked pylmmGWAS --help
+          uv run --locked pylmmKinship --help
+
+  lowest-direct:
+    # Checks the numpy/scipy lower bounds in pyproject.toml.  Not --locked:
+    # this job resolves the oldest allowed direct dependencies instead.
+    name: pytest (Python 3.10, lowest-direct)
+    runs-on: ubuntu-latest
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      # NOTE: clones the ~215MB example data too; see the pytest job.
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.10"
+
+      - name: Show resolved versions
+        run: uv run --resolution lowest-direct python -c "import numpy, scipy; print('numpy', numpy.__version__, 'scipy', scipy.__version__)"
+
+      - name: Run tests
+        run: uv run --resolution lowest-direct pytest

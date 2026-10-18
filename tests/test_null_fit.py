@@ -1,5 +1,4 @@
 """Null-model fits: LMM.fit() under REML/ML, missing Y, covariates."""
-from __future__ import division, print_function
 
 import numpy as np
 import pytest
