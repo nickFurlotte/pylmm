@@ -1,0 +1,22 @@
+# Null-model fit printed by pylmmGWAS.py -v ("heritability=%0.3f,
+# sigma=%0.3f") for every gwas_cli_*.out run without --refit.
+# Keys are <run>.h / <run>.sigma, <run> = file name minus gwas_cli_ / .out.
+# Values are rounded to 3 decimals by the CLI.
+bed_snps1000.h 0
+bed_snps1000.sigma 0.98599999999999999
+bed_snps50_reml.h 0
+bed_snps50_reml.sigma 0.98599999999999999
+bed_snps50_removeMissing.h 0
+bed_snps50_removeMissing.sigma 0.98599999999999999
+bed_snps50_covfile.h 0
+bed_snps50_covfile.sigma 0.98699999999999999
+bed_snps50_missingpheno.h 0
+bed_snps50_missingpheno.sigma 0.97799999999999998
+tped_snps50.h 0
+tped_snps50.sigma 0.98599999999999999
+emma_hmdp_snps1000.h 0.45400000000000001
+emma_hmdp_snps1000.sigma 0.040000000000000001
+emma_hmdp_snps1000_cov.h 0.443
+emma_hmdp_snps1000_cov.sigma 0.040000000000000001
+emma_hmdp_snps100_missingpheno.h 0.47499999999999998
+emma_hmdp_snps100_missingpheno.sigma 0.041000000000000002

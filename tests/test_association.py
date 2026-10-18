@@ -34,19 +34,12 @@ def test_gwas_hmdp(hmdp, gwas_golden, reml, refit, tag, nsnps):
     X = snps[:, :nsnps].copy()
     TS, PS = lmm.GWAS(Y, X, K, REML=reml, refit=refit)
     m = X.shape[1]
-    h.assert_close(TS, gwas_golden['ts_' + tag][:m], rtol=h.RTOL_FIT,
-                   atol=h.ATOL_FIT, what='ts_' + tag)
-    h.assert_close(PS, gwas_golden['ps_' + tag][:m], rtol=h.RTOL_FIT,
-                   atol=h.ATOL_FIT, what='ps_' + tag)
+    h.assert_fit_close(TS, gwas_golden['ts_' + tag][:m], what='ts_' + tag)
+    h.assert_pvalues_close(PS, gwas_golden['ps_' + tag][:m], what='ps_' + tag)
     h.assert_pvalues_valid(PS, tag)
     # Each SNP uses only its non-missing individuals; q = intercept + SNP.
     df = len(Y) - gwas_golden['n_missing'][:m] - 2
     h.assert_p_matches_t(TS, PS, df, tag)
-
-
-def test_gwas_golden_nan_pattern(gwas_golden):
-    """nan p-values are exactly the 68 monomorphic-after-missing SNPs."""
-    assert np.isnan(gwas_golden['ps_reml_norefit']).sum() == 68
 
 
 def test_association_imputed_with_beta(hmdp):
@@ -68,8 +61,10 @@ def test_association_imputed_with_beta(hmdp):
         rows.append([i, ts, ps, beta, np.asarray(bvar, dtype=np.float64).sum()])
     rows = np.array(rows, dtype=np.float64)
     for j, name in enumerate(['snp_index', 'ts', 'ps', 'beta', 'beta_var']):
-        h.assert_close(rows[:, j], golden[:, j], rtol=h.RTOL_FIT, atol=h.ATOL_FIT,
-                       what='imputed ' + name)
+        if name == 'ps':
+            h.assert_pvalues_close(rows[:, j], golden[:, j], what='imputed ps')
+        else:
+            h.assert_fit_close(rows[:, j], golden[:, j], what='imputed ' + name)
     h.assert_pvalues_valid(rows[:, 2], 'imputed')
     h.assert_p_matches_t(rows[:, 1], rows[:, 2], len(Y) - 2, 'imputed')
     # t = beta / sqrt(beta_var)

@@ -20,12 +20,19 @@ def check_kinship_invariants(K, what):
 
 
 def check_big_kinship(K, name):
-    """Compare a 1219x1219 kinship against its stored block + diag/rowsums."""
-    h.assert_close(K[:h.BED_BLOCK, :h.BED_BLOCK],
-                   h.load_golden_txt(name + '.block%d.txt' % h.BED_BLOCK), what=name)
-    dr = h.load_golden_txt(name + '.diag_rowsums.txt')
-    h.assert_close(np.diag(K), dr[:, 0], what=name + ' diag')
-    h.assert_close(K.sum(axis=1), dr[:, 1], what=name + ' rowsums')
+    """Compare a 1219x1219 kinship against its stored leading and trailing
+    blocks, diagonal and K.dot(cos(arange(n)))."""
+    b = h.BED_BLOCK
+    h.assert_close(K[:b, :b], h.load_golden_txt(name + '.block%d.txt' % b),
+                   what=name + ' leading block')
+    h.assert_close(K[-b:, -b:], h.load_golden_txt(name + '.tail%d.txt' % b),
+                   what=name + ' trailing block')
+    dk = h.load_golden_txt(name + '.diag_Kv.txt')
+    h.assert_close(np.diag(K), dk[:, 0], what=name + ' diag')
+    # Unlike the row sums (~0, pure round-off, since the genotype columns are
+    # centred), |K.dot(v)| is 0.09..5.9 here, so the default tolerance works.
+    h.assert_close(K.dot(np.cos(np.arange(K.shape[0]))), dk[:, 1],
+                   what=name + ' K.dot(v)')
 
 
 def assert_eigenvalues_close(actual, expected, what):
@@ -54,7 +61,7 @@ def test_calculate_kinship_bed():
 def test_cli_kinship_bed(tmp_path):
     base = h.write_bed_subset(tmp_path, h.BED_KIN_NSNPS)
     out = str(tmp_path / 'kin.txt')
-    h.run_script('pylmmKinship.py', ['-v', '--bfile', base, out])
+    h.run_script('pylmmKinship.py', ['-v', '--bfile', base, out], cwd=tmp_path)
     K = np.loadtxt(out)
     check_big_kinship(K, 'kinship_cli_bed_snps%d' % h.BED_KIN_NSNPS)
     check_kinship_invariants(K, 'pylmmKinship.py --bfile')
@@ -64,7 +71,8 @@ def test_cli_kinship_emma(tmp_path):
     emma = h.write_emma_subset(tmp_path)
     out = str(tmp_path / 'kin.txt')
     h.run_script('pylmmKinship.py', ['-v', '--emmaSNP', emma, '--emmaNumSNPs',
-                                     h.HMDP_NSNPS, '-n', 300, '-e', 'x', out])
+                                     h.HMDP_NSNPS, '-n', 300, '-e', 'x', out],
+                 cwd=tmp_path)
     K = np.loadtxt(out)
     h.assert_close(K, h.load_golden_txt('kinship_cli_emma_hmdp_snps1000.txt'),
                    what='pylmmKinship.py --emmaSNP')
@@ -95,7 +103,8 @@ def test_npdump_pickles_match_text_equivalents(hmdp):
 def test_cli_kinship_full_bed_reproduces_readme_kin(tmp_path):
     """README kinship command on all 98,740 SNPs (~1 min emulated)."""
     out = str(tmp_path / 'kin.txt')
-    h.run_script('pylmmKinship.py', ['--bfile', h.BED_BASE, out])
+    h.run_script('pylmmKinship.py', ['--bfile', h.BED_BASE, out],
+                 cwd=tmp_path)
     K = np.loadtxt(out)
     h.assert_close(K, h.load_readme_kinship(K.shape[0]),
                    what='pylmmKinship.py full BED vs data/*.pylmm.kin')

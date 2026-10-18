@@ -43,11 +43,11 @@ def hmdp():
 @pytest.fixture(scope='session')
 def bed_null():
     """(Y, K, Kva, Kve) for the README BED data (1219 individuals)."""
+    from scipy import linalg
     from pylmm import input as pinput
-    from pylmm import lmm
     IN = pinput.plink(helpers.BED_BASE, type='b', phenoFile=helpers.FAKE_PHENOS)
     n = len(IN.indivs)
     K = helpers.load_readme_kinship(n)
     Y = IN.phenos[:, 0]
-    Kva, Kve = lmm.linalg.eigh(K)
+    Kva, Kve = linalg.eigh(K)
     return Y, K, Kva, Kve
