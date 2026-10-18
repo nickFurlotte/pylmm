@@ -80,6 +80,19 @@ directory.
     values" message prints.
   - The fake phenotype fits at the h=0 boundary.
   - 1550 of the first 3000 SNPs have missing genotypes.
+- Synthetic CLI inputs, all written by the generator (and byte-identically by
+  `tests/helpers.py`) into a temp dir:
+  - TPED: the BED's first 50 SNPs as `.tped/.tfam/.map`, decoded straight
+    from the `.bed` bytes (`00`→`1 1`, `01`→`0 0`, `10`→`1 2`, `11`→`2 2`).
+  - Covariate file: `FID IID cos(i) i%3` for every fam individual, rows in
+    reverse fam order (so `getCovariates` has to re-order by key).
+  - Missing phenotypes: `fake.phenos` with rows 3, 100, 500 set to `NA` and
+    rows 7, 800 set to `-9`, rows in reverse order.
+  - EMMA missing phenotypes: `hmdp.liver.exprs.1` with entries 5, 23, 60 set
+    to `NA`.
+  - Header-less kinship: `hmdp_K_npdump.txt`'s values re-written with
+    `%.17g` and **no `#` lines**, plus a gzipped copy. See the warning under
+    `hmdp_K_npdump.txt` below.
 - "First N SNPs of the BED" is built by copying the 3-byte header plus N × 305
   bytes of the `.bed`, the first N lines of the `.bim`, and the whole `.fam`.
   The generator does this in a temp dir.
@@ -94,12 +107,13 @@ directory.
 
 | file | contents |
 |---|---|
-| `hmdp_K_npdump.txt` | `hmdp.liver.K.npdump` exported as text (94×94). Also used as `--kfile` for the EMMA CLI runs. |
+| `hmdp_K_npdump.txt` | `hmdp.liver.K.npdump` exported as text (94×94). **Do not pass it to `--kfile`**: `pylmmGWAS.py` reads K with `np.fromfile(sep=' ')`, which stops at the first `#`, and `K.resize()` then zero-fills, silently giving an all-zero kinship (plain OLS). The EMMA CLI runs use a header-less copy of the same values. |
 | `kinship_hmdp_snps1000.txt` | `lmm.calculateKinship(W)`, W = hmdp first 1000 SNPs (94×94). |
 | `kinship_hmdp_snps1000_centered.txt` | Same, with `center=True`. |
 | `kinship_bed_snps2000_calc.block100.txt` | `lmm.calculateKinship` on the BED's first 2000 SNPs, read with `input.plink(normGenotype=False)`: the leading `K[:100,:100]` block. |
-| `kinship_bed_snps2000_calc.diag_rowsums.txt` | Same K: columns `diag(K)` and `K.sum(1)` (1219 rows). |
-| `kinship_cli_bed_snps2000.{block100,diag_rowsums}.txt` | `pylmmKinship.py -v --bfile <first 2000 SNPs>` (default `-n 1000`, so 2 chunks), same summaries. |
+| `kinship_bed_snps2000_calc.tail100.txt` | Same K: the trailing `K[-100:,-100:]` block. |
+| `kinship_bed_snps2000_calc.diag_Kv.txt` | Same K: columns `diag(K)` and `K.dot(v)` with `v = cos(arange(1219))` (1219 rows). Row sums are not stored: the genotype columns are centred, so `K.sum(1)` is pure round-off. |
+| `kinship_cli_bed_snps2000.{block100,tail100,diag_Kv}.txt` | `pylmmKinship.py -v --bfile <first 2000 SNPs>` (default `-n 1000`, so 2 chunks), same summaries. |
 | `kinship_cli_emma_hmdp_snps1000.txt` | `pylmmKinship.py -v --emmaSNP <hmdp first 1000 SNPs> --emmaNumSNPs 1000 -n 300 -e x` (94×94, 4 chunks). |
 | `kinship_cli_emma_hmdp_snps1000.kva.txt` | Eigenvalues written by `-e` in that same run. |
 | `bed_readme_kin_eigenvalues.txt` | `scipy.linalg.eigh` eigenvalues of the README kinship (1219), before clamping. |
@@ -129,8 +143,20 @@ missing; see the baseline report.
 |---|---|
 | `gwas_cli_bed_snps1000.out` | The README command (`-v --bfile … --kfile snps.132k.clean.noX.pylmm.kin --phenofile snps.132k.clean.noX.fake.phenos`) on the BED's first 1000 SNPs. Identical to the first 1000 rows of the full 98,740-SNP README run. |
 | `gwas_cli_bed_snps50_{reml,refit,reml_refit,removeMissing}.out` | The same command on the first 50 SNPs, adding `--REML`, `--refit`, `--REML --refit`, or `--removeMissingGenotypes`. |
-| `gwas_cli_emma_hmdp_snps1000.out` | `-v --emmaSNP <hmdp first 1000 SNPs> --emmaPHENO data/hmdp.liver.exprs.1 --kfile hmdp_K_npdump.txt` |
+| `gwas_cli_bed_snps50_covfile.out` | The 50-SNP command plus `--covfile <synthetic covariate file>` (X0 = [1, cos(i), i%3]). |
+| `gwas_cli_bed_snps50_missingpheno.out` | The 50-SNP command with `--phenofile <fake.phenos with 3 NA and 2 -9>`; the CLI drops those 5 individuals. |
+| `gwas_cli_tped_snps50.out` | `-v --tfile <TPED of the first 50 SNPs> --kfile … --phenofile …`. The generator asserts it is identical to the first 50 rows of `gwas_cli_bed_snps1000.out`. |
+| `gwas_cli_emma_hmdp_snps1000.out` | `-v --emmaSNP <hmdp first 1000 SNPs> --emmaPHENO data/hmdp.liver.exprs.1 --kfile <header-less hmdp K>`. The generator also runs a gzipped `--kfile` on the first 100 SNPs and asserts it reproduces the first 100 rows exactly. |
 | `gwas_cli_emma_hmdp_snps1000_cov.out` | The same, plus `--emmaCOV <row 2 of data/hmdp.liver.exprs>`. |
+| `gwas_cli_emma_hmdp_snps100_missingpheno.out` | First 100 hmdp SNPs, `--emmaPHENO <exprs.1 with 3 NA>`. |
+| `gwas_cli_nullfit.kv.txt` | The null fit `pylmmGWAS.py -v` prints (`heritability=%0.3f, sigma=%0.3f`) for every run above without `--refit`. Keys `<run>.h`, `<run>.sigma`, where `<run>` is the `.out` name minus `gwas_cli_` and `.out`. |
+
+The two `gwas_cli_emma_*1000*.out` files were regenerated in the Phase 2
+review. The Phase 1 versions had been produced with `--kfile
+hmdp_K_npdump.txt`, so K was all zeros (the CLI printed h=0.068 instead of
+the REML 0.454) and they were effectively OLS results.
+
+The generator refuses to pass any text file that starts with `#` to a CLI.
 
 ### Other
 

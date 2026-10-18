@@ -202,3 +202,10 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
     TypeError rather than printing the intended `parser.error`.
 15. **Inconsistent return types.** `lmm.GWAS` returns lists normally but numpy
     arrays when `len(Y)==0` (lmm.py:107).
+16. **`--kfile` is read silently and unchecked** (pylmmGWAS.py:163-171).
+    `np.fromfile(sep=" ")` stops at the first token it cannot parse (for
+    example a `#` header line), and `K.resize((n, n))` then zero-fills
+    whatever is missing, or truncates a too-large file. No error or warning
+    is raised; with a headered file the kinship is all zeros and the run is
+    effectively OLS (found in the Phase 2 review: the first EMMA CLI goldens
+    had been generated this way).

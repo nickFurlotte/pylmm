@@ -24,7 +24,9 @@ Output formats (all loadable from Python 3 without pickle):
 """
 from __future__ import print_function
 
+import gzip
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,9 +55,12 @@ HMDP_NSNPS = 1000          # first 1000 SNPs of data/hmdp.liver.snps
 BED_KIN_NSNPS = 2000       # first 2000 SNPs of the BED file for kinship
 BED_GWAS_NSNPS = 1000      # first 1000 SNPs of the BED file for CLI GWAS
 BED_GWAS_SMALL_NSNPS = 50  # refit / REML / removeMissingGenotypes CLI variants
-BED_BLOCK = 100            # leading K[:100,:100] block stored for 1219x1219 K
+BED_BLOCK = 100            # leading/trailing 100x100 blocks stored for 1219x1219 K
 HMDP_MISSING_Y = [5, 23, 60]  # phenotype entries set to NaN for missing-Y fit
 HMDP_COV_SNP = 10          # SNP (0-based) used as covariate in covariate fit
+HMDP_GZ_NSNPS = 100        # EMMA CLI with a gzipped --kfile / NA phenotypes
+BED_MISSING_PHENO_NA = [3, 100, 500]   # fake.phenos entries written as 'NA'
+BED_MISSING_PHENO_M9 = [7, 800]        # ... and as '-9'
 
 # The goldens are only valid for the pinned baseline environment
 # (docker/py27/Dockerfile).  Fail loudly if a stale or different image is used;
@@ -103,14 +108,30 @@ def savekv(name, items, header):
     log('wrote %s (%d keys)' % (name, len(items)))
 
 
-def run_cli(args, outfile):
-    """Run one of the scripts/ CLIs with the current interpreter."""
+def check_no_comment_header(args):
+    """pylmmGWAS.py reads --kfile with np.fromfile(sep=' '), which stops at the
+    first '#' and then zero-fills K.resize(); every text input the CLIs read
+    must therefore be header-less.  Refuse to run if one is not."""
+    for a in args:
+        if os.path.isfile(a) and not a.endswith(('.bed', '.gz', '.py')):
+            f = open(a, 'rb')
+            first = f.read(1)
+            f.close()
+            if first == b'#':
+                raise RuntimeError('CLI input %s starts with a # header' % a)
+
+
+def run_cli(args, outfile, cwd):
+    """Run one of the scripts/ CLIs with the current interpreter.
+
+    Returns the merged stdout+stderr text (the -v log)."""
+    check_no_comment_header(args)
     env = dict(os.environ)
     env['PYTHONPATH'] = REPO + os.pathsep + env.get('PYTHONPATH', '')
     cmd = [sys.executable] + args + [outfile]
     log('running: %s' % ' '.join(cmd))
     begin = time.time()
-    p = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=subprocess.PIPE,
+    p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT)
     output = p.communicate()[0]
     if p.returncode != 0:
@@ -118,6 +139,16 @@ def run_cli(args, outfile):
         raise RuntimeError('command failed: %s' % ' '.join(cmd))
     log('  done in %.1fs' % (time.time() - begin))
     return output
+
+
+HERIT_RE = re.compile(r'heritability=(\S+), sigma=(\S+)')
+
+
+def null_fit_from_log(output):
+    """(h, sigma) as printed (%0.3f) by pylmmGWAS.py -v for the null fit."""
+    m = HERIT_RE.findall(output)
+    assert len(m) == 1, 'expected one heritability line, got %r' % (m,)
+    return float(m[0][0]), float(m[0][1])
 
 
 # --------------------------------------------------------------------------
@@ -184,17 +215,104 @@ def write_emma_subset(workdir, nsnps):
     return fn
 
 
+def write_headerless_kinship(fn, K):
+    """K as plain whitespace text with no '#' header (what --kfile needs)."""
+    np.savetxt(fn, K, fmt=FMT)
+    back = np.fromfile(open(fn, 'r'), sep=' ')
+    assert back.size == K.size and np.array_equal(back.reshape(K.shape), K)
+    return fn
+
+
+TPED_CODES = {0: '1 1', 1: '0 0', 2: '1 2', 3: '2 2'}  # PLINK 2-bit codes
+
+
+def write_tped_subset(workdir, nsnps):
+    """Transposed PLINK (.tped/.tfam/.map) with the first nsnps BED SNPs.
+
+    Genotypes are decoded straight from the .bed bytes (00 hom A1 -> '1 1',
+    01 missing -> '0 0', 10 het -> '1 2', 11 hom A2 -> '2 2'), which is the
+    allele coding input.getGenos_tped understands."""
+    base = os.path.join(workdir, 'tped%d' % nsnps)
+    nind = sum(1 for _ in open(BED_BASE + '.fam'))
+    nbytes = nind // 4 + (1 if nind % 4 else 0)
+    src = open(BED_BASE + '.bed', 'rb')
+    src.read(3)
+    bim = open(BED_BASE + '.bim')
+    tped = open(base + '.tped', 'w')
+    mapf = open(base + '.map', 'w')
+    for _ in range(nsnps):
+        raw = bytearray(src.read(nbytes))
+        v = bim.readline().split()
+        codes = [(raw[i // 4] >> (2 * (i % 4))) & 3 for i in range(nind)]
+        tped.write(' '.join(v[:4] + [TPED_CODES[c] for c in codes]) + '\n')
+        mapf.write(' '.join(v[:4]) + '\n')
+    for f in (src, bim, tped, mapf):
+        f.close()
+    shutil.copy(BED_BASE + '.fam', base + '.tfam')
+    return base
+
+
+def write_covfile(workdir):
+    """PLINK covariate file (FID IID c1 c2) for the BED individuals, rows in
+    REVERSE fam order so getCovariates() has to re-order them by key."""
+    fn = os.path.join(workdir, 'bed.cov')
+    fam = [l.split()[:2] for l in open(BED_BASE + '.fam')]
+    lines = []
+    for i, (fid, iid) in enumerate(fam):
+        lines.append('%s %s %s %d\n' % (fid, iid, FMT % np.cos(i), i % 3))
+    f = open(fn, 'w')
+    f.write(''.join(lines[::-1]))
+    f.close()
+    return fn
+
+
+def write_missing_phenofile(workdir):
+    """fake.phenos with some entries set to 'NA' / '-9', rows in reverse
+    order so getPhenos() has to re-order them by key."""
+    fn = os.path.join(workdir, 'bed.missing.phenos')
+    lines = open(FAKE_PHENOS).read().splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        v = line.split()
+        if i in BED_MISSING_PHENO_NA:
+            v[2] = 'NA'
+        elif i in BED_MISSING_PHENO_M9:
+            v[2] = '-9'
+        out.append(' '.join(v) + '\n')
+    f = open(fn, 'w')
+    f.write(''.join(out[::-1]))
+    f.close()
+    return fn
+
+
+def write_emma_missing_pheno(workdir):
+    """data/hmdp.liver.exprs.1 with entries HMDP_MISSING_Y written as 'NA'."""
+    fn = os.path.join(workdir, 'hmdp.exprs.1.NA')
+    v = open(os.path.join(DATA, 'hmdp.liver.exprs.1')).read().split()
+    for i in HMDP_MISSING_Y:
+        v[i] = 'NA'
+    f = open(fn, 'w')
+    f.write(' '.join(v) + '\n')
+    f.close()
+    return fn
+
+
 # --------------------------------------------------------------------------
 # Golden sections
 # --------------------------------------------------------------------------
 
 def big_kinship_summary(name, K, header):
-    """Store a 1219x1219 kinship compactly: leading block + diag + row sums."""
+    """Store a 1219x1219 kinship compactly: leading and trailing blocks, the
+    diagonal and K.dot(v) for a fixed non-constant v.  (Row sums would be
+    useless: the genotype columns are centred, so K.sum(1) is ~0 round-off.)"""
     savetxt(name + '.block%d.txt' % BED_BLOCK, K[:BED_BLOCK, :BED_BLOCK],
             header + '\nleading K[:%d,:%d] block' % (BED_BLOCK, BED_BLOCK))
-    savetxt(name + '.diag_rowsums.txt',
-            np.column_stack([np.diag(K), K.sum(axis=1)]),
-            header + '\ncolumns: diag(K), K.sum(axis=1)   (one row per individual)')
+    savetxt(name + '.tail%d.txt' % BED_BLOCK, K[-BED_BLOCK:, -BED_BLOCK:],
+            header + '\ntrailing K[-%d:,-%d:] block' % (BED_BLOCK, BED_BLOCK))
+    v = np.cos(np.arange(K.shape[0]))
+    savetxt(name + '.diag_Kv.txt', np.column_stack([np.diag(K), K.dot(v)]),
+            header + '\ncolumns: diag(K), K.dot(v) with v = cos(arange(n))   '
+            '(one row per individual)')
 
 
 def golden_kinship(Y, K, snps):
@@ -368,11 +486,25 @@ def golden_misc(Y, K, snps):
            '(calculateKinship of first %d hmdp SNPs).' % HMDP_NSNPS)
 
 
-def golden_cli(work):
+def golden_cli(work, K):
+    kinship_py = os.path.join(REPO, 'scripts', 'pylmmKinship.py')
+    gwas_py = os.path.join(REPO, 'scripts', 'pylmmGWAS.py')
+    exprs1 = os.path.join(DATA, 'hmdp.liver.exprs.1')
+    null_items = []
+
+    def gwas(args, name):
+        """Run pylmmGWAS.py into the golden file `name`; record the -v null fit."""
+        output = run_cli([gwas_py] + args, path(name), cwd=work)
+        if '--refit' not in args:
+            hh, ss = null_fit_from_log(output)
+            key = name[len('gwas_cli_'):-len('.out')]
+            null_items.extend([(key + '.h', hh), (key + '.sigma', ss)])
+        return output
+
     # ---- pylmmKinship.py ------------------------------------------------
     bed_kin = write_bed_subset(work, BED_KIN_NSNPS)
     kout = os.path.join(work, 'kin_bed.txt')
-    run_cli(['scripts/pylmmKinship.py', '-v', '--bfile', bed_kin], kout)
+    run_cli([kinship_py, '-v', '--bfile', bed_kin], kout, cwd=work)
     big_kinship_summary(
         'kinship_cli_bed_snps%d' % BED_KIN_NSNPS, np.loadtxt(kout),
         'scripts/pylmmKinship.py -v --bfile <first %d SNPs of '
@@ -381,8 +513,9 @@ def golden_cli(work):
 
     emma = write_emma_subset(work, HMDP_NSNPS)
     kout = os.path.join(work, 'kin_emma.txt')
-    run_cli(['scripts/pylmmKinship.py', '-v', '--emmaSNP', emma,
-             '--emmaNumSNPs', str(HMDP_NSNPS), '-n', '300', '-e', 'x'], kout)
+    run_cli([kinship_py, '-v', '--emmaSNP', emma,
+             '--emmaNumSNPs', str(HMDP_NSNPS), '-n', '300', '-e', 'x'], kout,
+            cwd=work)
     savetxt('kinship_cli_emma_hmdp_snps1000.txt', np.loadtxt(kout),
             'scripts/pylmmKinship.py -v --emmaSNP <first %d lines of '
             'data/hmdp.liver.snps> --emmaNumSNPs %d -n 300 -e x OUT (94x94)'
@@ -392,34 +525,81 @@ def golden_cli(work):
 
     # ---- pylmmGWAS.py ---------------------------------------------------
     bed_gwas = write_bed_subset(work, BED_GWAS_NSNPS)
-    common = ['scripts/pylmmGWAS.py', '-v', '--bfile', bed_gwas,
+    common = ['-v', '--bfile', bed_gwas,
               '--kfile', README_KIN, '--phenofile', FAKE_PHENOS]
-    gout = path('gwas_cli_bed_snps%d.out' % BED_GWAS_NSNPS)
-    run_cli(common, gout)
+    gwas(common, 'gwas_cli_bed_snps%d.out' % BED_GWAS_NSNPS)
 
     bed_small = write_bed_subset(work, BED_GWAS_SMALL_NSNPS)
-    common = ['scripts/pylmmGWAS.py', '-v', '--bfile', bed_small,
+    common = ['-v', '--bfile', bed_small,
               '--kfile', README_KIN, '--phenofile', FAKE_PHENOS]
     for flags, tag in ((['--REML'], 'reml'),
                        (['--refit'], 'refit'),
                        (['--REML', '--refit'], 'reml_refit'),
                        (['--removeMissingGenotypes'], 'removeMissing')):
-        run_cli(common + flags,
-                path('gwas_cli_bed_snps%d_%s.out' % (BED_GWAS_SMALL_NSNPS, tag)))
+        gwas(common + flags,
+             'gwas_cli_bed_snps%d_%s.out' % (BED_GWAS_SMALL_NSNPS, tag))
 
-    # EMMA input path
-    common = ['scripts/pylmmGWAS.py', '-v', '--emmaSNP', emma,
-              '--emmaPHENO', os.path.join(DATA, 'hmdp.liver.exprs.1'),
-              '--kfile', path('hmdp_K_npdump.txt')]
-    run_cli(common, path('gwas_cli_emma_hmdp_snps%d.out' % HMDP_NSNPS))
+    # --covfile (plink covariate file, rows in reverse order)
+    gwas(common + ['--covfile', write_covfile(work)],
+         'gwas_cli_bed_snps%d_covfile.out' % BED_GWAS_SMALL_NSNPS)
+
+    # --phenofile with NA and -9 entries (CLI missing-phenotype path)
+    gwas(['-v', '--bfile', bed_small, '--kfile', README_KIN,
+          '--phenofile', write_missing_phenofile(work)],
+         'gwas_cli_bed_snps%d_missingpheno.out' % BED_GWAS_SMALL_NSNPS)
+
+    # --tfile: the same 50 SNPs as transposed PLINK.  Must reproduce the
+    # first 50 rows of the --bfile README run exactly.
+    tped = write_tped_subset(work, BED_GWAS_SMALL_NSNPS)
+    W_bed, _ = read_bed_snps(BED_GWAS_SMALL_NSNPS, norm=False)
+    IN = pinput.plink(tped, type='t', normGenotype=False)
+    W_tped = np.array([g for g, _ in IN]).T
+    assert np.array_equal(np.isnan(W_bed), np.isnan(W_tped))
+    assert np.array_equal(np.nan_to_num(W_bed), np.nan_to_num(W_tped))
+    tname = 'gwas_cli_tped_snps%d.out' % BED_GWAS_SMALL_NSNPS
+    gwas(['-v', '--tfile', tped, '--kfile', README_KIN,
+          '--phenofile', FAKE_PHENOS], tname)
+    full = open(path('gwas_cli_bed_snps%d.out' % BED_GWAS_NSNPS)).readlines()
+    assert open(path(tname)).readlines() == full[:BED_GWAS_SMALL_NSNPS + 1]
+
+    # EMMA input path.  --kfile must be header-less: hmdp_K_npdump.txt has
+    # '#' lines, which pylmmGWAS.py's np.fromfile reader would stop at and
+    # then zero-fill K (an all-zero kinship, i.e. plain OLS).
+    kfile = write_headerless_kinship(os.path.join(work, 'hmdp.K.txt'), K)
+    common = ['-v', '--emmaSNP', emma, '--emmaPHENO', exprs1, '--kfile', kfile]
+    gwas(common, 'gwas_cli_emma_hmdp_snps%d.out' % HMDP_NSNPS)
     cov = os.path.join(work, 'hmdp.cov.emma')
     src = open(os.path.join(DATA, 'hmdp.liver.exprs'))
     src.readline()
     line2 = src.readline()  # 2nd expression trait used as a covariate
     src.close()
     open(cov, 'w').write(line2)
-    run_cli(common + ['--emmaCOV', cov],
-            path('gwas_cli_emma_hmdp_snps%d_cov.out' % HMDP_NSNPS))
+    gwas(common + ['--emmaCOV', cov],
+         'gwas_cli_emma_hmdp_snps%d_cov.out' % HMDP_NSNPS)
+
+    # gzipped --kfile (the .gz branch of the reader) on the first 100 SNPs:
+    # must reproduce the first 100 rows of the plain-text run exactly.
+    emma_small = write_emma_subset(work, HMDP_GZ_NSNPS)
+    kgz = kfile + '.gz'
+    f = gzip.open(kgz, 'wb')
+    f.write(open(kfile, 'rb').read())
+    f.close()
+    gzout = os.path.join(work, 'gz.out')
+    run_cli([gwas_py, '-v', '--emmaSNP', emma_small, '--emmaPHENO', exprs1,
+             '--kfile', kgz], gzout, cwd=work)
+    full = open(path('gwas_cli_emma_hmdp_snps%d.out' % HMDP_NSNPS)).readlines()
+    assert open(gzout).readlines() == full[:HMDP_GZ_NSNPS + 1]
+
+    # --emmaPHENO with 'NA' entries
+    gwas(['-v', '--emmaSNP', emma_small, '--emmaPHENO',
+          write_emma_missing_pheno(work), '--kfile', kfile],
+         'gwas_cli_emma_hmdp_snps%d_missingpheno.out' % HMDP_GZ_NSNPS)
+
+    savekv('gwas_cli_nullfit.kv.txt', null_items,
+           'Null-model fit printed by pylmmGWAS.py -v ("heritability=%0.3f,\n'
+           'sigma=%0.3f") for every gwas_cli_*.out run without --refit.\n'
+           'Keys are <run>.h / <run>.sigma, <run> = file name minus gwas_cli_ / .out.\n'
+           'Values are rounded to 3 decimals by the CLI.')
 
 
 def write_env():
@@ -449,7 +629,7 @@ def main():
     golden_misc(Y, K, snps)
     work = tempfile.mkdtemp(prefix='pylmm_golden_')
     try:
-        golden_cli(work)
+        golden_cli(work, K)
     finally:
         shutil.rmtree(work)
     log('all done in %.1fs' % (time.time() - t0))

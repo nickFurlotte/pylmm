@@ -21,6 +21,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN pip install --only-binary=:all: "numpy==${NUMPY_VERSION}" "scipy==${SCIPY_VERSION}"
 
+# Test runner: pytest 4.6.11 is the last release supporting Python 2. Its
+# dependencies are pinned too (the versions pip resolved on 2.7.18), so the
+# image is reproducible. scandir has no wheel; it builds pure-Python from sdist.
+RUN pip install \
+    "pytest==4.6.11" \
+    "atomicwrites==1.4.1" "attrs==21.4.0" "backports.functools-lru-cache==1.6.6" \
+    "configparser==4.0.2" "contextlib2==0.6.0.post1" "funcsigs==1.0.2" \
+    "importlib-metadata==2.1.3" "more-itertools==5.0.0" "packaging==20.9" \
+    "pathlib2==2.3.7.post1" "pluggy==0.13.1" "py==1.11.0" "pyparsing==2.4.7" \
+    "scandir==1.10.0" "six==1.17.0" "typing==3.10.0.0" "wcwidth==0.2.13" \
+    "zipp==1.2.0"
+
 WORKDIR /repo
 # The repo is bind-mounted at /repo by run.sh; make `import pylmm` work.
 ENV PYTHONPATH=/repo
