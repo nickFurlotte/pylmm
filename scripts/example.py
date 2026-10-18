@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 
-# This script illustrates how the pylmm module can be used to compute association 
-# statistics.  
+# This script illustrates how the pylmm module can be used to compute association
+# statistics.
 
 import sys
 import time
@@ -16,7 +16,7 @@ Y = np.genfromtxt('data/hmdp.liver.exprs.1')
 K = np.load('data/hmdp.liver.K.npdump', allow_pickle=True)
 snps = np.load('data/hmdp.liver.snps.1000.npdump', allow_pickle=True).T
 
-# These three lines will load all SNPs (from npdump or from txt) and 
+# These three lines will load all SNPs (from npdump or from txt) and
 # calculate the kinship
 #snps = np.genfromtxt('data/hmdp.liver.snps').T
 #snps = np.load('data/hmdp.liver.snps.npdump').T
@@ -46,6 +46,3 @@ begin = time.time()
 TS,PS = lmm.GWAS(Y,snps,K,REML=True,refit=True)
 end = time.time()
 sys.stderr.write("Total time for 1000 SNPs: %0.3f\n" % (end- begin))
-
-
-

@@ -28,7 +28,7 @@ basicGroup.add_option("--bfile", dest="bfile",
 basicGroup.add_option("--emmaSNP", dest="emmaFile", default=None,
                   help="For backwards compatibility with emma, we allow for \"EMMA\" file formats.  This is just a text file with individuals on the rows and snps on the columns.")
 basicGroup.add_option("--emmaNumSNPs", dest="numSNPs", type="int", default=0,
-		     help="When providing the emmaSNP file you need to specify how many snps are in the file")
+                     help="When providing the emmaSNP file you need to specify how many snps are in the file")
 
 basicGroup.add_option("-e", "--efile", dest="saveEig", help="Save eigendecomposition to this file.")
 basicGroup.add_option("-n", default=1000,dest="computeSize", type="int", help="The maximum number of SNPs to read into memory at once (default 1000).  This is important when there is a large number of SNPs, because memory could be an issue.")
@@ -42,8 +42,8 @@ parser.add_option_group(basicGroup)
 
 (options, args) = parser.parse_args()
 if len(args) != 1: 
-   parser.print_help()
-   sys.exit()
+    parser.print_help()
+    sys.exit()
 
 outFile = args[0]
 
@@ -55,15 +55,15 @@ from pylmm.lmm import calculateKinship
 from pylmm import input
 
 if not options.tfile and not options.bfile and not options.emmaFile: 
-   parser.error("You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP).")
+    parser.error("You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP).")
 
 if options.verbose: sys.stderr.write("Reading PLINK input...\n")
 if options.bfile: IN = input.plink(options.bfile,type='b')
 elif options.tfile: IN = input.plink(options.tfile,type='t')
 #elif options.pfile: IN = input.plink(options.pfile,type='p')
 elif options.emmaFile: 
-   if not options.numSNPs: parser.error("You must provide the number of SNPs when specifying an emma formatted file.")
-   IN = input.plink(options.emmaFile,type='emma')
+    if not options.numSNPs: parser.error("You must provide the number of SNPs when specifying an emma formatted file.")
+    IN = input.plink(options.emmaFile,type='emma')
 else: parser.error("You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP).")
 
 n = len(IN.indivs)
@@ -76,39 +76,36 @@ if options.emmaFile: IN.numSNPs = options.numSNPs
 i = 0
 K = None
 while i < IN.numSNPs:
-   j = 0
-   while j < options.computeSize and i < IN.numSNPs:
-      snp,id = IN.next()
-      if snp.var() == 0:
-	 i += 1
-	 continue
-      W[:,j] = snp
+    j = 0
+    while j < options.computeSize and i < IN.numSNPs:
+        snp,id = IN.next()
+        if snp.var() == 0:
+            i += 1
+            continue
+        W[:,j] = snp
 
-      i += 1
-      j += 1
-   if j < options.computeSize: W = W[:,range(0,j)] 
+        i += 1
+        j += 1
+    if j < options.computeSize: W = W[:,range(0,j)] 
 
-   if options.verbose: sys.stderr.write("Processing first %d SNPs\n" % i)
-   if K is None: 
-      try: 
-	 K = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
-      except AttributeError: K = np.dot(W,W.T) 
-   else:
-      try: 
-	 K_j = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
-      except AttributeError: K_j = np.dot(W,W.T)
-      K = K + K_j
+    if options.verbose: sys.stderr.write("Processing first %d SNPs\n" % i)
+    if K is None: 
+        try: 
+            K = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
+        except AttributeError: K = np.dot(W,W.T) 
+    else:
+        try: 
+            K_j = linalg.fblas.dgemm(alpha=1.,a=W.T,b=W.T,trans_a=True,trans_b=False) # calculateKinship(W) * j
+        except AttributeError: K_j = np.dot(W,W.T)
+        K = K + K_j
 
 K = K / float(IN.numSNPs)
 if options.verbose: sys.stderr.write("Saving Kinship file to %s\n" % outFile)
 np.savetxt(outFile,K)
 
 if options.saveEig:
-   if options.verbose: sys.stderr.write("Obtaining Eigendecomposition\n")
-   Kva,Kve = linalg.eigh(K)
-   if options.verbose: sys.stderr.write("Saving eigendecomposition to %s.[kva | kve]\n" % outFile)
-   np.savetxt(outFile+".kva",Kva)
-   np.savetxt(outFile+".kve",Kve)
-      
-
-
+    if options.verbose: sys.stderr.write("Obtaining Eigendecomposition\n")
+    Kva,Kve = linalg.eigh(K)
+    if options.verbose: sys.stderr.write("Saving eigendecomposition to %s.[kva | kve]\n" % outFile)
+    np.savetxt(outFile+".kva",Kva)
+    np.savetxt(outFile+".kve",Kve)
