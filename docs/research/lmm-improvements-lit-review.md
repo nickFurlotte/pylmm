@@ -36,7 +36,7 @@ ground rules, these are flagged for Nick and not fixed here.
 | Per-SNP rotation | `association` → `matrixMult(Kve.T, X)` for **one SNP at a time** (BLAS-2 mat-vec) | **O(n²) per SNP → O(mn²) total, the dominant cost** |
 | Per-SNP Wald test | `LL` → `getMLSoln` (builds X'SX, `linalg.inv`, β, Q) → `tstat` (t with N−q df) | O(nq²) per SNP plus Python overhead |
 | `refit=True` (exact per-SNP) | `fit(X=x)` per SNP: full grid + Brent | ~100x the per-SNP cost |
-| SNP with missing genotypes | `GWAS()` / `pylmmGWAS.py` builds a **new `LMM` on the subset**, which means a **fresh O(n³) `eigh` per SNP** | catastrophic when missingness is common |
+| SNP with missing genotypes, **only under `--removeMissingGenotypes`** (the CLI default mean-imputes, so no NaNs reach this branch) | `GWAS()` / `pylmmGWAS.py` (~L244-267) builds a **new `LMM` on the subset**, which means a **fresh O(n³) `eigh` per SNP** | catastrophic when missingness is common and this option is set |
 
 Other notes:
 
@@ -66,9 +66,13 @@ Other notes:
 1. **The REML flag is inconsistent in `scripts/pylmmGWAS.py`.**
    - The null model is fit with `L.fit()`. Its default is `REML=True`, but the CLI default is
      `--REML` off (ML). Association then uses `REML=options.REML`.
-   - SNPs that have missing genotypes are refit with `Ls.fit(REML=options.REML)`, i.e. ML by default.
-   - Result: within one run, SNPs with and without missingness are tested under different
-     variance-component estimators.
+   - So on every run, including the default path, the null fit is REML while `association` uses ML
+     (unless `--REML` is given): a REML/ML mismatch.
+   - Only under `--removeMissingGenotypes` (the default mean-imputes, so this branch, ~L244-267, is
+     never reached), SNPs that have missing genotypes are refit with `Ls.fit(REML=options.REML)`,
+     i.e. ML by default.
+   - Result: in that mode, SNPs with and without missingness are also tested under different
+     variance-component estimators within one run.
 2. **The log p-value branch in `LMM.tstat(log=True)` is wrong.** It computes `2.0 + logsf(...)`; it
    should be `log(2) + logsf(...)`. No caller uses it today, but it is the path needed for extreme
    p-values.
@@ -76,14 +80,15 @@ Other notes:
    optima it returns the *first* one, not the one with the highest LL. The grid also excludes h=1.
 4. **`--kfile2` is broken.** `pylmmGWAS.py` references `LMM_withK2`, which is not defined or imported
    anywhere, so using the option raises a NameError.
-5. **The kinship denominator is off.** `pylmmKinship.py` divides by `IN.numSNPs`, which includes the
-   monomorphic SNPs it skipped. K is scaled by a constant, which changes h² interpretation but not
-   p-values.
-6. **Python 2 idioms that break on modern numpy/scipy:**
+5. **The kinship denominator is off in two places.** `pylmmKinship.py` divides by `IN.numSNPs`, which
+   includes the monomorphic SNPs it skipped. `lmm.calculateKinship` has the same bug: it drops
+   monomorphic SNPs via `W[:,keep]` (~L51) but divides by the earlier `m` (~L63). K is scaled by a
+   constant, which changes h² interpretation but not p-values.
+6. **Python 2 idioms that break on modern Python/numpy/scipy:**
    - `True - mask` (numpy now raises for boolean subtract)
    - `X0 == None` on arrays
    - `linalg.fblas`
-   - `D.has_key`
+   - `D.has_key` (a Python 3 break, not a numpy/scipy one)
    - `'\x01'` string compare on bytes
 
    Phase 3 should already cover these.
@@ -106,7 +111,7 @@ Other notes:
     LMMs", bioRxiv 10.1101/154682 (2017/2019).
 - **GEMMA** (Zhou & Stephens 2012, *Nat Genet* 44:821; https://github.com/genetics-statistics/GEMMA):
   - Gives *exact* per-SNP ML or REML. After one rotation, the likelihood and its first and second
-    derivatives in λ come from O(n) recursions, then Newton-Raphson runs from a Brent bracket.
+    derivatives in λ come from O(n) recursions, with a grid scan over log λ first and then Newton-Raphson within the intervals where the derivative changes sign.
   - Reports Wald, LRT and score tests.
   - This is the principled replacement for pylmm's `refit=True` grid search.
 - **EMMAX** (Kang et al. 2010, *Nat Genet* 42:348) and **P3D** (Zhang et al. 2010, *Nat Genet*
@@ -150,7 +155,7 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
 - **Cost for pylmm:** 22 eighs (one per autosome) instead of 1.
   - K_{−c} = (K_counts_total − K_counts_c)/(m − m_c) is cheap if per-chromosome *unnormalized*
     WᵀW blocks are kept.
-  - For n ≤ ~10k, 22 eighs of n×n are minutes, which is acceptable.
+  - For n ≤ ~10k, 22 eighs of n×n take tens of minutes, which is acceptable.
 
 ### 2.3 Large-scale methods: what is portable?
 
@@ -176,7 +181,7 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
   for association.
 - **Missing data:** mean imputation shrinks relatedness toward 0 for high-missing individuals.
   Per-pair counts fix most of the bias. Either way, report the per-individual missingness rate.
-- **Selection** (FaST-LMM-Select; Listgarten et al. 2012/2013): build K from a selected SNP subset.
+- **Selection** (FaST-LMM-Select; Listgarten et al. 2012, *Nat Methods*): build K from a selected SNP subset.
   It can raise power but is fragile and adds tuning. Not recommended.
 
 ### 2.5 Multiple variance components
@@ -202,7 +207,7 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
   - `subset_by_index` returns only the top-k eigenpairs, which can be useful for a low-rank
     approximate mode.
   - Also set `check_finite=False` and `overwrite_a=True` to skip copies.
-  - Benchmark on the target BLAS. NumPy ≥2.0 macOS arm64 wheels use Apple Accelerate, while Linux
+  - Benchmark on the target BLAS. NumPy ≥2.0 wheels for macOS 14+ arm64 use Apple Accelerate, while Linux
     wheels use OpenBLAS.
 - **Thin SVD of W instead of eigh(WWᵀ):** when m < n (or for a LOCO block), this costs O(nm²) and is
   more accurate than forming K.
@@ -223,9 +228,9 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
 
 | Library | Notes | Fit for pylmm |
 |---|---|---|
-| **bed-reader** (https://github.com/fastlmm/bed-reader, PyPI 1.0.6, Nov 2024; Apache-2.0; Rust core, from the FaST-LMM team) | Multithreaded, reads arbitrary SNP or sample subsets, returns float32/64 with NaN for missing, supports cloud URLs | **Best optional backend.** License-compatible with MIT |
+| **bed-reader** (https://github.com/fastlmm/bed-reader, PyPI 1.1.0, June 2026; Apache-2.0 (per its LICENSE.md and Cargo.toml; not dual-licensed); Rust core, from the FaST-LMM team) | Multithreaded, reads arbitrary SNP or sample subsets, returns float32/64 with NaN for missing, supports cloud URLs | **Best optional backend.** License-compatible with MIT |
 | **pandas-plink** (https://github.com/limix/pandas-plink, 2.3.2) | Dask-lazy BED plus bim/fam DataFrames | Fine, but adds dask. bed-reader is lighter |
-| **Pgenlib** (https://pypi.org/project/Pgenlib/, 0.94.x in 2026; LGPL-3.0; from plink-ng) | Reads and writes PLINK 2 .pgen, including dosages | Optional extra only (LGPL as an optional dependency is fine; do not vendor it) |
+| **Pgenlib** (https://pypi.org/project/Pgenlib/, 0.95.1, Oct 2026; LGPL-3.0; from plink-ng) | Reads and writes PLINK 2 .pgen, including dosages | Optional extra only (LGPL as an optional dependency is fine; do not vendor it) |
 | **Pure numpy** | `np.fromfile` the bytes, then a 256×4 lookup table maps each byte to 4 genotypes: `lut[bytes].reshape(-1)[:n]`, vectorized over SNP blocks | **Default.** Zero new dependencies and ~100x+ faster than the current decoder |
 
 ### 2.8 P-value accuracy and calibration
@@ -237,10 +242,10 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
     after fixing the bug in §1.3.2.
 - **Calibration:**
   - Report λ_GC, the median χ² divided by 0.4549 (Devlin & Roeder 1999, *Biometrics* 55:997).
-  - Offer LRT and score tests alongside Wald, as GEMMA does. Wald can be anti-conservative at small
-    n under P3D for large-effect SNPs.
-  - Exact refit (§2.1) or LOCO (§2.2) are the principled fixes for deflation from proximal
-    contamination.
+  - Offer LRT and score tests alongside Wald, as GEMMA does. P3D is generally conservative for
+    large-effect SNPs, because the SNP's effect is absorbed into the null σg².
+  - LOCO (§2.2), or excluding nearby SNPs from K, is the principled fix for deflation from proximal
+    contamination. Exact refit (§2.1) does not fix it; it addresses the P3D conservatism above.
   - GRAMMAR-γ-style calibration is only needed if an approximate fast statistic is added.
 
 ---
@@ -255,8 +260,8 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
   3. returns arrays of β, SE, t and p.
 - **Why for pylmm:** replaces the per-SNP loop in `GWAS()` and `pylmmGWAS.py`, along with the
   `association` → `LL` → `getMLSoln` → `linalg.inv` chain. BLAS-2 becomes BLAS-3 and the Python
-  overhead disappears. Expect 10–100x on the example data. `pylmmGWAS.py -n`/`computeSize` already
-  hints at block processing.
+  overhead disappears. Expect 10–100x on the example data. `pylmmKinship.py` already does block
+  processing via `computeSize` (`-n`).
 - **Effort:** S.
 - **Validate:** t and p from `association(x)` must match to ~1e-10 relative on every SNP of the
   golden data (non-refit, non-missing path). Also check edge cases: monomorphic SNPs, q>1
@@ -303,7 +308,7 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
   - `pylmmKinship.py --loco` writes per-chromosome *unnormalized* WᵀW blocks plus SNP counts.
   - The GWAS uses K_{−c} for chromosome c: 22 eighs, or thin SVDs when m_{−c} < n.
   - Add `--grm {rrm,gcta}`, where gcta means 2p(1−p) scaling and per-pair non-missing counts.
-  - Fix the denominator in §1.3.5.
+  - Fix the denominator in §1.3.5 (both `pylmmKinship.py` and `lmm.calculateKinship`).
 - **Why:** removes proximal contamination (Listgarten 2012; Yang 2014) and is the community-standard
   default. The GCTA option makes K comparable with external tools.
 - **Effort:** M (depends on D2's chromosome plumbing).
@@ -344,7 +349,7 @@ FaST-LMM, GEMMA, and every biobank tool use this. pylmm does it one SNP at a tim
     or
   - (b) cache the eigendecomposition per missingness pattern (hash of the mask); or
   - (c) for small missingness, use an exact conditional approach with a low-rank correction.
-- **Why:** with `--removeMissingGenotypes`, each such SNP currently costs a fresh O(n³) eigh.
+- **Why:** only with `--removeMissingGenotypes` (not the default) does each such SNP currently cost a fresh O(n³) eigh.
 - **Effort:** S for (b); M for (c).
 - **Validate:** identical outputs to the current path for (b). Report timing.
 - **Risks:** in sequencing-like data, every SNP can have a unique pattern, so the cache never hits.
@@ -422,9 +427,9 @@ not become CI dependencies.
 Software (versions as seen on package indices, late 2026; verify before pinning):
 
 - fastlmm: https://fastlmm.github.io/ and https://pypi.org/project/fastlmm/ (0.6.x)
-- bed-reader: https://github.com/fastlmm/bed-reader (1.0.6)
+- bed-reader: https://github.com/fastlmm/bed-reader (1.1.0)
 - pandas-plink: https://github.com/limix/pandas-plink (2.3.2)
-- Pgenlib: https://pypi.org/project/Pgenlib/ (0.94.x, LGPL-3.0)
+- Pgenlib: https://pypi.org/project/Pgenlib/ (0.95.1, LGPL-3.0)
 - PLINK 2: https://www.cog-genomics.org/plink/2.0/
 - GEMMA: https://github.com/genetics-statistics/GEMMA
 - REGENIE: https://rgcgithub.github.io/regenie/ (4.1.x)
