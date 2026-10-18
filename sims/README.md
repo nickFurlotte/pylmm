@@ -128,8 +128,14 @@ uses. It does not reuse any pylmm code:
 - It evaluates a 201-point grid over [0, 1] (endpoints included), refines
   every interior local maximum with bounded Brent, and returns the best
   point.
-- `wald(y, K, x, X0, h=None, refit=False)` returns the Wald t and p.
-  σ² = Q/(n−p) and df = n−p, which is pylmm's convention.
+- `wald(y, K, x, X0, null_reml=True, test_reml=None, h=None, refit=False,
+  sigma_convention="textbook")` returns the Wald t and p. The p-value uses
+  the t distribution with df = n−p, as pylmm does.
+- `fit` reports both `sigma2_ml` (Q/n) and `sigma2_reml` (Q/(n−p)).
+  `sigma2` is whichever one matches the fitted likelihood, and
+  `sigma2_kind` says which.
+- Switches for pylmm's conventions default to the textbook behaviour. The
+  section "Isolating pylmm's suspected bugs" below lists them.
 
 `tests/sims/test_sims_oracle.py` validates it:
 
@@ -154,8 +160,13 @@ Assumptions and known behaviour:
   `ml_unbounded=True`. REML is unaffected. pylmm hides this because it clamps
   eigenvalues to at least 1e-6 and its grid stops at 0.99. This matters for
   S2 (ML with h near 1).
-- pylmm's REML LL equals the oracle's REML LL plus `pylmm_reml_offset(n, p)`,
-  a constant in h. pylmm's ML LL equals the oracle's ML LL.
+- pylmm's ML LL is the standard profile ML LL, so raw ML values match the
+  oracle's `ll`. pylmm's REML LL is the standard REML LL plus a constant,
+  `pylmm_reml_offset(n, p)` = n/2·log(n/(n−p)) − p/2. Both depend on Q only
+  through −(n−p)/2·log Q, so the REML ĥ is the same. Never compare raw REML
+  LLs. Compare ĥ, β̂, t and LL differences instead, or use
+  `OracleFit.ll_pylmm`. A test checks the offset at 8 values of h, from 0 to
+  0.999.
 
 ## pylmm behaviour the framework works around (not fixed)
 
@@ -183,3 +194,53 @@ SNPs with rank 99, h² ∈ {0.2, 0.5, 0.8}) gave these results:
 - With REML, GWAS t-statistics agree to 1e-6.
 - With `REML=False`, the GWAS t-statistics differ from the oracle's ML Wald
   t by up to 0.006. The cause is bug 1: the null h is still fitted by REML.
+
+## Isolating pylmm's suspected bugs
+
+Bug numbers refer to `docs/phase1-baseline.md`. Every switch below defaults
+to the textbook behaviour. With all of them set to the pylmm setting, the
+oracle reproduces pylmm. Flip one switch at a time to measure one effect on
+its own.
+
+| switch | textbook (default) | pylmm setting | isolates |
+|---|---|---|---|
+| `fit/wald(h_grid=)` | `"fine"`: global max on a 201-point grid over [0, 1], plus bounded Brent | `"pylmm"`: pylmm's exact search. Grid 0..0.99 in steps of 0.01, the `range(1, n−2)` scan, the first local optimum rather than the best, unbounded Brent with the h<0 guard, nan replaced by H[i−1], and the endpoint fallback | bugs **2** (off-by-one), **3** (grid excludes 1.0), **4** (unbounded Brent, nan fallback), and the first-not-best optimum |
+| `fit/wald(eig_clamp=)` | `None` | `1e-6`: eigenvalues of K below 1e-6 are raised to 1e-6 (`LMM.__init__`) | the clamp itself. It matters as h → 1 and for rank-deficient K: the BED K has 1109 of 1219 eigenvalues below 1e-6. The in-place mutation of the caller's `Kva` is bug **12** |
+| `wald(null_reml=, test_reml=)` | `test_reml = null_reml` | `null_reml=True, test_reml=False` reproduces `GWAS(REML=False)` | bug **1**: the null fit ignores `REML` |
+| `wald(sigma_convention=)` and `OracleFit.sigma2_ml` / `sigma2_reml` | `"textbook"`: Q/n under ML | `"pylmm"`: Q/(n−q) always. pylmm's reported sigma is `sigma2_reml` | bug **9**: sigma is not the ML estimate under ML |
+| `OracleFit.ll` / `ll_pylmm` | standard (RE)ML | `ll_pylmm` adds the REML constant | a convention, not a bug. Use it to compare raw LLs |
+
+Usage:
+
+```python
+PYLMM = dict(eig_clamp=1e-6, h_grid="pylmm")
+f_pylmm = oracle.fit(y, K, X0, reml=True, **PYLMM)       # reproduces pylmm
+f_true = oracle.fit(y, K, X0, reml=True)                 # textbook
+f_opt = oracle.fit(y, K, X0, reml=True, eig_clamp=1e-6)  # differs from f_pylmm only by the optimizer
+w = oracle.wald(y, K, x, X0, null_reml=True, test_reml=False,
+                sigma_convention="pylmm", **PYLMM)       # = lmm.GWAS(REML=False)
+```
+
+Validation is in `tests/sims/test_sims_oracle.py`. With all switches set to
+pylmm conventions, the oracle matches pylmm `LMM.fit` and `lmm.GWAS` (REML,
+and REML=False with a REML null) in three settings:
+
+- synthetic rank-deficient K: h, LL (via `ll_pylmm`), β, sigma, t and p;
+- a real BED subset (300 mice, rank about 99): |Δh| ≤ 3e-8, |ΔLL| ≤ 1e-13,
+  |Δt| ≤ 1e-8;
+- the two `example_null` replicates where pylmm stopped at 0.99: h = 0.99
+  exactly, and |Δt| ≈ 1e-13.
+
+In those two `example_null` replicates the textbook oracle gives h of 1.0
+and 0.996. That is still true with `eig_clamp=1e-6`, so the optimizer is the
+cause (bugs 2 and 3), not the clamp. Their textbook t-statistics differ from
+pylmm by 0.003 to 0.016.
+
+Not covered by oracle switches:
+
+- Bug 8 (kinship normalization) is a kinship-construction difference.
+  Compare `kinship.kinship` (pylmm's `calculateKinship`) with a K built from
+  `pylmm.input.normalizeGenotype` directly.
+- The `misc.fitTwo` grid (bug 3) involves two kinships, and the oracle fits
+  only one.
+- Bug 5 (`tstat(log=True)`) is on an unused code path.

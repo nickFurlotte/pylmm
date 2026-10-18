@@ -215,7 +215,8 @@ def test_pylmm_matches_oracle_on_easy_problem():
         ll_p = L.LL(f.h, REML=reml)[0]
         np.testing.assert_allclose(ll_p, f.ll + off, rtol=1e-9)
         t_p, _ = L.association(x.reshape(-1, 1), h=f.h, REML=reml)
-        np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h).t, rtol=1e-8)
+        np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, sigma_convention="pylmm").t,
+                                   rtol=1e-8)
 
 
 def test_ml_unbounded_with_centred_grm_and_intercept():
@@ -234,3 +235,138 @@ def test_ml_unbounded_with_centred_grm_and_intercept():
     assert not reml.ml_unbounded
     # a positive definite K removes the degeneracy
     assert not oracle.fit(y, 0.8 * kin.K + 0.2 * np.eye(n), reml=False).ml_unbounded
+
+
+
+
+# ---------------------------------------------------------------------------
+# pylmm-convention switches: with all of them on, the oracle reproduces pylmm
+# ---------------------------------------------------------------------------
+
+PYLMM = dict(eig_clamp=1e-6, h_grid="pylmm")
+
+
+def _rank_deficient_problem(seed=0, n=150, m=60, h2=0.5):
+    """K from fewer SNPs than individuals: rank <= m - 1, so pylmm clamps
+    most eigenvalues to 1e-6 (as for the BED kinship, 1109/1219)."""
+    from sims import phenotypes
+    g = genotypes.unrelated(n, m, seed=seed)
+    kin = kinship.from_matrix(kinship.kinship(g.G))
+    rng = np.random.default_rng(seed)
+    X0 = np.c_[np.ones(n), rng.standard_normal(n)]
+    y = phenotypes.simulate(kin, h2, rng, X0=X0, alpha=[1.0, 0.3]).y
+    x = rng.binomial(2, 0.3, n).astype(float)
+    return y, kin, X0, x
+
+
+def test_ll_conventions_ml_exact_reml_constant_offset():
+    """pylmm ML LL == oracle ML LL; pylmm REML LL == oracle REML LL + the
+    analytic constant, at every h (exactly, once the clamp is matched)."""
+    from pylmm.lmm import LMM
+    y, kin, X0, _ = _rank_deficient_problem()
+    n, p = X0.shape
+    assert (kin.Kva < 1e-6).sum() > 80
+    L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm(), X0=X0)
+    Kc = oracle.clamp_kinship(kin.K)
+    hs = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999]
+    for reml in (True, False):
+        d = [L.LL(h, REML=reml)[0] - oracle.profile_loglik(h, y, Kc, X0, reml)[0] for h in hs]
+        np.testing.assert_allclose(d, oracle.pylmm_reml_offset(n, p) if reml else 0.0,
+                                   atol=1e-8)
+    # LL differences agree without any offset
+    for reml in (True, False):
+        dp = L.LL(0.7, REML=reml)[0] - L.LL(0.0, REML=reml)[0]
+        do = (oracle.profile_loglik(0.7, y, Kc, X0, reml)[0]
+              - oracle.profile_loglik(0.0, y, Kc, X0, reml)[0])
+        np.testing.assert_allclose(dp, do, rtol=1e-10)
+    # the clamp itself is a measurable effect, growing towards h = 1
+    gap = [abs(L.LL(h, REML=True)[0] - oracle.pylmm_reml_offset(n, p)
+               - oracle.profile_loglik(h, y, kin.K, X0)[0]) for h in (0.3, 0.99)]
+    assert gap[1] > 10 * gap[0]
+
+
+def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
+    """Oracle with all pylmm switches vs pylmm: null fit (REML and ML) and
+    GWAS t (REML, and REML=False, which pylmm fits with a REML null)."""
+    from pylmm.lmm import LMM
+    from sims import methods
+    K = np.asarray(kin.K)
+    for reml in (True, False):
+        L = LMM(y, K, *kin.eig_for_pylmm(), X0=X0)
+        h, beta, sigma, ll = L.fit(REML=reml)
+        f = oracle.fit(y, K, X0, reml=reml, **PYLMM)
+        np.testing.assert_allclose(float(np.sum(h)), f.h, atol=tol_h)
+        np.testing.assert_allclose(float(np.sum(ll)), f.ll_pylmm, atol=1e-6)
+        np.testing.assert_allclose(float(np.sum(sigma)), f.sigma2_reml, rtol=1e-5)
+        np.testing.assert_allclose(np.ravel(beta), f.beta, rtol=1e-5, atol=1e-7)
+    for reml in (True, False):
+        t_p, p_p = methods.pylmm_gwas(y, xs, kin, X0=X0, REML=reml)
+        w = [oracle.wald(y, K, xs[:, j], X0=X0, null_reml=True, test_reml=reml,
+                         sigma_convention="pylmm", **PYLMM) for j in range(xs.shape[1])]
+        np.testing.assert_allclose(t_p, [v.t for v in w], atol=tol_t, rtol=tol_t)
+        np.testing.assert_allclose(p_p, [v.p for v in w], rtol=1e-4)
+
+
+def test_pylmm_convention_matches_pylmm_synthetic():
+    for seed in range(3):
+        y, kin, X0, x = _rank_deficient_problem(seed)
+        xs = np.c_[x, np.random.default_rng(seed).binomial(2, 0.4, len(y))]
+        _check_matches_pylmm(y, kin, X0, xs.astype(float))
+
+
+def test_pylmm_convention_matches_pylmm_bed_subset():
+    """Real genotypes: 300 random BED mice, K from 2500 SNPs (rank ~99)."""
+    from sims import phenotypes
+    spec = {"source": "bed", "n_snps": 2510, "select": "random", "n_indivs": 300, "seed": 1}
+    g = genotypes.get(spec)
+    kin = kinship.get(spec, snps=slice(0, 2500))
+    T = g.G[:, 2500:]
+    T = np.where(np.isnan(T), np.nanmean(T, axis=0), T)
+    T = T[:, T.std(axis=0) > 0][:, :5]
+    for h2, seed in ((0.3, 0), (0.8, 1)):
+        y = phenotypes.simulate(kin, h2, np.random.default_rng(seed)).y
+        _check_matches_pylmm(y, kin, None, T)
+
+
+def test_pylmm_convention_reproduces_example_null_failures():
+    """The example_null replicates where pylmm stopped at h = 0.99 while the
+    textbook oracle found h > 0.99 (n=200, h2=0.5, reps 1 and 15).  With
+    h_grid='pylmm' the oracle reproduces pylmm's 0.99 (the optimizer, not the
+    eigenvalue clamp, is responsible: the clamped fine search still goes
+    above 0.99)."""
+    from sims import phenotypes, runner
+    from sims.studies import example_null as ex
+    params = {"n": 200, "h2": 0.5, "m_kin": 2000, "m_test": 2000, "geno_seed": 1}
+    spec = {"source": "unrelated", "n": 200, "m": 4000, "seed": 1}
+    kin = kinship.get(spec, snps=slice(0, 2000))
+    G = genotypes.get(spec).G[:, 2000:2003]
+    reproduced = 0
+    for rep in (1, 15):
+        rng = np.random.default_rng(runner.task_seed(ex.NAME, params, rep))
+        y = phenotypes.simulate(kin, 0.5, rng).y
+        _check_matches_pylmm(y, kin, None, G)
+        fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
+        if fine.h > 0.99:       # true on the numpy the full run used
+            reproduced += 1
+            assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
+    if np.lib.NumpyVersion(np.__version__) >= "2.0.0":
+        assert reproduced == 2
+
+
+def test_sigma_conventions():
+    y, kin, X0, x = _rank_deficient_problem(1)
+    n, p = X0.shape
+    f = oracle.fit(y, kin.K, X0, reml=False)
+    assert f.sigma2 == f.sigma2_ml and f.sigma2_kind.startswith("ml")
+    np.testing.assert_allclose(f.sigma2_reml / f.sigma2_ml, n / (n - p))
+    fr = oracle.fit(y, kin.K, X0, reml=True)
+    assert fr.sigma2 == fr.sigma2_reml
+    wt = oracle.wald(y, kin.K, x, X0=X0, null_reml=False, h=f.h)
+    wp = oracle.wald(y, kin.K, x, X0=X0, null_reml=False, h=f.h, sigma_convention="pylmm")
+    # textbook ML uses Q/n, pylmm Q/(n-q): t differs by sqrt(n/(n-q))
+    np.testing.assert_allclose(wt.t / wp.t, np.sqrt(n / (n - p - 1)), rtol=1e-10)
+    assert wt.df == wp.df == n - p - 1
+    with pytest.raises(ValueError):
+        oracle.wald(y, kin.K, x, sigma_convention="other")
+    with pytest.raises(ValueError):
+        oracle.fit(y, kin.K, h_grid="coarse")
