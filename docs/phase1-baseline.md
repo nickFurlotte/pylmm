@@ -155,6 +155,10 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
      lmm.py:110, or the `Ls.fit()` / `L.fit(X=…)` calls at lmm.py:134, 136, 145.
    - The missing-genotype branch at pylmmGWAS.py:265 does pass `REML`, so the
      two branches are inconsistent.
+   **Status: fixed in Phase 5.2** (REML is the explicit default everywhere;
+   `--REML` is a no-op and `--ML` / `REML=False` fit and test by ML; the
+   `--refit` and `--removeMissingGenotypes` goldens were regenerated, see
+   tests/golden/README.md).
 2. **`getMax` off by one** (lmm.py:292): `range(1, n-2)` never tests grid index
    n-2, so a local maximum at h=0.98 is missed and the code falls back to the
    endpoints.
@@ -172,9 +176,12 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
    `log(2) + logsf`. This path is unused.
 6. **`--kfile2` is broken:** `LMM_withK2` and `optW` are undefined anywhere
    (pylmmGWAS.py:220, 227, 260), so the option raises NameError.
+   **Status: fixed in Phase 5.2** (the option is removed).
 7. **`--eigen` cannot read what pylmmKinship writes.** pylmmGWAS.py:211-212 runs
    `np.load(<base>.Kva/.Kve)` (binary .npy, capitalised). pylmmKinship.py:110-111
    writes text `<out>.kva/.kve` with `np.savetxt`.
+   **Status: fixed in Phase 5.2** (`--eigen` reads `<base>.kva/.kve` text or
+   a `.npz` from the new `pylmmKinship --eigenNpz`, and checks it against K).
 8. **Kinship normalisation differs between the two implementations.**
    - `lmm.calculateKinship` (lmm.py:54-60) mean-imputes first, then
      standardises by the variance of the imputed column.
@@ -187,23 +194,36 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
 9. **`sigma` is not the ML estimate under ML.** lmm.py:244 always uses
    Q/(N-q). The LL uses Q/N internally, but the reported sigma and the t-stat
    use N-q in both modes.
+   **Status: fixed in Phase 5.2 for the ML test** (`association(REML=False)`
+   uses Q/N); the sigma that `fit()` reports is unchanged (Phase 6.3).
 10. **Phenotype/fam misalignment.** `input.getPhenos` (input.py:211-214)
     silently skips fam individuals missing from the pheno file. The phenotype
     vector then no longer lines up with K or the genotypes, and nothing raises
     an error.
+    **Status: fixed in Phase 5.2** (pheno and covariate files are matched by
+    ID; absent individuals are missing, with a warning; no match or a
+    duplicate ID is an error).
 11. **All-missing SNP.** `input.normalizeGenotype` (input.py:181) returns an
     empty array for a SNP with every genotype missing, which causes a shape
     error downstream.
+    **Status: fixed in Phase 5.2** (nan for that SNP in both CLIs and
+    `GWAS`; pylmmKinship and `calculateKinship` skip it).
 12. **Caller's array changed in place.** `LMM.__init__` (lmm.py:208-210) clamps
     the caller's `Kva` array in place.
+    **Status: fixed in Phase 5.2** (also `calculateKinship`'s `W`).
 13. **Inconsistent zero-variance filters in pylmmGWAS.** The missing-genotype
     branch uses `xs.var() <= 1e-6` (line 247); the complete branch uses
     `x.var() == 0` (line 269).
+    **Status: fixed in Phase 5.2** (one QR-based `lmm.snp_estimable` check
+    in `GWAS` and both CLI branches).
 14. **Crash instead of a usage error** (pylmmGWAS.py:117). If there is no
     `.phenos` file and no `--emmaPHENO`, `os.path.isfile(None)` raises
     TypeError rather than printing the intended `parser.error`.
+    **Status: fixed in Phase 5.2.**
 15. **Inconsistent return types.** `lmm.GWAS` returns lists normally but numpy
     arrays when `len(Y)==0` (lmm.py:107).
+    **Status: fixed in Phase 5.2** (always lists); the array shapes that
+    `fit` and `association(returnBeta=True)` return are unchanged.
 16. **`--kfile` is read silently and unchecked** (pylmmGWAS.py:163-171).
     `np.fromfile(sep=" ")` stops at the first token it cannot parse (for
     example a `#` header line), and `K.resize((n, n))` then zero-fills

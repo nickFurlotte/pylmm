@@ -484,30 +484,32 @@ The machine-readable version is
 S4's ledger, with impacts updated from the full runs; 19–25 are new from S5.
 Phase 5 means behaviour and robustness; Phase 6.3 means numerics, where the
 fix changes results. Its `status` column marks the fixed items (4 and 16:
-fixed in Phase 5.1). The measured impacts are the pre-fix ones.
+fixed in Phase 5.1; 1, 6, 7, 10–14 and 19–24 fixed, 9 fixed for the ML
+test and 15 partly fixed in Phase 5.2). The measured impacts are the pre-fix
+ones.
 
 | # | issue | verdict | severity | measured impact | path | phase |
 |---|---|---|---|---|---|---|
 | 4 | Brent unbounded above h = 1 (**fixed in Phase 5.1**) | CONFIRMED | **high** | scipy ≥ 1.11: crash in S1 25/2,000, S2 68/3,984, S3 14/7,040; up to 12.5% per cell; per-SNP refit 0.25–2.8% of SNPs. scipy < 1.11: no crash; correct REML ĥ (90/95 replayed fits), ĥ = 1.002–1.035 with nan LL for unbounded ML (5/95) | every null fit and refit | **5** |
 | 16 | `--kfile` read unchecked (**fixed in Phase 5.1**) | CONFIRMED | **high** | wrong-size K accepted, exit 0 (6/6); a headered K becomes all zeros on numpy < 2.3 | CLI `--kfile` | **5** |
-| 21 | K not validated (order, symmetry, PSD, nan) — new | CONFIRMED | high | permuted K: Δĥ up to 0.78, corr(t) < 0.9, no warning | `LMM`; CLI | 5 |
-| 20 | saturated design (n ≤ q+1) gives finite t — new | CONFIRMED | high | 8–20 of 20 SNPs, every replicate | `LMM`/`GWAS` | 5 |
-| 1 | null fit always REML; `REML=` only reaches the Wald step | CONFIRMED | medium | default path: CLI ≡ REML (25/25 S1 cells), max \|Δt\| 0.039 vs ML Wald; `--removeMissingGenotypes`: t off by 2–10% | CLI default; `GWAS(REML=False)`; `--refit` | 5 (needs a decision) |
+| 21 | K not validated (order, symmetry, PSD, nan) — new (**fixed in Phase 5.2**; order only via the library's optional `ids`/`K_ids`) | CONFIRMED | high | permuted K: Δĥ up to 0.78, corr(t) < 0.9, no warning | `LMM`; CLI | 5 |
+| 20 | saturated design (n ≤ q+1) gives finite t — new (**fixed in Phase 5.2**) | CONFIRMED | high | 8–20 of 20 SNPs, every replicate | `LMM`/`GWAS` | 5 |
+| 1 | null fit always REML; `REML=` only reaches the Wald step (**fixed in Phase 5.2**) | CONFIRMED | medium | default path: CLI ≡ REML (25/25 S1 cells), max \|Δt\| 0.039 vs ML Wald; `--removeMissingGenotypes`: t off by 2–10% | CLI default; `GWAS(REML=False)`; `--refit` | 5 (needs a decision) |
 | 3 | h grid stops at 0.99 (also `fitTwo`) | CONFIRMED | medium | ĥ = 0.99 for every well-identified fit at h² = 1 (S2); 38–46% of fits at h² 0.95–0.99; max Δ−log10 p 0.81 (BED h² = 0.99) | every null fit; `misc.fitTwo` | 6.3 |
-| 10 | `getPhenos` skips individuals | CONFIRMED | medium | CLI crashes; a silent row shift only for library callers | CLI; `input.plink` | 5 |
-| 11 | all-missing SNP gives an empty array | CONFIRMED | medium | the whole scan aborts (6/6) | `GWAS`; CLIs | 5 |
+| 10 | `getPhenos` skips individuals (**fixed in Phase 5.2**) | CONFIRMED | medium | CLI crashes; a silent row shift only for library callers | CLI; `input.plink` | 5 |
+| 11 | all-missing SNP gives an empty array (**fixed in Phase 5.2**) | CONFIRMED | medium | the whole scan aborts (6/6) | `GWAS`; CLIs | 5 |
 | 17 | ML unbounded, centred GRM with m > n | NOT A BUG (property) | medium | pylmm ML ĥ up to +0.16 vs REML (S4), ≈ +0.03 on average (S2, h² ≤ 0.95); 33–52% of ML fits at 0.99 | ML paths only | 6.3 |
-| 19 | non-estimable SNP gets t ≈ 0, not nan — new | CONFIRMED | medium | \|t\| ≤ 1e-6, 17–100% of replicates | `GWAS`; CLI | 5 |
-| 22 | constant phenotype gives h = 0.99, σ ≈ 0, or a crash — new | CONFIRMED | medium | 50–67% of replicates give finite numbers | `LMM`; CLI | 5 |
-| 23 | collinear covariates give a bare `LinAlgError` — new | CONFIRMED | medium | crash, no message about covariates (6/6) | `LMM`; CLI | 5 |
+| 19 | non-estimable SNP gets t ≈ 0, not nan — new (**fixed in Phase 5.2**) | CONFIRMED | medium | \|t\| ≤ 1e-6, 17–100% of replicates | `GWAS`; CLI | 5 |
+| 22 | constant phenotype gives h = 0.99, σ ≈ 0, or a crash — new (**fixed in Phase 5.2**) | CONFIRMED | medium | 50–67% of replicates give finite numbers | `LMM`; CLI | 5 |
+| 23 | collinear covariates give a bare `LinAlgError` — new (**fixed in Phase 5.2**) | CONFIRMED | medium | crash, no message about covariates (6/6) | `LMM`; CLI | 5 |
 | 2 | `getMax` skips grid index 98 | CONFIRMED | low | 99% of fits return 0.99 at true h² = 0.98 (S2); \|Δh\| ≤ 0.01 | every null fit | 6.3 (with 3) |
 | 8 | two kinship normalisations; denominator | CONFIRMED | low | Δĥ +0.017 (hmdp), +0.06 at 25% monomorphic; t and p unchanged under rescaling | `calculateKinship`, `pylmmKinship` | 6.3 |
-| 6, 7 | `--kfile2` NameError; `--eigen` cannot read pylmmKinship output | CONFIRMED | low | crash 100% when used | CLI | 5 |
-| 12, 14 | in-place mutation; no pheno file gives TypeError | CONFIRMED | low | caller arrays changed; a traceback instead of a usage message | API; CLI | 5 |
-| 24 | non-finite inputs not validated — new | CONFIRMED | low | scipy error with no context; inf y gives all nan silently | API | 5 |
+| 6, 7 | `--kfile2` NameError; `--eigen` cannot read pylmmKinship output (**fixed in Phase 5.2**) | CONFIRMED | low | crash 100% when used | CLI | 5 |
+| 12, 14 | in-place mutation; no pheno file gives TypeError (**fixed in Phase 5.2**) | CONFIRMED | low | caller arrays changed; a traceback instead of a usage message | API; CLI | 5 |
+| 24 | non-finite inputs not validated — new (**fixed in Phase 5.2**) | CONFIRMED | low | scipy error with no context; inf y gives all nan silently | API | 5 |
 | 25 | badly scaled covariates warn — new | CONFIRMED | low | answers correct to 1e-7; `LinAlgWarning` only | `getMLSoln` | 6.3 |
-| 9 | ML σ² = Q/(n−q) | CONVENTION | cosmetic | t ratio √(n/(n−p)) = 1.0034 at n = 300 | `association(REML=False)` | 6.3 (document) |
-| 13, 15 | zero-variance filters differ; return types | CONFIRMED | cosmetic | no numeric effect on BED coding; list vs ndarray | CLI; API | 5 |
+| 9 | ML σ² = Q/(n−q) (**fixed in Phase 5.2** for the ML test; `fit()`'s σ unchanged) | CONVENTION | cosmetic | t ratio √(n/(n−p)) = 1.0034 at n = 300 | `association(REML=False)` | 6.3 (document) |
+| 13, 15 | zero-variance filters differ; return types (13 **fixed**, 15 **partly fixed in Phase 5.2**) | CONFIRMED | cosmetic | no numeric effect on BED coding; list vs ndarray | CLI; API | 5 |
 | 5 | `tstat(log=True)` adds 2 instead of log 2 | UNREACHABLE | cosmetic | 1.307 in log p; no caller | none | 6.3 |
 | 18 | λ_GC 1.3–4.9 on BED | NOT A BUG | none | pooled t1e 0.038–0.055 vs 0.049–0.058 for the exact test | study design | – |
 
@@ -579,16 +581,18 @@ test inverted.
 * Phase 5:
   * done in Phase 5.1, now regression tests: `test_bug4_fit_with_peak_near_one`
     and `test_bug16_wrong_size_kinship_rejected`
-  * `test_bug10_absent_individuals_treated_as_missing`
-  * `test_bug11_cli_gwas_all_missing_snp`
-  * `test_bug11_cli_kinship_all_missing_snp`
-  * `test_bug1_gwas_ml_equals_textbook_ml_wald` (with `--ML`)
-  * `test_bug6_kfile2`
-  * `test_bug7_eigen_reads_pylmmkinship_output`
-  * `test_bug12_lmm_does_not_mutate_kva`
-  * `test_bug12_calculatekinship_does_not_mutate_w`
-  * `test_bug14_no_pheno_file_is_a_usage_error`
-  * `test_bug15_gwas_return_type_consistent`
+  * done in Phase 5.2, now regression tests (the matching
+    `test_bugN_current_*` tests were inverted):
+    `test_bug10_absent_individuals_treated_as_missing`,
+    `test_bug11_cli_gwas_all_missing_snp`,
+    `test_bug11_cli_kinship_all_missing_snp`,
+    `test_bug1_gwas_ml_equals_textbook_ml_wald` (plus `test_bug1_cli_ml_flag`
+    for `--ML`), `test_bug6_kfile2_removed`,
+    `test_bug7_eigen_reads_pylmmkinship_output`,
+    `test_bug12_lmm_does_not_mutate_kva`,
+    `test_bug12_calculatekinship_does_not_mutate_w`,
+    `test_bug14_no_pheno_file_is_a_usage_error`,
+    `test_bug15_gwas_return_type_consistent`
 * Phase 6.3:
   * `test_bug2_getmax_finds_peak_at_098`
   * `test_bug3_h_search_reaches_one`
@@ -597,7 +601,8 @@ test inverted.
   * `test_bug8_monomorphic_snps_do_not_change_k`
   * `test_bug8_two_kinships_agree_with_missing_data`
 
-New Phase 5 tests to write. Each is from S5
+New Phase 5 tests to write (items 2–6 and 8–10 done in Phase 5.2, in
+`tests/test_input_validation.py` and the S4 file). Each is from S5
 ([`s5_edge_cases.md`](../sims/studies/s5_edge_cases.md), §"Phase 5 robustness
 targets"), and each has an exact cell in `s5_edge_cases/summary.csv`.
 

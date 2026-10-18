@@ -808,7 +808,13 @@ LEDGER = [
 
 
 # fix status by id (not listed: "open", or "-" for NOT A BUG); impacts above are pre-fix
-STATUS = {"4": "fixed in Phase 5.1", "16": "fixed in Phase 5.1"}
+STATUS = {"4": "fixed in Phase 5.1", "16": "fixed in Phase 5.1",
+          **{i: "fixed in Phase 5.2" for i in ("1", "6", "7", "10", "11", "12", "13", "14",
+                                                "19", "20", "22", "23", "24")},
+          "9": "fixed in Phase 5.2 for the ML test (--ML / REML=False use Q/n); fit()'s reported sigma unchanged",
+          "15": "partly fixed in Phase 5.2 (GWAS always returns lists); fit/association shapes open",
+          "21": "fixed in Phase 5.2 (nan/shape errors, asymmetry and non-PSD warnings, optional ids/K_ids "
+                "check in the library); a CLI --kfile has no IDs, so its order cannot be checked"}
 
 
 def ledger():
