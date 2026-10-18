@@ -1,0 +1,27 @@
+kind,ktype,band,method,fits,lostmode_201,lostmode_099,nonglobal_099
+main,bed,h2<=0.95,ML,671,0,0,4
+main,bed,h2<=0.95,REML,671,0,0,5
+main,bed,h2=0.98,ML,89,0,0,88
+main,bed,h2=0.98,REML,89,0,0,88
+main,bed,h2=0.99,ML,96,0,0,12
+main,bed,h2=0.99,REML,96,0,0,13
+main,bed,h2=1,ML,96,0,0,0
+main,bed,h2=1,REML,96,0,0,0
+main,synthetic m<n,h2<=0.95,ML,1004,0,0,3
+main,synthetic m<n,h2<=0.95,REML,1004,0,0,4
+main,synthetic m<n,h2=0.98,ML,130,0,0,129
+main,synthetic m<n,h2=0.98,REML,130,0,0,129
+main,synthetic m<n,h2=0.99,ML,144,0,0,14
+main,synthetic m<n,h2=0.99,REML,144,0,0,14
+main,synthetic m<n,h2=1,ML,144,0,0,0
+main,synthetic m<n,h2=1,REML,144,0,0,0
+main,synthetic m>n,h2<=0.95,ML,992,225,16,35
+main,synthetic m>n,h2<=0.95,REML,992,0,0,10
+main,synthetic m>n,h2=0.98,ML,135,11,2,2
+main,synthetic m>n,h2=0.98,REML,135,0,0,5
+main,synthetic m>n,h2=0.99,ML,136,5,1,1
+main,synthetic m>n,h2=0.99,REML,136,0,0,9
+main,synthetic m>n,h2=1,ML,137,9,3,5
+main,synthetic m>n,h2=1,REML,137,0,0,6
+probe,probe,all,ML,142,79,20,28
+probe,probe,all,REML,142,0,0,1

@@ -3,3 +3,6 @@ data/*
 .pytest_cache/
 __pycache__/
 .venv/
+# Phase 4 simulation raw results and --quick reports (commit only summaries)
+sims/results/**/raw/
+sims/results/**/quick/

@@ -1,0 +1,19 @@
+bug,name,verdict,severity,affected,phase
+1,null fit always REML; --REML no-op on default path,CONFIRMED,medium,CLI default + lmm.GWAS(REML=False); CLI --refit/--removeMissingGenotypes use ML,5
+2,"getMax range(1, n-2) skips grid index 98",CONFIRMED,low,every null fit,6.3
+3,h grid capped at 0.99 (and fitTwo w grid),CONFIRMED,medium,every null fit at high h2; misc.fitTwo,6.3
+4,unbounded Brent above h = 1,CONFIRMED,high,"every null fit and refit at high h2: crash on scipy >= 1.11; on scipy < 1.11 correct, except h > 1 (LL nan) when the ML profile is unbounded",5
+5,tstat(log=True) adds 2.0 not log 2,UNREACHABLE,cosmetic,no caller,6.3
+6,--kfile2 NameError,CONFIRMED,low,CLI --kfile2 only,5
+7,--eigen cannot read pylmmKinship output,CONFIRMED,low,CLI --eigen only,5
+8,kinship normalisation / denominator,CONFIRMED,low,"lmm.calculateKinship, pylmmKinship",6.3
+9,ML sigma uses Q/(n-q),CONVENTION,cosmetic,association(REML=False),6.3
+10,getPhenos drops individuals missing from the pheno file,CONFIRMED,medium,CLI whenever the pheno/cov file lacks a fam individual (crash),5
+11,all-missing SNP returns an empty array,CONFIRMED,medium,CLI GWAS + pylmmKinship (crash),5
+12,LMM mutates caller's Kva; calculateKinship mutates W,CONFIRMED,low,library API,5
+13,inconsistent zero-variance filters,CONFIRMED,cosmetic,CLI,5
+14,crash without a pheno file,CONFIRMED,low,CLI usage error,5
+15,inconsistent return types; 1x1 arrays,CONFIRMED,cosmetic,library API,5
+16,headered / wrong-size --kfile read silently,CONFIRMED,high,CLI --kfile (numpy < 2.3; size mismatch on all),5
+17,ML unbounded as h -> 1 with centred GRM,NOT A BUG,medium,"ML paths: fit(REML=False), CLI --refit / --removeMissingGenotypes",6.3
+18,lambda_GC 1.3-4.9 on BED genotypes,NOT A BUG,none,"study design (LD, few effective tests)",-

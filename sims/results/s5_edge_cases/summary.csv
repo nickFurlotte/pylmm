@@ -1,0 +1,162 @@
+family,variant,path,knobs,ideal,outcome,frac,severity,crash_err,warn,n_nan_unexp,n_finite_unexp,max_abs_dh,max_dt,dh_ref,runtime_s,reps
+missing,mcar,cli_remove,"gm=0.01, pm=0.2",result,wrong,1.0,critical,,,0.0,0.0,0.0004986219640334966,0.04281737810005448,,1.076,6
+missing,mcar,lib,"gm=0.2, pm=0.2",result,wrong,0.17,critical,,,0.0,0.0,4.572011680359367e-08,0.0021862859128359002,,0.114,6
+smalln,n_k,lib,"n=10, k=9",error_or_nan,wrong,1.0,critical,,RuntimeWarning: divide by zero encountered in divide,0.0,17.0,,,,0.025,6
+smalln,n_k,lib,"n=10, k=12",error_or_nan,wrong,1.0,critical,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 1.0204480479401271e-17.,0.0,18.0,,,,0.019,6
+smalln,n_k,lib,"n=20, k=19",error_or_nan,wrong,1.0,critical,,RuntimeWarning: divide by zero encountered in divide,0.0,16.0,,,,0.016,6
+smalln,n_k,lib,"n=20, k=22",error_or_nan,wrong,1.0,critical,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 1.2500298141467246e-19.,0.0,15.0,,,,0.018,6
+smalln,n_k,lib,"n=50, k=49",error_or_nan,wrong,1.0,critical,,RuntimeWarning: divide by zero encountered in divide,0.0,9.0,,,,0.036,6
+pheno,constant,lib,,error_or_nan,wrong,0.5,critical,null fit: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points. | GWAS: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points.,RuntimeWarning: invalid value encountered in log,0.0,0.0,,,,0.054,6
+pheno,constant,cli_impute,,error_or_nan,wrong,0.67,critical,scipy.optimize._optimize.BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points.,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:250: RuntimeWarning: invalid value e,0.0,0.0,,,,1.174,6
+io,kfile_big,cli_impute,,error_or_nan,wrong,1.0,critical,,,0.0,0.0,,,,1.491,6
+io,kfile_small,cli_impute,,error_or_nan,wrong,1.0,critical,,,0.0,0.0,,,,1.558,6
+missing,mcar,cli_remove,"gm=0.01, pm=0",result,wrong,0.83,high,,,0.0,0.0,0.0004985201816628537,0.05050046500243088,,1.064,6
+missing,mcar,cli_remove,"gm=0.05, pm=0",result,wrong,1.0,high,,,0.0,0.0,0.0004912005506638728,0.05917587450609613,,1.106,6
+missing,mcar,cli_remove,"gm=0.05, pm=0.2",result,wrong,1.0,high,,,0.0,0.0,0.00037575091396918614,0.049590764972811785,,1.143,6
+missing,mcar,cli_remove,"gm=0.2, pm=0",result,wrong,1.0,high,,,0.0,0.0,0.0004474746657613382,0.05730301136273086,,1.197,6
+missing,mcar,cli_remove,"gm=0.2, pm=0.2",result,wrong,1.0,high,,,0.0,0.0,0.00041920808783829644,0.09989364212115459,,1.181,6
+missing,mcar,cli_remove,"gm=0.5, pm=0",result,wrong,1.0,high,,,0.0,0.0,0.00046606697519901985,0.07586065277111337,,1.208,6
+missing,mcar,cli_remove,"gm=0.5, pm=0.2",result,wrong,1.0,high,,,0.0,0.0,0.00045094912932558406,0.062702374240823,,1.036,6
+degenerate,eq_cov_x2,cli_remove,,result,wrong,0.5,high,numpy.linalg.LinAlgError: A singular matrix detected: slice(s) [0] are singular.,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,0.0,1.0,0.00046196311407487034,3.359377309664069e-08,,1.08,6
+kin,nonpsd,lib,noise=0.3,warn_or_error,wrong,0.33,high,,,0.0,0.0,,,0.12723253562538006,0.011,6
+kin,wrong_order,lib,,warn_or_error,wrong,1.0,high,,,0.0,0.0,3.601386167062515e-08,6.719726530768355e-08,0.7831920587771757,0.011,6
+kin,upper_only,lib,,warn_or_error,wrong,1.0,high,,,0.0,0.0,,,0.36723613191013316,0.01,6
+degenerate,allmiss,lib,,result,crash,1.0,high,GWAS: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,RuntimeWarning: Degrees of freedom <= 0 for slice,,,,,,0.018,6
+degenerate,allmiss,lib_impute,,result,crash,1.0,high,GWAS: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,RuntimeWarning: Degrees of freedom <= 0 for slice,,,,,,0.012,6
+degenerate,allmiss,cli_impute,,result,crash,1.0,high,IndexError: boolean index did not match indexed array along axis 0; size of axis is 0 but size of corresponding boolean axis is 100,,,,,,,1.192,6
+smalln,n_k,lib,"n=20, k=2",result,crash,0.17,high,null fit: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points. | GWAS: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points.,RuntimeWarning: invalid value encountered in log,0.0,0.0,0.009999978025582834,1.5432223166023107e-08,,0.01,6
+degenerate,mono_dosage,lib,,result,wrong,0.67,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 2.291303693949728e-18.,0.0,1.0,5.4580203578957764e-08,7.586541236330879e-08,,0.016,6
+degenerate,mono_dosage,lib_impute,,result,wrong,1.0,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 9.497009641467282e-18.,0.0,1.0,4.811612752675387e-08,1.1423105611418904e-07,,0.012,6
+degenerate,mono_ydrop,cli_impute,,result,wrong,0.67,medium,,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,0.0,1.0,0.0003745550806357745,1.328326624250309e-07,,1.063,6
+degenerate,single_minor_ydrop,cli_impute,,result,wrong,0.17,medium,,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,0.0,1.0,0.00039310536198899904,1.1056068327519597e-07,,1.139,6
+degenerate,eq_cov,lib,,result,wrong,0.33,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 1.4810340004172456e-18.,0.0,1.0,2.9301370108036906e-08,4.689374460964402e-08,,0.013,6
+degenerate,eq_cov,lib_impute,,result,wrong,0.33,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 9.413088494386045e-18.,0.0,1.0,4.64171309166872e-08,5.952754684687084e-08,,0.012,6
+degenerate,eq_cov,cli_impute,,result,wrong,0.83,medium,,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,0.0,1.0,0.0003754851830246042,5.557187399141128e-08,,1.057,6
+degenerate,eq_cov,cli_remove,,result,wrong,0.33,medium,,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,0.0,1.0,0.0004955690520215827,4.5543730897712464e-08,,1.074,6
+degenerate,eq_cov_x2,lib,,result,wrong,0.5,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 1.0051774687221867e-17.,0.0,1.0,2.9560760617108883e-08,3.240542334470575e-08,,0.013,6
+degenerate,eq_cov_x2,lib_impute,,result,wrong,1.0,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 7.190824349521812e-34.,0.0,1.0,2.807362337042818e-08,6.00245467774485e-08,,0.014,6
+degenerate,eq_cov_x2,cli_impute,,result,wrong,0.67,medium,,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,0.0,1.0,0.000420093412998368,3.1273082512495165e-08,,1.08,6
+smalln,n_k,lib,"n=20, k=18",error_or_nan,wrong,0.17,medium,null fit: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points. | GWAS: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points.,RuntimeWarning: invalid value encountered in log,0.0,19.0,,,,0.117,6
+smalln,n_k,lib,"n=50, k=48",error_or_nan,wrong,0.33,medium,null fit: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points. | GWAS: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points.,RuntimeWarning: invalid value encountered in log,0.0,20.0,,,,0.263,6
+smalln,n_k,lib,"n=50, k=52",error_or_nan,wrong,1.0,medium,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 4.3377368311666797e-20.,0.0,17.0,,,,0.046,6
+smalln,n_k,lib,"n=10, k=8",error_or_nan,crash,1.0,medium,null fit: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points. | GWAS: BracketError: The algorithm terminated without finding a valid bracket. Consider trying different initial points.,RuntimeWarning: invalid value encountered in log,,,,,,0.106,6
+kin,nan_K,lib,,error_or_nan,crash,1.0,medium,null fit: ValueError: array must not contain infs or NaNs | GWAS: ValueError: array must not contain infs or NaNs,,,,,,,0.0,6
+cov,collinear_dup,lib,,result_or_error,crash,1.0,medium,null fit: LinAlgError: A singular matrix detected: slice(s) [0] are singular. | GWAS: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 3.7379619267312675e-18.,,,,,,0.004,6
+cov,collinear_dup,cli_impute,,result_or_error,crash,1.0,medium,numpy.linalg.LinAlgError: A singular matrix detected: slice(s) [0] are singular.,/Users/nfurlott/pylmm/pylmm1/.claude/worktrees/agent-a5d68f12dbec7751c/pylmm/lmm.py:220: LinAlgWarning: An ill-condition,,,,,,1.21,6
+cov,collinear_comb,lib,,result_or_error,crash,1.0,medium,null fit: LinAlgError: A singular matrix detected: slice(s) [0] are singular. | GWAS: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 6.2927983354696785e-18.,,,,,,0.004,6
+cov,intercept_dup,lib,,result_or_error,crash,1.0,medium,null fit: LinAlgError: A singular matrix detected: slice(s) [0] are singular. | GWAS: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,,,,,,,0.002,6
+cov,intercept_dup,cli_impute,,result_or_error,crash,1.0,medium,numpy.linalg.LinAlgError: A singular matrix detected: slice(s) [0] are singular.,,,,,,,1.068,6
+cov,zero_cov,lib,,result_or_error,crash,1.0,medium,null fit: LinAlgError: A singular matrix detected: slice(s) [0] are singular. | GWAS: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,,,,,,,0.002,6
+cov,zero_cov,cli_impute,,result_or_error,crash,1.0,medium,numpy.linalg.LinAlgError: A singular matrix detected: slice(s) [0] are singular.,,,,,,,0.949,6
+cov,cov_nan,lib,,error_or_nan,crash,1.0,medium,null fit: ValueError: array must not contain infs or NaNs | GWAS: ValueError: array must not contain infs or NaNs,,,,,,,0.002,6
+pheno,all_nan,lib,,error_or_nan,crash,1.0,medium,null fit: LinAlgError: A singular matrix detected: slice(s) [0] are singular.,,,,,,,0.0,6
+pheno,all_nan,cli_impute,,error_or_nan,crash,1.0,medium,numpy.linalg.LinAlgError: A singular matrix detected: slice(s) [0] are singular.,,,,,,,0.965,6
+io,nophenofile,cli_impute,,error_or_nan,crash,1.0,medium,"TypeError: stat: path should be string, bytes, os.PathLike or integer, not NoneType",,,,,,,0.913,6
+io,pheno_missing_indiv,cli_impute,,error_or_nan,crash,1.0,medium,IndexError: boolean index did not match indexed array along axis 0; size of axis is 100 but size of corresponding boolean axis is 99,,,,,,,1.146,6
+io,kfile_header,cli_impute,,error_or_nan,crash,1.0,medium,ValueError: string or file could not be read to its end due to unmatched data,,,,,,,1.507,6
+kin,nonpsd,lib,noise=0.1,warn_or_error,silent,1.0,medium,,,0.0,0.0,,,0.04382536000264381,0.011,6
+kin,asym,lib,,warn_or_error,silent,1.0,medium,,,0.0,0.0,,,0.0,0.015,6
+pheno,const_noise,lib,noise=1e-12,warn_or_error,silent,1.0,medium,,,0.0,0.0,,,,0.01,6
+cov,cov_scale,lib,scale=1e-08,result,OK,1.0,low,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 1.0515081268631239e-16.,0.0,0.0,3.225615419211181e-08,4.997061545108927e-08,,0.015,6
+cov,cov_scale,lib,scale=1e+08,result,OK,1.0,low,,LinAlgWarning: An ill-conditioned matrix detected: slice 0 has rcond = 7.962591289661038e-17.,0.0,0.0,2.6951057441326753e-08,5.753730292212822e-08,,0.014,6
+missing,mcar,lib,"gm=0, pm=0",result,OK,1.0,none,,,0.0,0.0,7.086597597627531e-08,9.646894627568514e-08,,0.012,6
+missing,mcar,lib_impute,"gm=0, pm=0",result,OK,1.0,none,,,0.0,0.0,3.165844819630337e-08,7.81318470213735e-08,,0.023,6
+missing,mcar,lib,"gm=0, pm=0.05",result,OK,1.0,none,,,0.0,0.0,4.549860743718881e-08,8.316977584410523e-08,,0.018,6
+missing,mcar,lib_impute,"gm=0, pm=0.05",result,OK,1.0,none,,,0.0,0.0,3.319618102626265e-08,3.875234949601847e-08,,0.018,6
+missing,mcar,lib,"gm=0, pm=0.2",result,OK,1.0,none,,,0.0,0.0,3.689533045747595e-08,3.654606339775768e-08,,0.013,6
+missing,mcar,lib_impute,"gm=0, pm=0.2",result,OK,1.0,none,,,0.0,0.0,5.8431830596283874e-08,7.453567490664185e-08,,0.011,6
+missing,mcar,cli_impute,"gm=0, pm=0",result,OK,1.0,none,,,0.0,0.0,0.00048210845870122476,7.657670919591908e-08,,1.159,6
+missing,mcar,cli_remove,"gm=0, pm=0",result,OK,1.0,none,,,0.0,0.0,0.0003071147933876306,6.930685236827827e-08,,1.262,6
+missing,mcar,cli_impute,"gm=0, pm=0.2",result,OK,1.0,none,,,0.0,0.0,0.00047823658021219073,3.31056606295288e-08,,1.274,6
+missing,mcar,cli_remove,"gm=0, pm=0.2",result,OK,1.0,none,,,0.0,0.0,0.00045118131524846117,7.589295051586769e-08,,1.054,6
+missing,mcar,lib,"gm=0.01, pm=0",result,OK,1.0,none,,,0.0,0.0,3.154960503959359e-08,9.92873104843639e-08,,0.097,6
+missing,mcar,lib_impute,"gm=0.01, pm=0",result,OK,1.0,none,,,0.0,0.0,2.889778283332589e-08,6.482765346760289e-08,,0.012,6
+missing,mcar,lib,"gm=0.01, pm=0.05",result,OK,1.0,none,,,0.0,0.0,3.867858894279763e-08,5.820283295305516e-08,,0.062,6
+missing,mcar,lib_impute,"gm=0.01, pm=0.05",result,OK,1.0,none,,,0.0,0.0,5.847954098747721e-08,8.278179663978591e-08,,0.014,6
+missing,mcar,lib,"gm=0.01, pm=0.2",result,OK,1.0,none,,,0.0,0.0,3.7022100829453564e-08,4.5383777985685825e-08,,0.077,6
+missing,mcar,lib_impute,"gm=0.01, pm=0.2",result,OK,1.0,none,,,0.0,0.0,4.2989676679594524e-08,6.217736401789575e-08,,0.013,6
+missing,mcar,cli_impute,"gm=0.01, pm=0",result,OK,1.0,none,,,0.0,0.0,0.000491043358804899,6.572628502343706e-08,,1.16,6
+missing,mcar,cli_impute,"gm=0.01, pm=0.2",result,OK,1.0,none,,,0.0,0.0,0.00033532682720793794,7.106414245949821e-08,,1.003,6
+missing,mcar,lib,"gm=0.05, pm=0",result,OK,1.0,none,,,0.0,0.0,4.052546809241164e-08,7.979722782547327e-08,,0.131,6
+missing,mcar,lib_impute,"gm=0.05, pm=0",result,OK,1.0,none,,,0.0,0.0,2.5675183368267795e-08,3.6789135037261885e-08,,0.013,6
+missing,mcar,lib,"gm=0.05, pm=0.05",result,OK,1.0,none,,,0.0,0.0,3.641687507105473e-08,5.776658371392452e-08,,0.117,6
+missing,mcar,lib_impute,"gm=0.05, pm=0.05",result,OK,1.0,none,,,0.0,0.0,3.856269092938902e-08,4.635605943548171e-08,,0.013,6
+missing,mcar,lib,"gm=0.05, pm=0.2",result,OK,1.0,none,,,0.0,0.0,3.5288183375392634e-08,4.5663140102458755e-08,,0.102,6
+missing,mcar,lib_impute,"gm=0.05, pm=0.2",result,OK,1.0,none,,,0.0,0.0,3.9419035813281766e-08,4.340502802319124e-08,,0.011,6
+missing,mcar,cli_impute,"gm=0.05, pm=0",result,OK,1.0,none,,,0.0,0.0,0.000479834261769313,7.692951098370315e-08,,1.011,6
+missing,mcar,cli_impute,"gm=0.05, pm=0.2",result,OK,1.0,none,,,0.0,0.0,0.0004628977708499571,3.126471602747302e-08,,1.24,6
+missing,mcar,lib,"gm=0.2, pm=0",result,OK,1.0,none,,,0.0,0.0,6.745293995580326e-08,9.31510146795489e-08,,0.116,6
+missing,mcar,lib_impute,"gm=0.2, pm=0",result,OK,1.0,none,,,0.0,0.0,2.5503333223042546e-08,2.9255545583372066e-08,,0.012,6
+missing,mcar,lib,"gm=0.2, pm=0.05",result,OK,1.0,none,,,0.0,0.0,2.9866885409290944e-08,4.535236552971611e-08,,0.111,6
+missing,mcar,lib_impute,"gm=0.2, pm=0.05",result,OK,1.0,none,,,0.0,0.0,3.4988862418483535e-08,3.9662459858091914e-08,,0.011,6
+missing,mcar,lib_impute,"gm=0.2, pm=0.2",result,OK,1.0,none,,,0.0,0.0,2.8789744699331266e-08,3.410684281465284e-08,,0.015,6
+missing,mcar,cli_impute,"gm=0.2, pm=0",result,OK,1.0,none,,,0.0,0.0,0.0004929525086433961,5.285823057032957e-08,,0.979,6
+missing,mcar,cli_impute,"gm=0.2, pm=0.2",result,OK,1.0,none,,,0.0,0.0,0.004267666035988975,0.012388402471115945,,0.996,6
+missing,mcar,lib,"gm=0.5, pm=0",result,OK,1.0,none,,,0.0,0.0,3.2369890157202263e-08,2.9125447886801936e-08,,0.135,6
+missing,mcar,lib_impute,"gm=0.5, pm=0",result,OK,1.0,none,,,0.0,0.0,4.344280818413537e-08,8.507421950243454e-08,,0.013,6
+missing,mcar,lib,"gm=0.5, pm=0.05",result,OK,1.0,none,,,0.0,0.0,1.7569650512250234e-08,5.8195164687191436e-08,,0.104,6
+missing,mcar,lib_impute,"gm=0.5, pm=0.05",result,OK,1.0,none,,,0.0,0.0,3.166428891310247e-08,3.329747756316628e-08,,0.011,6
+missing,mcar,lib,"gm=0.5, pm=0.2",result,OK,1.0,none,,,0.0,0.0,3.6714411288940596e-08,5.5738733073518176e-08,,0.098,6
+missing,mcar,lib_impute,"gm=0.5, pm=0.2",result,OK,1.0,none,,,0.0,0.0,5.711792083751277e-08,7.352594089127251e-08,,0.011,6
+missing,mcar,cli_impute,"gm=0.5, pm=0",result,OK,1.0,none,,,0.0,0.0,0.00048178477564281286,6.8056523083726e-08,,0.965,6
+missing,mcar,cli_impute,"gm=0.5, pm=0.2",result,OK,1.0,none,,,0.0,0.0,0.00047550626177234045,3.60088640016798e-08,,1.001,6
+degenerate,mono,lib,,result,OK,1.0,none,,,0.0,0.0,3.0846660781236324e-08,5.622410981231951e-08,,0.014,6
+degenerate,mono,lib_impute,,result,OK,1.0,none,,,0.0,0.0,5.6824181637882276e-08,1.1747496742042784e-07,,0.011,6
+degenerate,mono,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.0004581952627360497,4.885478650140975e-08,,1.119,6
+degenerate,mono,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.00046321702644669394,1.2316033326520426e-07,,1.048,6
+degenerate,mono_ydrop,lib,,result,OK,1.0,none,,,0.0,0.0,5.346496584346383e-08,7.760882048124529e-08,,0.011,6
+degenerate,mono_ydrop,lib_impute,,result,OK,1.0,none,,,0.0,0.0,4.562490918402773e-08,5.425511664935989e-08,,0.012,6
+degenerate,mono_ydrop,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.0003950227333123779,5.3345356992862136e-08,,1.102,6
+degenerate,mono_xdrop,lib,,result,OK,1.0,none,,,0.0,0.0,3.4446747843031034e-08,7.144966474026404e-08,,0.012,6
+degenerate,mono_xdrop,lib_impute,,result,OK,1.0,none,,,0.0,0.0,7.569527249451369e-08,1.2891851236540575e-07,,0.012,6
+degenerate,mono_xdrop,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.00038334658632688257,2.6676754583121465e-08,,1.172,6
+degenerate,mono_xdrop,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.00047957626260630715,4.0700384413422386e-08,,1.022,6
+degenerate,allmiss,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.0004876413892722642,5.82418923922301e-08,,1.045,6
+degenerate,single_minor,lib,,result,OK,1.0,none,,,0.0,0.0,4.560912547635354e-08,5.059363974990738e-08,,0.012,6
+degenerate,single_minor,lib_impute,,result,OK,1.0,none,,,0.0,0.0,2.849803774906956e-08,5.428244537197813e-08,,0.019,6
+degenerate,single_minor,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.0004029256877917109,5.739019226513875e-08,,1.111,6
+degenerate,single_minor,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.0003969139532347121,5.307592776393477e-08,,1.027,6
+degenerate,single_minor_ydrop,lib,,result,OK,1.0,none,,,0.0,0.0,3.6791926671941866e-08,8.804445328358668e-08,,0.011,6
+degenerate,single_minor_ydrop,lib_impute,,result,OK,1.0,none,,,0.0,0.0,4.111191043154605e-08,4.524822934393047e-08,,0.011,6
+degenerate,single_minor_ydrop,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.0004171260244261177,5.8645595130135675e-08,,0.997,6
+degenerate,eq_intercept,lib,,result,OK,1.0,none,,,0.0,0.0,4.1352168966835023e-08,1.1335642590565298e-07,,0.011,6
+degenerate,eq_intercept,lib_impute,,result,OK,1.0,none,,,0.0,0.0,4.7386577994856793e-08,6.789272327707166e-08,,0.012,6
+degenerate,eq_intercept,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.0004338073764027506,8.520204952677801e-08,,1.141,6
+degenerate,eq_intercept,cli_remove,,result,OK,1.0,none,,,0.0,0.0,0.000449737154791241,6.067177804602863e-08,,1.045,6
+smalln,n_k,lib,"n=10, k=0",result,OK,1.0,none,,,0.0,0.0,0.009999978025582834,2.048541786203728e-08,,0.009,6
+smalln,n_k,lib,"n=10, k=2",result,OK,1.0,none,,,0.0,0.0,0.009999978025582834,1.853054168443613e-09,,0.009,6
+smalln,n_k,lib,"n=10, k=5",result,OK,1.0,none,,,0.0,0.0,0.009999978025582834,2.7055040818790843e-08,,0.009,6
+smalln,n_k,lib,"n=10, k=7",result_or_error,OK,1.0,none,,,0.0,0.0,0.009999978025582834,1.1590728377086634e-13,,0.01,6
+smalln,n_k,lib,"n=20, k=0",result,OK,1.0,none,,,0.0,0.0,3.451651126029631e-08,6.210894132330225e-08,,0.009,6
+smalln,n_k,lib,"n=20, k=10",result,OK,1.0,none,,,0.0,0.0,0.009999978025582834,2.249444752688845e-08,,0.011,6
+smalln,n_k,lib,"n=20, k=17",result_or_error,OK,1.0,none,,,0.0,0.0,0.009999943782122434,9.875848994145286e-08,,0.014,6
+smalln,n_k,lib,"n=50, k=0",result,OK,1.0,none,,,0.0,0.0,0.009999978025582834,3.6928605173791595e-08,,0.011,6
+smalln,n_k,lib,"n=50, k=2",result,OK,1.0,none,,,0.0,0.0,3.0558672814429144e-08,5.5073905550315076e-08,,0.013,6
+smalln,n_k,lib,"n=50, k=25",result,OK,1.0,none,,,0.0,0.0,0.004567525008209836,0.006233091407721436,,0.02,6
+smalln,n_k,lib,"n=50, k=47",result_or_error,OK,1.0,none,,,0.0,0.0,0.009999859536052313,1.0266787420221135e-11,,0.028,6
+kin,lowrank,lib,m_kin=2,result,OK,1.0,none,,,0.0,0.0,1.9032220777148723e-07,1.4861015751321816e-08,,0.011,6
+kin,lowrank,lib,m_kin=5,result,OK,1.0,none,,,0.0,0.0,4.842387794079528e-07,2.527420650544343e-08,,0.01,6
+kin,lowrank,lib,m_kin=20,result,OK,1.0,none,,,0.0,0.0,4.380335614229125e-07,9.709777748501125e-08,,0.011,6
+kin,identity,lib,,result,OK,1.0,none,,,0.0,0.0,,1.1780146026086825e-15,,0.009,6
+kin,dup_pairs,lib,,result,OK,1.0,none,,,0.0,0.0,5.603212861471363e-07,6.92952878522668e-07,,0.011,6
+kin,dup_all,lib,,result,OK,1.0,none,,,0.0,0.0,6.196797389668163e-07,7.412221807650873e-08,,0.01,6
+kin,scale,lib,scale=0.0001,result,OK,1.0,none,,,0.0,0.0,0.009936106689831359,,,0.011,6
+kin,scale,lib,scale=10000,result,OK,1.0,none,,,0.0,0.0,3.620778340780034e-11,4.6637054884612894e-08,,0.012,6
+cov,cov_nan,cli_impute,,error_or_nan,OK,1.0,none,gwas.py: error: The covariate file %s contains missing values. At this time we are not dealing with this case.  Either remove those individuals with missing val,,,,,,,1.007,6
+cov,many,lib,k=5,result,OK,1.0,none,,,0.0,0.0,3.950640481420464e-08,5.5730441289592036e-08,,0.015,6
+cov,many,lib,k=20,result,OK,1.0,none,,,0.0,0.0,4.285935611969549e-08,5.357352766965917e-08,,0.022,6
+cov,many,lib,k=40,result,OK,1.0,none,,,0.0,0.0,6.603803648363993e-08,8.305809001685205e-08,,0.035,6
+cov,many,lib,k=80,result,OK,1.0,none,,,0.0,0.0,2.0130210864888198e-07,2.0551103890875666e-07,,0.122,6
+pheno,scale,lib,scale=1e-06,result,OK,1.0,none,,,0.0,0.0,9.676941342684486e-08,1.7556800557816388e-07,,0.012,6
+pheno,scale,lib,scale=1e+06,result,OK,1.0,none,,,0.0,0.0,1.3235475448958312e-07,2.1953299308985486e-07,,0.012,6
+pheno,offset,lib,offset=1e+09,result,OK,1.0,none,,,0.0,0.0,4.302690912449947e-07,3.6589011489895906e-05,,0.012,6
+pheno,binary,lib,,result,OK,1.0,none,,,0.0,0.0,1.9504271975279153e-08,1.9572273739520967e-08,,0.011,6
+pheno,heavy_t2,lib,,result,OK,1.0,none,,,0.0,0.0,3.7463378725621777e-08,6.402262431315364e-08,,0.015,6
+pheno,lognormal,lib,,result,OK,1.0,none,,,0.0,0.0,6.809251242023695e-08,8.161385607617279e-08,,0.011,6
+pheno,inf_y,lib,,error_or_nan,OK,1.0,none,,,20.0,0.0,,,,0.01,6
+pheno,few_obs,lib,n_obs=3,result,OK,1.0,none,,,0.0,0.0,0.010000000000000009,1.4432899320127035e-15,,0.008,6
+pheno,binary,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.0004563316556356334,3.9969776877146757e-08,,1.124,6
+pheno,inf_y,cli_impute,,error_or_nan,OK,1.0,none,,,20.0,0.0,,,,1.131,6
+io,pheno_shuffled,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.00047092030454054523,7.008533559060837e-08,,1.069,6
+io,pheno_extra_indiv,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.0004539972884868293,3.271888227018849e-08,,0.995,6
+io,pheno_neg9,cli_impute,,result,OK,1.0,none,,,0.0,0.0,0.00042701936376943195,1.3730965504887838e-07,,1.425,6

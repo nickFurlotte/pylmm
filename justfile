@@ -10,19 +10,27 @@ default:
 
 # Create/update the project virtualenv from uv.lock
 sync:
-    uv sync
+    uv sync --group sims
 
 # Run the test suite (slow tests skipped); extra args go to pytest
 test *args:
-    uv run pytest "$@"
+    uv run --group sims pytest "$@"
 
 # Run the test suite including the slow full-dataset tests
 test-slow *args:
-    uv run pytest --runslow "$@"
+    uv run --group sims pytest --runslow "$@"
 
 # Run the test suite in the Python 2.7 baseline Docker image
 test-py27 *args:
     docker/py27/test.sh "$@"
+
+# Run a Phase 4 simulation study, e.g. `just sim example_null --quick --jobs 4`
+sim STUDY *args:
+    uv run --group sims python -m sims run "$@"
+
+# Summarise a study (summary.csv/md + PNGs); add --quick for the quick run
+sim-report STUDY *args:
+    uv run --group sims python -m sims report "$@"
 
 # Run scripts/example.py
 example:

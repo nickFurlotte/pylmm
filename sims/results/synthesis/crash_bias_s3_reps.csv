@@ -1,0 +1,15 @@
+cell_id,rep,source,h2,n_causal,vpe,m_kin,stage,h_used,h_from,hits_bonf,hits_bonf_refit,refit_snps,refit_crashes
+db53fbd90377,25,unrelated,0.8,1,0.005,1500,per-SNP refit (L.fit(X=x)),0.900803,pylmm,0,0,101,1
+db53fbd90377,67,unrelated,0.8,1,0.005,1500,null fit (LMM.fit),0.970281,oracle(capped),0,0,101,32
+53e61d22923a,30,unrelated,0.8,1,0.01,1500,per-SNP refit (L.fit(X=x)),0.939798,pylmm,0,0,101,1
+53e61d22923a,34,unrelated,0.8,1,0.01,1500,per-SNP refit (L.fit(X=x)),0.99,pylmm,0,0,101,13
+53e61d22923a,35,unrelated,0.8,1,0.01,1500,per-SNP refit (L.fit(X=x)),0.939572,pylmm,0,0,101,1
+53e61d22923a,39,unrelated,0.8,1,0.01,1500,per-SNP refit (L.fit(X=x)),0.954893,pylmm,0,0,101,7
+53e61d22923a,61,unrelated,0.8,1,0.01,1500,per-SNP refit (L.fit(X=x)),0.947799,pylmm,0,0,101,4
+90251dc368b3,18,unrelated,0.8,1,0.02,1500,per-SNP refit (L.fit(X=x)),0.99,pylmm,0,0,101,16
+123085aa257a,57,unrelated,0.8,1,0.05,1500,per-SNP refit (L.fit(X=x)),0.99,pylmm,1,1,101,1
+3f2a3acc0711,68,balding_nichols,0.8,1,0.02,1500,null fit (LMM.fit),0.973025,oracle(capped),0,0,101,64
+3f2a3acc0711,69,balding_nichols,0.8,1,0.02,1500,per-SNP refit (L.fit(X=x)),0.96729,pylmm,0,0,101,27
+baf8b4f98f83,15,balding_nichols,0.8,5,0.005,1500,per-SNP refit (L.fit(X=x)),0.950154,pylmm,0,0,105,4
+baf8b4f98f83,56,balding_nichols,0.8,5,0.005,1500,per-SNP refit (L.fit(X=x)),0.952633,pylmm,0,0,105,3
+6bcd4e6234ad,38,balding_nichols,0.8,5,0.02,1500,per-SNP refit (L.fit(X=x)),0.935592,pylmm,1,1,105,1
