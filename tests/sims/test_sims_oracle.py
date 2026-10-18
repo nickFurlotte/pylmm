@@ -1,6 +1,9 @@
 """Validation of the independent oracle (sims/oracle.py), and a quick check
 of pylmm against it."""
 
+import contextlib
+import io
+
 import numpy as np
 import pytest
 from scipy import linalg, stats
@@ -387,16 +390,27 @@ def test_pylmm_convention_reproduces_example_null_failures():
         if fine.h > 0.99:
             assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
     # optimum clearly above 0.99: simulate at h2 = 1 and pick the first seed
-    # (of a few) whose clamped fine optimum is >= 0.995
-    for seed in range(20):
+    # whose clamped fine REML optimum is >= 0.995 and whose pylmm-grid REML
+    # profile has no interior peak, with every step larger than FP noise, so
+    # that pylmm's search provably goes to the 0.99 endpoint without a Brent
+    # step (no BracketError, bug 4) on any platform.  REML only: with this
+    # m > n centred K the ML profile is unbounded (bug 17).
+    from pylmm.lmm import LMM
+    for seed in range(40):
         y = phenotypes.simulate(kin, 1.0, np.random.default_rng(seed)).y
         fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
-        if fine.h >= 0.995:
+        grid = oracle.fit(y, kin.K, **PYLMM)
+        d = np.diff(grid.ll_grid)
+        peaks = (d[:-1] > 0) & (d[1:] < 0)
+        if fine.h >= 0.995 and np.all(np.abs(d) > 1e-6) and not peaks.any():
             break
     else:
-        pytest.fail("no seed gave a clamped fine optimum >= 0.995")
-    _check_matches_pylmm(y, kin, None, G)
-    assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
+        pytest.fail("no seed gave a clean optimum above 0.99")
+    assert grid.h == pytest.approx(0.99)
+    with contextlib.redirect_stderr(io.StringIO()):
+        L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm())
+        h = float(np.sum(L.fit(REML=True)[0]))
+    assert h == pytest.approx(0.99)
 
 
 def test_sigma_conventions():
