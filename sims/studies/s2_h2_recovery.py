@@ -113,7 +113,11 @@ def pylmm_block(prefix, y, kin, reml, n):
     }
     # does pylmm's first-optimum rule lose to the best *other* mode?
     out[prefix + "nonglobal"] = int(out[prefix + "ll_deficit"] > 1e-3)
-    # ... specifically because a *different mode* is higher (not the 0.99 grid cap)
+    # ... specifically because a *different mode* is higher (not the 0.99 grid cap).
+    # Caveat: LL_GRID includes h = 0.995 and 1.0, which pylmm can never return,
+    # so a profile that rises past 0.99 (ML with m > n, bug 17) counts as a
+    # "higher mode" here.  sims/synthesis.py (part s2lost) recomputes this on
+    # pylmm's own range [0, 0.99]; the docs quote that version.
     out[prefix + "lostmode"] = int(out[prefix + "nonglobal"] and out[prefix + "n_modes"] > 1)
     return out
 
@@ -144,13 +148,43 @@ def oracle_block(prefix, y, K, reml):
 
 # ---------------------------------------------------------------------------
 
-def run_main(params, seed):
+def simulate_main(params, seed):
+    """(kin, y) of one main-grid replicate (shared with sims/synthesis.py)."""
     rng = np.random.default_rng(seed)
     n, mk = params["n"], params["mk"]
     spec = geno_spec(params["src"], n, m_kin(n, mk), params["geno_seed"])
     kin = kinship.get(spec)
     ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng, mu=MU)
-    y = ph.y
+    return kin, ph.y
+
+
+def simulate_probe(params, seed):
+    """(kin, y) of one probe replicate: a misspecified phenotype fitted with
+    the Balding-Nichols K (shared with sims/synthesis.py)."""
+    rng = np.random.default_rng(seed)
+    n = params["n"]
+    kind = params["src"]
+    kin = kinship.get(geno_spec("balding_nichols", n, 5 * n, params["geno_seed"]))
+    h2 = params["h2"]
+    ph = phenotypes.simulate(kin, h2=h2, rng=rng, mu=MU)
+    y = ph.y.copy()
+    if kind == "mix_family":      # extra family component not in K (K is balding_nichols)
+        k2 = kinship.get(geno_spec("family", n, 5 * n, params["geno_seed"]))
+        y = y + np.sqrt(1.0) * phenotypes.sample_polygenic(k2.Kva, k2.Kve, 1.0, rng)
+    elif kind == "mix_bn":
+        # despite the name, NOT a Balding-Nichols component: a second *family*
+        # kinship from another genotype draw (geno_seed + 1), also not in K
+        k2 = kinship.get(geno_spec("family", n, 5 * n, params["geno_seed"] + 1))
+        y = y + phenotypes.sample_polygenic(k2.Kva, k2.Kve, 1.0, rng)
+    elif kind == "mix_rank":      # signal on a few top eigenvectors only (low-rank, spiky)
+        top = np.argsort(kin.Kva)[-3:]
+        y = y + 3.0 * np.asarray(kin.Kve)[:, top] @ rng.standard_normal(3)
+    return kin, y
+
+
+def run_main(params, seed):
+    n = params["n"]
+    kin, y = simulate_main(params, seed)
     out = {"rank_K": int((kin.Kva > 1e-6).sum()), "frac_clamped": float((kin.Kva < CLAMP).mean())}
     out.update(pylmm_block("r_", y, kin, True, n))
     out.update(pylmm_block("m_", y, kin, False, n))
@@ -168,22 +202,8 @@ def run_main(params, seed):
 def run_probe(params, seed):
     """Misspecified phenotypes on n = 100, fitted with one K: does the profile
     become multimodal, and does pylmm's first-optimum rule pick a worse mode?"""
-    rng = np.random.default_rng(seed)
     n = params["n"]
-    kind = params["src"]
-    kin = kinship.get(geno_spec("balding_nichols", n, 5 * n, params["geno_seed"]))
-    h2 = params["h2"]
-    ph = phenotypes.simulate(kin, h2=h2, rng=rng, mu=MU)
-    y = ph.y.copy()
-    if kind == "mix_family":      # extra family component not in K (K is balding_nichols)
-        k2 = kinship.get(geno_spec("family", n, 5 * n, params["geno_seed"]))
-        y = y + np.sqrt(1.0) * phenotypes.sample_polygenic(k2.Kva, k2.Kve, 1.0, rng)
-    elif kind == "mix_bn":        # extra component from a different family draw (seed+1)
-        k2 = kinship.get(geno_spec("family", n, 5 * n, params["geno_seed"] + 1))
-        y = y + phenotypes.sample_polygenic(k2.Kva, k2.Kve, 1.0, rng)
-    elif kind == "mix_rank":      # signal on a few top eigenvectors only (low-rank, spiky)
-        top = np.argsort(kin.Kva)[-3:]
-        y = y + 3.0 * np.asarray(kin.Kve)[:, top] @ rng.standard_normal(3)
+    kin, y = simulate_probe(params, seed)
     out = {}
     for pre, reml in (("r_", True), ("m_", False)):
         out.update(pylmm_block(pre, y, kin, reml, n))

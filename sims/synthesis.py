@@ -1,7 +1,7 @@
 """Phase 4 synthesis: the numbers in docs/phase4-simulations.md that are not
 already in a committed study summary.
 
-Run:  uv run --group sims python sims/synthesis.py            (all parts, ~3 min)
+Run:  uv run --group sims python sims/synthesis.py            (all parts, ~8 min)
       uv run --group sims python sims/synthesis.py crash s1   (selected parts)
 
 Parts (outputs in sims/results/synthesis/):
@@ -12,13 +12,22 @@ crash   crash_accounting.csv, crash_by_h2.csv
         pylmm crashes (bug 4: scipy BracketError), with Wilson CIs.
 crashbias  crash_bias_s1.csv, crash_bias_s2.csv, crash_bias_s3.csv
         Re-simulates each crashed replicate from its stored seed (run_cell is
-        a pure function of (params, seed)) and fits what a pylmm with a
-        bounded h search would see: the textbook oracle REML h, capped at
-        0.99 (bug 3 not fixed), with pylmm's own association step.  Compares
-        each affected cell's summary with and without those replicates.
+        a pure function of (params, seed)), checks that pylmm still crashes
+        on it, and fits what a pylmm with a bounded h search would see: the
+        textbook oracle REML h, capped at 0.99 (bug 3 not fixed), with
+        pylmm's own association step.  For S3 this covers both the fixed-h
+        scan and the per-SNP refit (each causal SNP is refitted with pylmm,
+        and with the capped oracle h of [1, x] where that refit crashes).
+        Compares each affected cell's summary with and without those
+        replicates.
 s1      s1_calibration.csv: pooled type-I error with replicate-cluster CIs,
         mean chi^2 (from the stored random p-value sample) and the spread of
         single-replicate lambda_GC, per (structure, h2, method).
+s2lost  s2_lostmode.csv (+ _reps): replays every S2 replicate's pylmm
+        profile and recomputes the "lost mode" flag on pylmm's own range
+        [0, 0.99] (the study's flag uses a grid up to h = 1, so an ML profile
+        rising past 0.99 counted as a lost mode).  The 201-point flag is
+        recomputed too and must match the stored one exactly.
 s2      s2_attribution_compact.csv: pylmm h-hat bias split into estimator /
         optimizer / clamp by h2 band and kinship type; boundary rates.
 s3      s3_calibrated_power.csv, power_calibrated.png: power at an empirically
@@ -27,8 +36,10 @@ s3      s3_calibrated_power.csv, power_calibrated.png: power at an empirically
         threshold is not set by SNPs that tag the causal ones (S4 item 18).
 ledger  bug_ledger.csv: the consolidated ledger (S4 + new S5 issues).
 
-Nothing here modifies pylmm; the crashed-replicate refits call pylmm's
-LMM.association with an externally supplied h.
+Every part reads only the rows of the current study plan and STUDY_VERSION
+(``runner.current_rows``).  Nothing here modifies pylmm; the
+crashed-replicate refits call pylmm's LMM.association with an externally
+supplied h.
 """
 
 import contextlib
@@ -127,7 +138,7 @@ def crash_accounting():
     rows, byh = [], []
     for name, keys in STUDIES.items():
         tasks = runner.plan(name, quick=False)
-        done = {(r["cell_id"], r["rep"]) for r in runner.read_rows(runner.raw_path(name, False))}
+        done = {(r["cell_id"], r["rep"]) for r in runner.current_rows(name)}
         errs = {(e["cell_id"], e["rep"]): e for e in _errors(name)}
         per = {}
         for cid, params, rep, seed in tasks:
@@ -231,6 +242,9 @@ def crash_bias_s1():
         rng = np.random.default_rng(seed)
         kin, G_dis, G_in = s1._setup(params)
         y = phenotypes.simulate(kin, h2=params["h2"], rng=rng).y
+        if _pylmm_fit_or_none(y, kin, True) is not None:
+            raise RuntimeError("S1 replay: pylmm no longer crashes on cell %s rep %d "
+                               "(replay or software stack differs from the run)" % (cid, rep))
         fT = oracle.fit(y, np.asarray(kin.K), reml=True)
         h = min(fT.h, H_CAP)
         p = _assoc_scan(_lmm_at_h(y, kin), G_dis, h)
@@ -248,7 +262,7 @@ def crash_bias_s1():
     done = pd.DataFrame([dict(cell_id=r["cell_id"], **{c: r["metrics"][c] for c in
                                                        ["h_hat", "n_reml", "lam_reml"] +
                                                        ["k_reml_%s" % metrics.alpha_label(a) for a in s1.ALPHAS]})
-                         for r in runner.read_rows(runner.raw_path("s1_null_calibration", False))])
+                         for r in runner.current_rows("s1_null_calibration")])
     out = []
     for cid, g in cr.groupby("cell_id"):
         d = done[done.cell_id == cid]
@@ -270,21 +284,15 @@ def crash_bias_s1():
 
 def crash_bias_s2():
     import pandas as pd
-    from sims import kinship
     from sims.studies import s2_h2_recovery as s2
     crashed = _crashed_tasks("s2_h2_recovery")
     rows = []
     for k, (cid, rep, params, seed, txt) in enumerate(crashed):
         if params.get("kind") == "probe" and params["src"] != "correct":
             continue
-        rng = np.random.default_rng(seed)
         n = params["n"]
-        if params.get("kind") == "probe":
-            kin = kinship.get(s2.geno_spec("balding_nichols", n, 5 * n, params["geno_seed"]))
-        else:
-            kin = kinship.get(s2.geno_spec(params["src"], n, s2.m_kin(n, params["mk"]),
-                                           params["geno_seed"]))
-        y = phenotypes.simulate(kin, h2=params["h2"], rng=rng, mu=s2.MU).y
+        sim = s2.simulate_probe if params.get("kind") == "probe" else s2.simulate_main
+        kin, y = sim(params, seed)
         r = {"cell_id": cid, "rep": rep, **{k_: params[k_] for k_ in ("kind", "src", "n", "mk", "h2", "geno_seed")},
              "crashed_fit": _s2_which_fit(txt)}
         K = np.asarray(kin.K)
@@ -302,7 +310,7 @@ def crash_bias_s2():
     _write(cr, "crash_bias_s2_reps.csv")
     # effect on the reported pylmm REML bias per (src, n, mk, h2) (geno seeds pooled, as in bias_rmse)
     done = []
-    for r in runner.read_rows(runner.raw_path("s2_h2_recovery", False)):
+    for r in runner.current_rows("s2_h2_recovery"):
         p = r["params"]
         if p.get("kind") != "main":
             continue
@@ -325,7 +333,34 @@ def crash_bias_s2():
     _write(pd.DataFrame(out), "crash_bias_s2.csv")
 
 
+def _refit_scan(L, y, K, G, h_cap=H_CAP):
+    """pylmm's per-SNP refit (L.fit(X=x), then association) for the columns of
+    G.  Where pylmm's refit crashes, the bounded-search proxy: the textbook
+    oracle REML h of [1, x], capped at 0.99.  Returns (p, n_crashed)."""
+    p = np.full(G.shape[1], np.nan)
+    n_crash = 0
+    for j in range(G.shape[1]):
+        x = G[:, j:j + 1]
+        if x.var() == 0:
+            continue
+        try:
+            with _quiet():
+                L.fit(X=x)
+            h = L.optH
+        except Exception as ex:   # noqa: BLE001
+            if "BracketError" not in type(ex).__name__:
+                raise
+            n_crash += 1
+            h = min(oracle.fit(y, K, np.c_[np.ones(len(y)), x], reml=True).h, h_cap)
+        with _quiet():
+            _, p[j] = L.association(x, h=h, REML=True)
+    return p, n_crash
+
+
 def crash_bias_s3():
+    """Fixed-h (lmm) and refit (lmmr) Bonferroni power with the crashed
+    replicates added back.  12 of the 14 S3 crashes were in the per-SNP
+    refit, so the refit power is the one they could bias."""
     import pandas as pd
     from sims.studies import s3_power as s3
     crashed = _crashed_tasks("s3_power")
@@ -333,34 +368,57 @@ def crash_bias_s3():
     for k, (cid, rep, p, seed, txt) in enumerate(crashed):
         rng = np.random.default_rng(seed)
         Gk, Gt, kin = s3._design(p)
+        if p["contam"]:
+            raise NotImplementedError("crash in a contamination cell: replay not implemented")
         m = Gt.shape[1]
         kc = p["n_causal"]
         cidx = phenotypes.choose_causal(m, kc, rng, G=Gt, min_maf=s3.MIN_MAF)
         ph = phenotypes.simulate(kin, p["h2"], rng, G=Gt, causal_idx=cidx, causal_var=[p["vpe"]] * kc)
+        nulls = np.setdiff1d(np.arange(m), cidx)
+        samp = rng.choice(nulls, size=s3.N_NULL_SAMPLE, replace=False)
+        stage = _stage(txt)
+        K = np.asarray(kin.K)
         f = _pylmm_fit_or_none(ph.y, kin, True)
+        if (f is None) != stage.startswith("null"):
+            raise RuntimeError("S3 replay of cell %s rep %d: null-fit crash %s, stored stage %r"
+                               % (cid, rep, f is None, stage))
         if f is None:
-            fT = oracle.fit(ph.y, np.asarray(kin.K), reml=True)
-            h, src_h = min(fT.h, H_CAP), "oracle(capped)"
+            h, src_h = min(oracle.fit(ph.y, K, reml=True).h, H_CAP), "oracle(capped)"
         else:
             h, src_h = f["h"], "pylmm"
-        pc = _assoc_scan(_lmm_at_h(ph.y, kin), Gt[:, cidx], h)
+        L = _lmm_at_h(ph.y, kin)
+        pc = _assoc_scan(L, Gt[:, cidx], h)
+        # refit, exactly the SNPs the study refits (causal + the null sample), in its order
+        pr, n_crash = _refit_scan(L, ph.y, K, Gt[:, np.r_[cidx, samp]])
+        if stage.startswith("per-SNP") and n_crash == 0:
+            raise RuntimeError("S3 replay of cell %s rep %d: no refit crash reproduced" % (cid, rep))
+        prc = pr[:kc]
         rows.append({"cell_id": cid, "rep": rep, "source": p["source"], "h2": p["h2"],
-                     "n_causal": kc, "vpe": p["vpe"], "stage": _stage(txt), "h_used": h,
-                     "h_from": src_h, "hits_bonf": int((pc <= 0.05 / m).sum())})
-        _log("s3 crashed rep %d/%d (%s)" % (k + 1, len(crashed), _stage(txt)))
+                     "n_causal": kc, "vpe": p["vpe"], "m_kin": p["m_kin"], "stage": stage,
+                     "h_used": h, "h_from": src_h, "hits_bonf": int((pc <= 0.05 / m).sum()),
+                     "hits_bonf_refit": int((prc <= 0.05 / m).sum()),
+                     "refit_snps": len(pr), "refit_crashes": n_crash})
+        _log("s3 crashed rep %d/%d (%s): %d of %d refits crash" % (k + 1, len(crashed), stage,
+                                                                   n_crash, len(pr)))
     cr = pd.DataFrame(rows)
     out = []
     pt = pd.read_csv(os.path.join(runner.study_dir("s3_power"), "power_table.csv"))
-    for key, g in cr.groupby(["source", "h2", "n_causal", "vpe"]):
-        r = pt[(pt.source == key[0]) & (pt.h2 == key[1]) & (pt.n_causal == key[2]) &
-               (pt.vpe == key[3]) & (pt.contam == 0) & (pt.method == "lmm")].iloc[0]
+    for key, g in cr.groupby(["source", "h2", "n_causal", "vpe", "m_kin"]):
+        sel = ((pt.source == key[0]) & (pt.h2 == key[1]) & (pt.n_causal == key[2]) &
+               (pt.vpe == key[3]) & (pt.contam == 0) & (pt.m_kin == key[4]))
+        r = pt[sel & (pt.method == "lmm")].iloc[0]
+        rr = pt[sel & (pt.method == "lmmr")].iloc[0]
         nc = r.n_causal_total
-        k_done = r.power_bonf * nc
+        n_add = len(g) * key[2]
         out.append({"source": key[0], "h2": key[1], "n_causal": key[2], "vpe": key[3],
-                    "reps_done": int(r.n_reps), "reps_crashed": len(g),
+                    "m_kin": key[4], "reps_done": int(r.n_reps), "reps_crashed": len(g),
                     "stage": "; ".join(sorted(set(g.stage))),
+                    "refit_crashes_per_snp": g.refit_crashes.sum() / g.refit_snps.sum(),
                     "pow_bonf_lmm_excl": r.power_bonf,
-                    "pow_bonf_lmm_incl": (k_done + g.hits_bonf.sum()) / (nc + len(g) * key[2])})
+                    "pow_bonf_lmm_incl": (r.power_bonf * nc + g.hits_bonf.sum()) / (nc + n_add),
+                    "pow_bonf_lmmr_excl": rr.power_bonf,
+                    "pow_bonf_lmmr_incl": (rr.power_bonf * rr.n_causal_total + g.hits_bonf_refit.sum())
+                    / (rr.n_causal_total + n_add)})
     _write(cr, "crash_bias_s3_reps.csv")
     _write(pd.DataFrame(out), "crash_bias_s3.csv")
 
@@ -371,15 +429,18 @@ def crash_bias_s3():
 
 def s1_calibration():
     import pandas as pd
-    rows = runner.read_rows(runner.raw_path("s1_null_calibration", False))
+    rows = runner.current_rows("s1_null_calibration")
+    # a cell is every grid key; "design" holds the keys other than pop and h2
+    # (n, m_kin, m_test, geno_seed), so two designs are never pooled
     cells = {}
     for r in rows:
         p = r["params"]
-        cells.setdefault((p["pop"], p["h2"]), []).append(r["metrics"])
+        design = tuple(sorted((k, v) for k, v in p.items() if k not in ("pop", "h2")))
+        cells.setdefault((p["pop"], p["h2"], design), []).append(r["metrics"])
     out = []
-    for (pop, h2), ms in cells.items():
+    for (pop, h2, design), ms in cells.items():
         for meth in ("ols", "reml", "reml_in"):
-            r = {"pop": pop, "h2": h2, "method": meth, "reps": len(ms)}
+            r = {"pop": pop, "h2": h2, **dict(design), "method": meth, "reps": len(ms)}
             n = np.array([m["n_" + meth] for m in ms], float)
             for lab in ("0.05", "1e-03", "1e-04"):
                 k = np.array([m["k_%s_%s" % (meth, lab)] for m in ms], float)
@@ -395,27 +456,33 @@ def s1_calibration():
             out.append(r)
     df = pd.DataFrame(out)
     order = {p: i for i, p in enumerate(["unrelated", "bn_fst0.05", "bn_fst0.2", "family", "bed"])}
-    df = df.sort_values(["method", "pop", "h2"], key=lambda s: s.map(order) if s.name == "pop" else s)
+    df = df.sort_values(["method", "pop", "h2"], key=lambda s: s.map(order) if s.name == "pop" else s,
+                        kind="stable")
     _write(df, "s1_calibration.csv")
 
     # compact: h2 = 0 vs pooled over h2 in {0.2, 0.5, 0.8, 0.95}; the replicate is the cluster
     pooled = []
+    designs = sorted({d for (_, _, d) in cells})
     for pop in order:
-        for meth in ("ols", "reml", "reml_in"):
-            for band, keep in (("h2=0", lambda h: h == 0), ("h2>0", lambda h: h > 0)):
-                ms = [m for (p_, h), mm in cells.items() if p_ == pop and keep(h) for m in mm]
-                r = {"pop": pop, "method": meth, "band": band, "reps": len(ms)}
-                n = np.array([m["n_" + meth] for m in ms], float)
-                for lab in ("0.05", "1e-03", "1e-04"):
-                    k = np.array([m["k_%s_%s" % (meth, lab)] for m in ms], float)
-                    R, lo, hi = _clustered_rate(k, n)
-                    r["t1e_" + lab], r["t1e_%s_lo" % lab], r["t1e_%s_hi" % lab] = R, lo, hi
-                chi = [np.mean(metrics.chi2_from_p(np.asarray(m["qqrand_" + meth], float)))
-                       for m in ms if ("qqrand_" + meth) in m]
-                r["meanchi2"], r["meanchi2_lo"], r["meanchi2_hi"] = _mean_ci(chi)
-                lam = np.array([m["lam_" + meth] for m in ms], float)
-                r["lambda_q05"], r["lambda_q95"] = np.quantile(lam, [0.05, 0.95])
-                pooled.append(r)
+        for design in designs:
+            for meth in ("ols", "reml", "reml_in"):
+                for band, keep in (("h2=0", lambda h: h == 0), ("h2>0", lambda h: h > 0)):
+                    ms = [m for (p_, h, d_), mm in cells.items()
+                          if p_ == pop and d_ == design and keep(h) for m in mm]
+                    if not ms:
+                        continue
+                    r = {"pop": pop, **dict(design), "method": meth, "band": band, "reps": len(ms)}
+                    n = np.array([m["n_" + meth] for m in ms], float)
+                    for lab in ("0.05", "1e-03", "1e-04"):
+                        k = np.array([m["k_%s_%s" % (meth, lab)] for m in ms], float)
+                        R, lo, hi = _clustered_rate(k, n)
+                        r["t1e_" + lab], r["t1e_%s_lo" % lab], r["t1e_%s_hi" % lab] = R, lo, hi
+                    chi = [np.mean(metrics.chi2_from_p(np.asarray(m["qqrand_" + meth], float)))
+                           for m in ms if ("qqrand_" + meth) in m]
+                    r["meanchi2"], r["meanchi2_lo"], r["meanchi2_hi"] = _mean_ci(chi)
+                    lam = np.array([m["lam_" + meth] for m in ms], float)
+                    r["lambda_q05"], r["lambda_q95"] = np.quantile(lam, [0.05, 0.95])
+                    pooled.append(r)
     _write(pd.DataFrame(pooled), "s1_calibration_pooled.csv")
     return df
 
@@ -424,21 +491,101 @@ def s1_calibration():
 # S2 compact attribution
 # ---------------------------------------------------------------------------
 
+def _ktype(p):
+    return "bed" if p["src"] == "bed" else ("synthetic m>n" if p["mk"] == "hi" else "synthetic m<n")
+
+
+def _band(h2):
+    return "h2<=0.95" if h2 <= 0.95 else "h2=%g" % h2
+
+
+LL_GRID_099 = np.linspace(0.0, 0.99, 199)     # pylmm's own range, same 0.005 spacing
+
+
+def s2_lostmode():
+    """Recompute the S2 "lost mode" flag on [0, 0.99] by replaying each
+    replicate's pylmm profile (pylmm's LL at the stored seed's y)."""
+    import pandas as pd
+    from pylmm.lmm import LMM
+    from sims.studies import s2_h2_recovery as s2
+    rows = sorted(runner.current_rows("s2_h2_recovery"), key=lambda r: (r["cell_id"], r["rep"]))
+    recs, mismatch = [], 0
+    for i, r in enumerate(rows):
+        p, m = r["params"], r["metrics"]
+        sim = s2.simulate_probe if p.get("kind") == "probe" else s2.simulate_main
+        kin, y = sim(p, r["seed"])
+        Kva, Kve = kin.eig_for_pylmm()
+        with _quiet():
+            L = LMM(np.asarray(y, float), np.asarray(kin.K), Kva, Kve)
+        for pre, reml in (("r_", True), ("m_", False)):
+            def ll(h):
+                return float(np.sum(L.LL(h, L.X0t, stack=False, REML=reml)[0]))
+            with np.errstate(all="ignore"):
+                L201 = np.array([ll(h) for h in s2.LL_GRID])
+                L099 = np.array([ll(h) for h in LL_GRID_099])
+                ll_hat = ll(m[pre + "h_pylmm"])
+            d201 = max(0.0, np.nanmax(L201) - ll_hat)
+            lost201 = int(d201 > 1e-3 and s2.n_modes(L201) > 1)
+            if lost201 != m[pre + "lostmode"] or s2.n_modes(L201) != m[pre + "n_modes"]:
+                mismatch += 1
+            d099 = max(0.0, np.nanmax(L099) - ll_hat)
+            recs.append({"cell_id": r["cell_id"], "rep": r["rep"], "kind": p.get("kind"),
+                         "src": p["src"], "n": p["n"], "mk": p["mk"], "h2": p["h2"],
+                         "geno_seed": p["geno_seed"], "method": "REML" if reml else "ML",
+                         "h_pylmm": m[pre + "h_pylmm"], "lostmode_201": lost201,
+                         "stored_lostmode_201": m[pre + "lostmode"],
+                         "n_modes_099": s2.n_modes(L099), "ll_deficit_099": d099,
+                         "nonglobal_099": int(d099 > 1e-3),
+                         "lostmode_099": int(d099 > 1e-3 and s2.n_modes(L099) > 1),
+                         "h_gridmax_099": float(LL_GRID_099[int(np.nanargmax(L099))])})
+        if (i + 1) % 500 == 0:
+            _log("s2 lost-mode replay: %d/%d replicates" % (i + 1, len(rows)))
+    if mismatch:
+        raise RuntimeError("S2 lost-mode replay: %d fits do not reproduce the stored 201-grid flags"
+                           % mismatch)
+    _log("S2 lost-mode replay reproduces the stored 201-point flags for all %d fits" % len(recs))
+    d = pd.DataFrame(recs)
+    _write(d, "s2_lostmode_reps.csv")
+    out = []
+    main = d[d.kind == "main"].copy()
+    main["ktype"] = [_ktype(dict(src=a, mk=b)) for a, b in zip(main.src, main.mk)]
+    main["band"] = main.h2.map(_band)
+    for (kt, band, meth), g in main.groupby(["ktype", "band", "method"]):
+        out.append({"kind": "main", "ktype": kt, "band": band, "method": meth, "fits": len(g),
+                    "lostmode_201": int(g.lostmode_201.sum()), "lostmode_099": int(g.lostmode_099.sum()),
+                    "nonglobal_099": int(g.nonglobal_099.sum())})
+    for meth, g in d[d.kind == "probe"].groupby("method"):
+        out.append({"kind": "probe", "ktype": "probe", "band": "all", "method": meth, "fits": len(g),
+                    "lostmode_201": int(g.lostmode_201.sum()), "lostmode_099": int(g.lostmode_099.sum()),
+                    "nonglobal_099": int(g.nonglobal_099.sum())})
+    _write(pd.DataFrame(out), "s2_lostmode.csv")
+    return d
+
+
 def s2_attribution():
     import pandas as pd
-    rows = runner.read_rows(runner.raw_path("s2_h2_recovery", False))
+    rows = runner.current_rows("s2_h2_recovery")
+    lost_path = os.path.join(OUT, "s2_lostmode_reps.csv")
+    lost099 = {}
+    if os.path.exists(lost_path):
+        lr = pd.read_csv(lost_path)
+        lost099 = {(c, int(rp), mt): int(v) for c, rp, mt, v in
+                   zip(lr.cell_id, lr.rep, lr.method, lr.lostmode_099)}
+    else:
+        _log("note: %s missing (run part s2lost first); lostmode_099 left empty" % lost_path)
     recs = []
     for r in rows:
         p, m = r["params"], r["metrics"]
         if p.get("kind") != "main":
             continue
-        ktype = "bed" if p["src"] == "bed" else ("synthetic m>n" if p["mk"] == "hi" else "synthetic m<n")
+        ktype = _ktype(p)
         h2 = p["h2"]
-        band = "h2<=0.95" if h2 <= 0.95 else "h2=%g" % h2
+        band = _band(h2)
         for pre, meth in (("r_", "REML"), ("m_", "ML")):
             rec = {"ktype": ktype, "band": band, "method": meth, "h2": h2,
                    "h_pylmm": m[pre + "h_pylmm"], "cap": m[pre + "hit99"],
                    "lost": m[pre + "lostmode"], "nonglobal": m[pre + "nonglobal"],
+                   "lost099": lost099.get((r["cell_id"], r["rep"], meth), np.nan),
                    "has_oracle": m["has_oracle"]}
             if m["has_oracle"]:
                 rec.update({"T": m[pre + "h_T"], "G": m[pre + "h_G"], "C": m[pre + "h_C"],
@@ -449,11 +596,15 @@ def s2_attribution():
     for (kt, band, meth), g in d.groupby(["ktype", "band", "method"]):
         o = g[g.has_oracle == 1]
         est, opt, clamp = (o["T"] - o.h2), (o["G"] - o["T"]), (o["C"] - o["T"])
+        # bias_pylmm_oracle_reps = est_mean + opt_mean + clamp_mean + inter_mean
+        # (same replicates); bias_pylmm uses every replicate of the band
         r = {"ktype": kt, "band": band, "method": meth, "reps": len(g), "oracle_reps": len(o),
              "bias_pylmm": (g.h_pylmm - g.h2).mean(),
+             "bias_pylmm_oracle_reps": (o.h_pylmm - o.h2).mean(),
              "rmse_pylmm": np.sqrt(((g.h_pylmm - g.h2) ** 2).mean()),
              "frac_at_099": g.cap.mean(), "frac_nonglobal": g.nonglobal.mean(),
              "lostmode_count": int(g.lost.sum()),
+             "lostmode_099_count": int(g.lost099.sum()) if g.lost099.notna().all() else np.nan,
              "est_mean": est.mean(), "opt_mean": opt.mean(), "clamp_mean": clamp.mean(),
              "inter_mean": (o["B"] - o["G"] - o["C"] + o["T"]).mean(),
              "rms_opt": np.sqrt((opt ** 2).mean()), "rms_clamp": np.sqrt((clamp ** 2).mean()),
@@ -479,7 +630,7 @@ def s2_attribution():
 def s3_calibrated(check_reps=1):
     import pandas as pd
     from sims.studies import s3_power as s3
-    rows = runner.read_rows(runner.raw_path("s3_power", False))
+    rows = runner.current_rows("s3_power")
     by_cell = {}
     for r in rows:
         by_cell.setdefault(r["cell_id"], []).append(r)
@@ -602,9 +753,13 @@ LEDGER = [
     ("3", "h grid stops at 0.99 (also misc.fitTwo w grid)", "CONFIRMED", "medium",
      "fraction of REML fits at the 0.99 cap; max |d -log10 p|", "38-46% at h2 0.95-0.99 (S4 synthetic); max |d -log10 p| 0.81 (S4 BED h2=0.99)",
      "every null fit at high h2; misc.fitTwo", "6.3", "S4, S2"),
-    ("4", "Brent search unbounded above h = 1 (BracketError on scipy >= 1.11)", "CONFIRMED", "high",
-     "fraction of replicates that crash", "S1 25/2000, S2 68/3984, S3 14/7040; up to 12.5% per cell (S4 BED n=300 h2=0.95)",
-     "every null fit and per-SNP refit; CLI default", "5", "S4, S1, S2, S3, S5"),
+    ("4", "Brent search unbounded above h = 1 (BracketError on scipy >= 1.11; correct on scipy < 1.11 "
+     "except h > 1 for an unbounded ML profile)", "CONFIRMED", "high",
+     "fraction of replicates that crash (scipy >= 1.11)",
+     "S1 25/2000, S2 68/3984, S3 14/7040; up to 12.5% per cell (S4 BED n=300 h2=0.95); per-SNP refit "
+     "0.25-2.8% of SNPs (S4); scipy 1.9 replay of 95 crashed fits: 90 correct to 7e-8, 5 unbounded-ML "
+     "fits return h = 1.002-1.035 (LL nan)",
+     "every null fit and per-SNP refit; CLI default", "5", "S4, S1, S2, S3, S5, synthesis replay"),
     ("5", "tstat(log=True) adds 2.0 instead of log 2", "UNREACHABLE", "cosmetic",
      "log p error", "1.307 (no caller)", "none today", "6.3", "S4"),
     ("6", "--kfile2 uses undefined LMM_withK2 / optW", "CONFIRMED", "low",
@@ -660,7 +815,8 @@ def ledger():
 
 
 PARTS = {"crash": crash_accounting, "crashbias": lambda: (crash_bias_s1(), crash_bias_s2(), crash_bias_s3()),
-         "s1": s1_calibration, "s2": s2_attribution, "s3": s3_calibrated, "ledger": ledger}
+         "s1": s1_calibration, "s2lost": s2_lostmode, "s2": s2_attribution, "s3": s3_calibrated,
+         "ledger": ledger}
 
 
 def main(argv):

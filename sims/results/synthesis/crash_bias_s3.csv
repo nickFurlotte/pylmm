@@ -1,8 +1,8 @@
-source,h2,n_causal,vpe,reps_done,reps_crashed,stage,pow_bonf_lmm_excl,pow_bonf_lmm_incl
-balding_nichols,0.8,1,0.02,78,2,null fit (LMM.fit); per-SNP refit (L.fit(X=x)),0.25641,0.25
-balding_nichols,0.8,5,0.005,78,2,per-SNP refit (L.fit(X=x)),0,0
-balding_nichols,0.8,5,0.02,79,1,per-SNP refit (L.fit(X=x)),0.210127,0.21
-unrelated,0.8,1,0.005,78,2,null fit (LMM.fit); per-SNP refit (L.fit(X=x)),0,0
-unrelated,0.8,1,0.01,75,5,per-SNP refit (L.fit(X=x)),0.0266667,0.025
-unrelated,0.8,1,0.02,79,1,per-SNP refit (L.fit(X=x)),0.379747,0.375
-unrelated,0.8,1,0.05,79,1,per-SNP refit (L.fit(X=x)),0.873418,0.875
+source,h2,n_causal,vpe,m_kin,reps_done,reps_crashed,stage,refit_crashes_per_snp,pow_bonf_lmm_excl,pow_bonf_lmm_incl,pow_bonf_lmmr_excl,pow_bonf_lmmr_incl
+balding_nichols,0.8,1,0.02,1500,78,2,null fit (LMM.fit); per-SNP refit (L.fit(X=x)),0.450495,0.25641,0.25,0.282051,0.275
+balding_nichols,0.8,5,0.005,1500,78,2,per-SNP refit (L.fit(X=x)),0.0333333,0,0,0,0
+balding_nichols,0.8,5,0.02,1500,79,1,per-SNP refit (L.fit(X=x)),0.00952381,0.210127,0.21,0.220253,0.22
+unrelated,0.8,1,0.005,1500,78,2,null fit (LMM.fit); per-SNP refit (L.fit(X=x)),0.163366,0,0,0,0
+unrelated,0.8,1,0.01,1500,75,5,per-SNP refit (L.fit(X=x)),0.0514851,0.0266667,0.025,0.0266667,0.025
+unrelated,0.8,1,0.02,1500,79,1,per-SNP refit (L.fit(X=x)),0.158416,0.379747,0.375,0.379747,0.375
+unrelated,0.8,1,0.05,1500,79,1,per-SNP refit (L.fit(X=x)),0.00990099,0.873418,0.875,0.873418,0.875
