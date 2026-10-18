@@ -12,12 +12,14 @@
 import os
 import sys
 
-try:
-    from pylmm.cli.kinship import main
-except ImportError:
-    # Running from a source checkout without installing the package.
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-    from pylmm.cli.kinship import main
+# Always put this checkout's repo root first, so the shim runs the code next
+# to it even if another (installed or already-imported) pylmm is around.
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO)
+for _m in [m for m in sys.modules if m == 'pylmm' or m.startswith('pylmm.')]:
+    del sys.modules[_m]
+
+from pylmm.cli.kinship import main  # noqa: E402
 
 if __name__ == '__main__':
     main()
