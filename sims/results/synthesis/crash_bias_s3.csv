@@ -1,0 +1,8 @@
+source,h2,n_causal,vpe,reps_done,reps_crashed,stage,pow_bonf_lmm_excl,pow_bonf_lmm_incl
+balding_nichols,0.8,1,0.02,78,2,null fit (LMM.fit); per-SNP refit (L.fit(X=x)),0.25641,0.25
+balding_nichols,0.8,5,0.005,78,2,per-SNP refit (L.fit(X=x)),0,0
+balding_nichols,0.8,5,0.02,79,1,per-SNP refit (L.fit(X=x)),0.210127,0.21
+unrelated,0.8,1,0.005,78,2,null fit (LMM.fit); per-SNP refit (L.fit(X=x)),0,0
+unrelated,0.8,1,0.01,75,5,per-SNP refit (L.fit(X=x)),0.0266667,0.025
+unrelated,0.8,1,0.02,79,1,per-SNP refit (L.fit(X=x)),0.379747,0.375
+unrelated,0.8,1,0.05,79,1,per-SNP refit (L.fit(X=x)),0.873418,0.875

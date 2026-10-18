@@ -1,0 +1,26 @@
+id,title,verdict,severity,impact_metric,impact_value,path,phase,evidence
+1,Null fit always REML; REML= only reaches the Wald step,CONFIRMED,medium,max |dt| CLI default vs textbook ML Wald,0.039 (S4 unrelated m<n h2=0.8); S1: CLI == REML exactly in 25/25 cells,CLI default; lmm.GWAS(REML=False); CLI --refit/--removeMissingGenotypes,5,"S4, S1, S5"
+2,"getMax range(1, n-2) skips grid index 98 (h = 0.98)",CONFIRMED,low,REML fits returning 0.99 at true h2 = 0.98 (well-identified K),99% (S2 m<n and BED; mean optimizer error +0.009); 5.1% skip-98 rate in S4 h2=0.95,every null fit and refit,6.3,"S4, S2"
+3,h grid stops at 0.99 (also misc.fitTwo w grid),CONFIRMED,medium,fraction of REML fits at the 0.99 cap; max |d -log10 p|,38-46% at h2 0.95-0.99 (S4 synthetic); max |d -log10 p| 0.81 (S4 BED h2=0.99),every null fit at high h2; misc.fitTwo,6.3,"S4, S2"
+4,Brent search unbounded above h = 1 (BracketError on scipy >= 1.11),CONFIRMED,high,fraction of replicates that crash,"S1 25/2000, S2 68/3984, S3 14/7040; up to 12.5% per cell (S4 BED n=300 h2=0.95)",every null fit and per-SNP refit; CLI default,5,"S4, S1, S2, S3, S5"
+5,tstat(log=True) adds 2.0 instead of log 2,UNREACHABLE,cosmetic,log p error,1.307 (no caller),none today,6.3,S4
+6,--kfile2 uses undefined LMM_withK2 / optW,CONFIRMED,low,crash rate when used,100%,CLI --kfile2,5,S4
+7,--eigen cannot read what pylmmKinship -e writes,CONFIRMED,low,crash rate when used,100%,CLI --eigen,5,S4
+8,Two kinship normalisations; denominator counts dropped monomorphic SNPs,CONFIRMED,low,dh (t and p unchanged under pure rescaling),+0.017 hmdp h2=0.5; +0.06 at 25% monomorphic; max |dt| 0.03 between the two K with missing data,"lmm.calculateKinship, pylmmKinship",6.3,S4
+9,Under ML the reported sigma^2 is Q/(n-q),CONVENTION,cosmetic,t ratio,sqrt(n/(n-p)) = 1.0034 at n=300,"association(REML=False), reported sigma",6.3,"S4, S2"
+10,getPhenos skips fam individuals missing from the pheno file,CONFIRMED,medium,outcome on CLI,crash (reshape/IndexError); silent shift only for library callers,CLI pheno/cov files; input.plink,5,"S4, S5"
+11,All-missing SNP: normalizeGenotype returns an empty array,CONFIRMED,medium,outcome,"whole scan aborts (LinAlgError / IndexError / ValueError), 6/6",lmm.GWAS; CLI GWAS; pylmmKinship,5,"S4, S5"
+12,LMM mutates caller's Kva; calculateKinship mutates W,CONFIRMED,low,outcome,caller arrays silently changed,library API,5,"S4, S5"
+13,Zero-variance filters differ between CLI branches,CONFIRMED,cosmetic,outcome,same SNP tested or skipped depending on one missing call,CLI --removeMissingGenotypes,5,"S4, S5"
+14,No pheno file: os.path.isfile(None) TypeError,CONFIRMED,low,outcome,traceback instead of usage error,CLI,5,"S4, S5"
+15,Inconsistent return types; 1x1 arrays,CONFIRMED,cosmetic,outcome,list vs ndarray; numbers unaffected,library API,5,"S4, S5"
+16,--kfile read unchecked (fromfile + resize),CONFIRMED,high,outcome,"wrong-size K accepted, exit 0, 6/6 (S5); headered K all zeros on numpy < 2.3",CLI --kfile,5,"S4, S5"
+17,ML unbounded as h -> 1 with centred GRM from m > n SNPs,NOT A BUG (property),medium,pylmm ML h - REML h; ML fits at 0.99,"+0.14 to +0.16, 50-75% at cap (S4 n=200 m=2000 h2>=0.5); ML at cap 33-52% vs REML 21-26% (S2 m>n)","ML paths: fit(REML=False), CLI --refit/--removeMissingGenotypes",6.3,"S4, S2"
+18,lambda_GC 1.3-4.9 on BED genotypes,NOT A BUG,none,pooled t1e at 0.05 (pylmm / exact test),0.038-0.055 / 0.049-0.058,study design (M_eff ~ 18),-,S4
+19,"Non-estimable SNP (constant up to rounding, = covariate) gets finite t ~ 0 instead of nan","CONFIRMED (new, S5)",medium,|t| returned,<= 1e-6 (p ~ 1); 17-100% of replicates,lmm.GWAS; CLI both branches,5,S5
+20,Saturated design (n <= q + 1) returns finite t with 0 or negative df,"CONFIRMED (new, S5)",high,SNPs with finite t where not estimable,"8-20 of 20 SNPs, every replicate (n = 10, 20, 50)",LMM / lmm.GWAS,5,S5
+21,"K not validated: wrong order, asymmetric, non-PSD, nan accepted","CONFIRMED (new, S5)",high,dh with permuted K,"up to 0.78, corr(t) < 0.9, no warning; non-PSD: dh > 0.1 in 1/3",LMM.__init__; CLI --kfile,5,S5
+22,"Constant phenotype returns h = 0.99, sigma ~ 0 (or BracketError)","CONFIRMED (new, S5)",medium,outcome,"finite numbers or crash, 50-67% of replicates",LMM; CLI,5,S5
+23,Collinear / duplicate / zero covariates give a bare LinAlgError,"CONFIRMED (new, S5)",medium,outcome,"crash with no mention of covariates, 6/6",LMM.getMLSoln; CLI --covfile,5,S5
+24,"Non-finite inputs not validated in the library (nan in K/X0, inf in y)","CONFIRMED (new, S5)",low,outcome,scipy ValueError without context; inf y -> all-nan with no warning,library API,5,S5
+25,Badly scaled covariates emit LinAlgWarning (answers correct),"CONFIRMED (new, S5)",low,relative error vs oracle,<= 1e-7,LMM.getMLSoln,6.3,S5
