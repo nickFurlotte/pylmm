@@ -57,7 +57,26 @@ BED_BLOCK = 100            # leading K[:100,:100] block stored for 1219x1219 K
 HMDP_MISSING_Y = [5, 23, 60]  # phenotype entries set to NaN for missing-Y fit
 HMDP_COV_SNP = 10          # SNP (0-based) used as covariate in covariate fit
 
+# The goldens are only valid for the pinned baseline environment
+# (docker/py27/Dockerfile).  Fail loudly if a stale or different image is used;
+# set PYLMM_GOLDEN_ANY_VERSION=1 to override for cross-checks.
+EXPECTED_VERSIONS = {'numpy': '1.16.6', 'scipy': '1.2.3'}
+
 OUT = None
+
+
+def check_versions():
+    found = {'numpy': np.__version__, 'scipy': scipy.__version__}
+    if found == EXPECTED_VERSIONS:
+        return
+    msg = ('expected numpy %(numpy)s / scipy %(scipy)s' % EXPECTED_VERSIONS +
+           ', found numpy %(numpy)s / scipy %(scipy)s' % found)
+    if os.environ.get('PYLMM_GOLDEN_ANY_VERSION') == '1':
+        log('WARNING: %s (PYLMM_GOLDEN_ANY_VERSION=1)' % msg)
+        return
+    raise SystemExit('generate_golden.py: %s. Rebuild the image with '
+                     '`docker/py27/run.sh --build`, or set '
+                     'PYLMM_GOLDEN_ANY_VERSION=1 for a cross-check.' % msg)
 
 
 def log(msg):
@@ -414,6 +433,7 @@ def write_env():
 
 def main():
     global OUT
+    check_versions()
     OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1
                           else os.path.join(REPO, 'tests', 'golden'))
     if not os.path.isdir(OUT):

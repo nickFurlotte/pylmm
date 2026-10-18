@@ -81,13 +81,16 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
 - scipy ≥0.12 has no `scipy.linalg.fblas`, so the dgemm paths in `matrixMult`
   and pylmmKinship always fall back to `np.dot`.
 - README dataset:
-  - The kinship has 565 of 1219 eigenvalues below 1e-6 (replicate inbred
-    individuals), which get clamped to 1e-6.
+  - The kinship is rank deficient (replicate inbred individuals): 1109 of
+    1219 eigenvalues are below 1e-6 and get clamped to 1e-6. All of them are
+    LAPACK round-off (|e| < 1e-12); the next eigenvalue is about 0.29, so the
+    effective rank is about 110. 565 of the 1109 are negative.
   - The fake phenotype fits at the **h=0 boundary** under both REML and ML.
     Golden values for that dataset therefore exercise the boundary branch of
     `getMax`.
   - The verbose message "Cleaning %d eigen values" prints the count of
-    eigenvalues below 0, but the code clamps those below 1e-6 (lmm.py:209).
+    eigenvalues below 0 (565 here), but the code clamps those below 1e-6
+    (1109 here; lmm.py:209).
 - 68 of the first 1000 hmdp SNPs give nan p-values. Each is monomorphic once
   missing individuals are removed.
 - `pylmmGWAS.py` writes values with `str()`, so the output precision depends on

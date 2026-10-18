@@ -27,6 +27,11 @@ the **unmodified** `main` code on numpy 1.12.1 / scipy 0.19.1 gives
 match to within 5e-12 relative; they differ only because numpy 1.12 `str()`
 prints 12 significant digits.
 
+The generator refuses to run unless numpy is 1.16.6 and scipy is 1.2.3, so a
+stale Docker image cannot silently produce different goldens. For a cross-check
+on another version, set `PYLMM_GOLDEN_ANY_VERSION=1` and write to a scratch
+directory.
+
 ## Formats (no pickles, all readable from Python 3)
 
 - `*.txt` is `numpy.savetxt(fmt='%.17g')`, which round-trips float64
@@ -36,6 +41,21 @@ prints 12 significant digits.
   `SNP_ID BETA BETA_SD F_STAT P_VALUE`, with values written by `str()` (shortest
   repr under numpy ≥1.14, `nan` when missing). Compare these numerically, not
   as text.
+
+## Comparison rules
+
+- **Eigenvalue files** (`bed_readme_kin_eigenvalues.txt`,
+  `kinship_cli_emma_hmdp_snps1000.kva.txt`) are mostly LAPACK round-off:
+  1109 of 1219 and 50 of 94 entries are below 1e-6, with magnitudes around
+  1e-13 to 1e-16 and arbitrary sign. The raw values are kept as written, but
+  those entries are not reproducible across BLAS/LAPACK builds. Compare these
+  files with `atol = 1e-10 * max(eig)` (or only on entries above 1e-6), and
+  never check the sign of the near-zero entries.
+- **`assoc_hmdp_GWAS.txt`**: `ts_ml_norefit`/`ps_ml_norefit` are exactly equal
+  to `ts_reml_norefit`/`ps_reml_norefit`. `lmm.GWAS` never passes `REML` to
+  `fit()`, and the t-statistic uses N-q in both modes (known bugs 1 and 9 in
+  `docs/phase1-baseline.md`), so these columns do not exercise ML. A port that
+  fixes those bugs is expected to change them.
 
 ## Inputs (all from `data/`)
 
@@ -53,8 +73,11 @@ prints 12 significant digits.
   - `Y` = column 0 of `snps.132k.clean.noX.fake.phenos` (no missing values).
   - `K` = `snps.132k.clean.noX.pylmm.kin`. Rerunning `pylmmKinship.py` on the
     full BED reproduces this file to within 1.2e-15.
-  - The kinship is rank deficient: 565 eigenvalues are below 1e-6 and get
-    clamped.
+  - The kinship is rank deficient: 1109 of 1219 eigenvalues are below 1e-6
+    and get clamped to 1e-6. All of them are round-off (|e| < 1e-12); the
+    next eigenvalue is about 0.29, so the effective rank is about 110. Only
+    565 are negative, which is the count the misleading "Cleaning %d eigen
+    values" message prints.
   - The fake phenotype fits at the h=0 boundary.
   - 1550 of the first 3000 SNPs have missing genotypes.
 - "First N SNPs of the BED" is built by copying the 3-byte header plus N × 305
