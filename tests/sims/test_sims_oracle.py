@@ -157,6 +157,40 @@ def test_wald_refit_vs_null_h():
     assert w0.df == len(y) - 3
 
 
+@pytest.mark.parametrize("h", [0.0, 0.3, 0.85])
+def test_wald_matches_direct_gls_at_fixed_h(h):
+    """The Wald test with K != I against a GLS computed a different way:
+    whiten with the eigendecomposition of V = hK + (1-h)I (no Cholesky),
+    then ordinary least squares (lstsq) on the whitened data, and the
+    classical OLS variance / t / p of the whitened regression."""
+    y, K, X = _random_problem(seed=4)
+    n = len(y)
+    x = np.random.default_rng(9).binomial(2, 0.3, n).astype(float)
+    d, U = np.linalg.eigh(h * K + (1 - h) * np.eye(n))
+    W = U / np.sqrt(d)                                   # V^-1/2 = U diag(d^-1/2) U'
+    Xa = np.c_[X, x]
+    yw, Xw = W.T @ y, W.T @ Xa
+    beta, *_ = np.linalg.lstsq(Xw, yw, rcond=None)
+    p = Xa.shape[1]
+    resid = yw - Xw @ beta
+    for test_reml, s2 in ((True, resid @ resid / (n - p)), (False, resid @ resid / n)):
+        se = np.sqrt(s2 * np.linalg.inv(Xw.T @ Xw)[-1, -1])
+        t = beta[-1] / se
+        w = oracle.wald(y, K, x, X0=X, h=h, null_reml=test_reml)
+        np.testing.assert_allclose(w.beta, beta[-1], rtol=1e-9)
+        np.testing.assert_allclose(w.se, se, rtol=1e-9)
+        np.testing.assert_allclose(w.t, t, rtol=1e-9)
+        np.testing.assert_allclose(w.p, 2 * stats.t.sf(abs(t), n - p), rtol=1e-8)
+        assert w.df == n - p
+    # statsmodels GLS, when installed (the sims group), gives the same REML-convention t
+    try:
+        import statsmodels.api as sm
+    except ImportError:         # pragma: no cover
+        return
+    r = sm.GLS(y, Xa, sigma=h * K + (1 - h) * np.eye(n)).fit()
+    np.testing.assert_allclose(oracle.wald(y, K, x, X0=X, h=h).t, r.tvalues[-1], rtol=1e-8)
+
+
 # ---------------------------------------------------------------------------
 # statsmodels MixedLM (optional; in the `sims` dependency group)
 # ---------------------------------------------------------------------------
@@ -333,24 +367,36 @@ def test_pylmm_convention_reproduces_example_null_failures():
     textbook oracle found h > 0.99 (n=200, h2=0.5, reps 1 and 15).  With
     h_grid='pylmm' the oracle reproduces pylmm's 0.99 (the optimizer, not the
     eigenvalue clamp, is responsible: the clamped fine search still goes
-    above 0.99)."""
+    above 0.99).
+
+    Those two replicates have optima within FP noise of 0.99, so whether the
+    fine fit lands above 0.99 is platform dependent; for them only the
+    implication is checked.  The constructed case (h2 = 1, optimum at the
+    h = 1 boundary) is unambiguous on every platform."""
     from sims import phenotypes, runner
     from sims.studies import example_null as ex
     params = {"n": 200, "h2": 0.5, "m_kin": 2000, "m_test": 2000, "geno_seed": 1}
     spec = {"source": "unrelated", "n": 200, "m": 4000, "seed": 1}
     kin = kinship.get(spec, snps=slice(0, 2000))
     G = genotypes.get(spec).G[:, 2000:2003]
-    reproduced = 0
     for rep in (1, 15):
         rng = np.random.default_rng(runner.task_seed(ex.NAME, params, rep))
         y = phenotypes.simulate(kin, 0.5, rng).y
         _check_matches_pylmm(y, kin, None, G)
         fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
-        if fine.h > 0.99:       # true on the numpy the full run used
-            reproduced += 1
+        if fine.h > 0.99:
             assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
-    if np.lib.NumpyVersion(np.__version__) >= "2.0.0":
-        assert reproduced == 2
+    # optimum clearly above 0.99: simulate at h2 = 1 and pick the first seed
+    # (of a few) whose clamped fine optimum is >= 0.995
+    for seed in range(20):
+        y = phenotypes.simulate(kin, 1.0, np.random.default_rng(seed)).y
+        fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
+        if fine.h >= 0.995:
+            break
+    else:
+        pytest.fail("no seed gave a clamped fine optimum >= 0.995")
+    _check_matches_pylmm(y, kin, None, G)
+    assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
 
 
 def test_sigma_conventions():

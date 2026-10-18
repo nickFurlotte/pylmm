@@ -166,10 +166,16 @@ def test_bug1_current_cli_refit_fits_ml_but_library_refit_fits_reml():
 
 @pytest.mark.xfail(strict=True, reason="bug 1: GWAS(REML=False) uses a REML null h, not the ML Wald")
 def test_bug1_gwas_ml_equals_textbook_ml_wald():
+    """An ML null fit + ML Wald, isolated from bug 9: the reference keeps
+    pylmm's sigma^2 = Q/(n-q) (``sigma_convention='pylmm'``), so fixing bug 1
+    alone flips this test (an ML-fitted pylmm matches it to ~5e-8 here, while
+    the textbook Q/n would still differ by sqrt(n/(n-q)) = 1.0127; that is
+    bug 9's own reproducer below)."""
     Gt, K, y = _ml_bounded_case()
     with quiet():
         t0, _ = GWAS(y, Gt, K, REML=False)
-    w = [oracle.wald(y, K, Gt[:, j], null_reml=False).t for j in range(Gt.shape[1])]
+    w = [oracle.wald(y, K, Gt[:, j], null_reml=False, sigma_convention="pylmm").t
+         for j in range(Gt.shape[1])]
     np.testing.assert_allclose(t0, w, atol=1e-4)
 
 
@@ -240,8 +246,13 @@ def test_bug4_current_brent_crashes_with_bracketerror():
         L.fit()
 
 
-@pytest.mark.xfail(strict=True, reason="bug 4: Brent is unbounded above h = 1 (crash / H[i-1] fallback)")
+@pytest.mark.xfail(SCIPY_HAS_BRACKETERROR, strict=True,
+                   reason="bug 4: Brent is unbounded above h = 1; scipy >= 1.11 raises BracketError")
 def test_bug4_fit_with_peak_near_one():
+    """The correct answer.  Version-dependent: on scipy < 1.11 the same
+    unbounded search steps above 1, gets nan, and still converges to the
+    interior optimum (the nan -> H[i-1] fallback never fires), so this passes
+    there and is only an expected failure on scipy >= 1.11."""
     L = fake_lmm(_peak_0972)
     assert abs(L.fit()[0] - 0.972) < 1e-4
 
@@ -560,7 +571,8 @@ def test_bug16_current_wrong_size_kinship_silently_resized(tmp_path):
 def test_bug16_wrong_size_kinship_rejected(tmp_path):
     fn = str(tmp_path / "k.txt")
     np.savetxt(fn, np.eye(3))
-    with pytest.raises(ValueError):
+    # either fix flips this: raising ValueError, or a CLI-style usage error (sys.exit)
+    with pytest.raises((ValueError, SystemExit)):
         cli_gwas.readKinshipFile(fn, 4)
 
 
