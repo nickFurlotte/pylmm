@@ -824,7 +824,9 @@ LEDGER = [
      "CLI default + lmm.GWAS(REML=False); CLI --refit/--removeMissingGenotypes use ML", "5"),
     (2, "getMax range(1, n-2) skips grid index 98", "CONFIRMED", "low", "every null fit", "6.3"),
     (3, "h grid capped at 0.99 (and fitTwo w grid)", "CONFIRMED", "medium", "every null fit at high h2; misc.fitTwo", "6.3"),
-    (4, "unbounded Brent above h = 1", "CONFIRMED", "high", "every null fit at high h2 (crash on scipy >= 1.11)", "5"),
+    (4, "unbounded Brent above h = 1", "CONFIRMED", "high",
+     "every null fit and refit at high h2: crash on scipy >= 1.11; on scipy < 1.11 correct, "
+     "except h > 1 (LL nan) when the ML profile is unbounded", "5"),
     (5, "tstat(log=True) adds 2.0 not log 2", "UNREACHABLE", "cosmetic", "no caller", "6.3"),
     (6, "--kfile2 NameError", "CONFIRMED", "low", "CLI --kfile2 only", "5"),
     (7, "--eigen cannot read pylmmKinship output", "CONFIRMED", "low", "CLI --eigen only", "5"),

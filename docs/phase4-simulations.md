@@ -6,39 +6,52 @@ what fails, and what to fix in Phase 5 and what in Phase 6.3. Each number
 below comes from a committed study summary (`sims/results/<study>/summary.*`,
 `sims/studies/<study>.md`) or from `sims/synthesis.py`, whose outputs are in
 [`sims/results/synthesis/`](../sims/results/synthesis/). To reproduce them:
-`uv run --group sims python sims/synthesis.py` (about 3 min; it needs the
-gitignored `raw/full.jsonl` files). "Confirmed" means a reproducer or a
+`uv run --group sims python sims/synthesis.py` (about 8 min; it needs the
+gitignored `raw/full.jsonl` files, and reads only the rows of each study's
+current grid and `STUDY_VERSION`). "Confirmed" means a reproducer or a
 measured effect with a CI that excludes zero. "Suggestive" means a small
 sample or a CI that is optimistic.
 
 ## 1. TL;DR
 
-* **On its default path pylmm is statistically correct.** With the REML null
-  fit and the Wald test, null p-values are calibrated on all five genotype
-  structures when h² > 0. Pooled type-I error at α = 0.05 is 0.0495–0.0500,
-  at α = 1e-3 it is (0.93–1.02)×10⁻³, and the mean χ² is 0.99–1.01 (1,575
-  replicates, replicate-cluster CIs). The Wald t matches an independent dense
-  oracle to 2e-7. For h² ≤ 0.95, pylmm's REML ĥ is within an RMS of 0.003 of
-  the textbook optimum.
+* **On its default path, and under a correctly specified model, pylmm is
+  statistically correct.** Every study simulates the polygenic effect from the
+  same K that is fitted (§8), so these are calibration results for an exactly
+  specified model. With the REML null fit and the Wald test, null p-values
+  are calibrated on all five genotype structures when h² > 0. Pooled type-I
+  error at α = 0.05 is 0.0495–0.0500, at α = 1e-3 it is (0.93–1.02)×10⁻³,
+  and the mean χ² is 0.99–1.01 (1,575 replicates, replicate-cluster CIs).
+  The Wald t matches an independent dense oracle to 2e-7, and the oracle's
+  Wald test matches a direct GLS with K ≠ I to 1e-9 (tests). For h² ≤ 0.95,
+  pylmm's REML ĥ is within an RMS of 0.0033 of the textbook optimum.
 * **pylmm is a real improvement on OLS.** Under structure, OLS is badly
   inflated: pooled type-I error at 0.05 reaches 0.55 on the mouse BED data,
-  with a mean χ² of 14. At a calibrated 1e-3 threshold the two have the same
-  power on unrelated data. With structure, pylmm has much more power. For
-  example, at h² = 0.5 with one SNP explaining 5% of variance:
-  Balding–Nichols 0.94 vs 0.15, BED 0.50 vs 0.06. At h² = 0.8, OLS's
-  calibrated power is about 0.
-* **The main failure is a crash (bug 4).** When the REML optimum lies at about
-  0.96–0.975, the unbounded Brent step lands above h = 1, and scipy ≥ 1.11
-  raises `BracketError`. That aborts the fit, and with it the whole GWAS or
-  CLI run. This happened in 107 of 13,024 full-run replicates (0.8%), all
-  but one at true h² ≥ 0.7:
+  with a mean χ² of 14. Part of that is built into the design: the
+  phenotype's polygenic component is drawn from the very K that pylmm
+  fits, so OLS faces exactly the structure the LMM models. At a calibrated
+  1e-3 threshold the two have about the same power on unrelated data: the
+  CIs overlap, though pylmm is ahead at h² = 0.8 (0.60 vs 0.43 at 2%).
+  Across all 72 main S3 cells OLS is ahead in only 3, by ≤ 0.013. With
+  structure, pylmm has much more power. For example, at h² = 0.5 with one SNP explaining 5% of
+  variance: Balding–Nichols 0.94 vs 0.15, BED 0.50 vs 0.06. At h² = 0.8,
+  OLS's calibrated power is about 0.
+* **The main failure is a crash (bug 4), and it is new with the Python 3
+  port's scipy.** When the REML optimum lies at about 0.96–0.975, the
+  unbounded Brent bracket search steps above h = 1, where pylmm's LL is nan.
+  On scipy ≥ 1.11 that raises `BracketError`, which aborts the fit, and with
+  it the whole GWAS or CLI run. This happened in 107 of 13,024 full-run
+  replicates (0.8%), all but one at true h² ≥ 0.7:
   * pooled S1 rates of 2.3% at h² = 0.8 and 4.0% at h² = 0.95;
   * 11.5% at h² = 0.98 with n = 200 (S2);
   * up to 8.8% in one 80-replicate cell (S1 family, h² = 0.95), and 12.5% in
     S4 (BED, n = 300, h² = 0.95).
 
-  Per-SNP refits crash on up to 2.8% of SNPs (S4), so a `--refit` scan of a
-  high-h² trait will almost surely abort.
+  Per-SNP refits crash on 0.25–2.8% of SNPs at h² 0.8–0.99 (S4), so a
+  `--refit` scan of a high-h² trait will almost surely abort. On scipy < 1.11
+  the same code does not crash: replayed on scipy 1.9, 90 of the 95 crashed
+  null fits return the correct bounded optimum (to 7e-8), and the other 5 (ML
+  with an unbounded profile, bug 17) return h slightly above 1 (§4). The fix
+  is the same either way: a bounded search.
 * **ĥ near 1 is wrong by construction (bugs 2 and 3).** The grid stops at 0.99,
   and index 98 (h = 0.98) is never tested. At true h² = 0.98, 99% of
   well-identified REML fits return 0.99; at h² = 1 every well-identified fit
@@ -53,17 +66,19 @@ sample or a CI that is optimistic.
   relative t error is 2–10% (S5).
 * **ML fails with a centred GRM built from more SNPs than individuals (bug 17).**
   This is a property of the model, not a code bug. There is then no MLE, and
-  pylmm's ML ĥ is an artifact of the clamp and the cap: +0.14 against REML,
-  and 33–52% of ML fits sit at 0.99. REML is unaffected.
+  pylmm's ML ĥ is an artifact of the clamp and the cap: up to +0.16 against
+  REML (S4's worst cell, n = 200, m = 2000, h² = 0.5), ≈ +0.03 on average in S2 (m > n, h² ≤ 0.95), and
+  33–52% of ML fits sit at 0.99. REML is unaffected.
 * **Input validation is the other weak area.** pylmm silently accepts a
   wrong-size `--kfile` (bug 16), a mis-ordered or non-PSD K, saturated designs
   and constant phenotypes, and returns plausible-looking numbers (S5: 22
   critical- or high-severity "wrong" outcomes and 19 crashes in 161 cases).
   New issues 19–25 are in the ledger.
 * **Excluding crashed replicates does not change the calibration or power
-  conclusions.** When the crashed replicates are refitted, pooled type-I error
-  moves by ≤ 0.0008 and power by ≤ 0.006. It does bias a few S2 high-h²
-  ĥ summaries, by up to 0.03, because a crash selects replicates with
+  conclusions.** When the crashed replicates are refitted with a bounded
+  search, pooled type-I error moves by ≤ 0.0008, fixed-h power by ≤ 0.006
+  and per-SNP-refit power by ≤ 0.007. It does bias a few S2 high-h² ĥ
+  summaries, by up to 0.03, because a crash selects replicates with
   ĥ ≈ 0.96 (§4).
 
 ## 2. Setup
@@ -71,8 +86,10 @@ sample or a CI that is optimistic.
 **Framework.** `sims/` ([README](../sims/README.md)) runs a study as a grid of
 cells × replicates, and every task has a deterministic seed. Each replicate
 simulates y = Xβ + Σ βⱼgⱼ + u + e with u ~ N(0, h²σ²K), where K is pylmm's
-own `calculateKinship`. The replicate is then fitted with pylmm (unchanged)
-and with comparators: OLS, and the oracle. Nothing in `pylmm/` was modified.
+own `calculateKinship`, and the same K is then used for the fit, so the
+model is exactly specified (§8). The replicate is fitted with pylmm
+(unchanged) and with comparators: OLS, and the oracle. Nothing in `pylmm/`
+was modified.
 
 **Independent oracle** ([`sims/oracle.py`](../sims/oracle.py)). The oracle is
 a dense Cholesky profile (RE)ML fit over a 201-point grid on [0, 1] plus
@@ -83,7 +100,9 @@ bounded Brent, and it shares no code with pylmm. It is validated in
 * closed-form balanced-ANOVA REML and ML;
 * the error-contrast and multivariate-normal log-densities;
 * a 2001-point grid;
-* statsmodels `MixedLM`, to 1e-5 in h.
+* statsmodels `MixedLM`, to 1e-5 in h;
+* for the Wald test with K ≠ I at fixed h: a direct GLS by eigen-whitening and
+  least squares, and statsmodels `GLS` (β̂, se, t and p to 1e-8).
 
 The oracle has switches for each pylmm convention (`h_grid="pylmm"`,
 `eig_clamp=1e-6`, the REML/ML split, the σ convention). With all of them set
@@ -116,9 +135,10 @@ separate estimator, optimizer and clamp effects.
 | S5 edge cases | 966 (161 × 6) | 5.4 min | 0.18 h |
 
 The total is about 2.1 h of wall time and 8.3 core-hours.
-`synthesis.py` adds about 3 min. It replays crashed and S3 replicates from
-their stored seeds, and the replay is verified to reproduce the stored S3
-p-values on 80 replicates.
+`synthesis.py` adds about 8 min. It replays crashed, S2 and S3 replicates
+from their stored seeds. The replay is verified: it reproduces the stored S3
+p-values on 80 replicates and the stored S2 profile flags on all 7,832 S2
+fits, and every replayed crash still crashes.
 
 ## 3. Results
 
@@ -171,24 +191,28 @@ into three parts using the oracle:
 * *clamp*: oracle with the 1e-6 eigenvalue floor − textbook.
 
 Source: [`s2_attribution_compact.csv`](../sims/results/synthesis/s2_attribution_compact.csv),
-on oracle replicates (all at n = 200, about 1/3 at n = 600). The full
-per-cell tables are in [`s2_h2_recovery/summary.md`](../sims/results/s2_h2_recovery/summary.md).
+on oracle replicates (all at n = 200, about 1/3 at n = 600). The bias is the
+mean over those same replicates (`bias_pylmm_oracle_reps`), so it is the sum
+of the three parts and the interaction; the mean over all replicates
+(`bias_pylmm`) differs by ≤ 0.011. "Fits at 0.99" uses all replicates. The
+full per-cell tables are in
+[`s2_h2_recovery/summary.md`](../sims/results/s2_h2_recovery/summary.md).
 
 | K type | true h² | method | mean bias pylmm | estimator | optimizer | clamp | fits at 0.99 |
 |---|---|---|---|---|---|---|---|
 | synthetic, m < n | ≤ 0.95 | REML | +0.004 | +0.004 | 0.000 | 0 | 0% |
 | synthetic, m < n | 0.98 | REML | +0.010 | +0.001 | **+0.009** | 0 | **99%** |
 | synthetic, m < n | 1.0 | REML | −0.010 | 0.000 | **−0.010** | 0 | 100% |
-| BED | ≤ 0.95 | REML | −0.004 | −0.006 | 0.000 | 0 | 0% |
+| BED | ≤ 0.95 | REML | −0.006 | −0.006 | 0.000 | 0 | 0% |
 | BED | 0.98 | REML | +0.010 | +0.001 | **+0.009** | 0 | **99%** |
-| synthetic, m > n | ≤ 0.95 | REML | +0.004 | +0.007 | −0.001 | 0 | 10% |
-| synthetic, m > n | 0.98–1.0 | REML | −0.04 to −0.05 | −0.05 | −0.005 | 0 | 53–62% |
-| synthetic, m > n | ≤ 0.95 | **ML** | +0.031 | +0.20 (no MLE) | **−0.16** | **−0.06** (interaction +0.06) | 22% |
+| synthetic, m > n | ≤ 0.95 | REML | +0.006 | +0.007 | −0.001 | 0 | 10% |
+| synthetic, m > n | 0.98–1.0 | REML | −0.050 to −0.055 | −0.046 to −0.050 | −0.004 to −0.005 | 0 | 53–62% |
+| synthetic, m > n | ≤ 0.95 | **ML** | +0.038 | +0.20 (no MLE) | **−0.16** | **−0.06** (interaction +0.06) | 22% |
 
 ![S2 h² recovery, family](../sims/results/s2_h2_recovery/h_recovery_family.png)
 
 * **Interior h² (≤ 0.95): pylmm's REML is the textbook estimator (confirmed).**
-  The optimizer's mean contribution is ≤ 0.001 and its RMS is ≤ 0.003. The
+  The optimizer's mean contribution is ≤ 0.001 and its RMS is ≤ 0.0033. The
   clamp contributes 0. The remaining bias and RMSE (0.05–0.14) are REML's own,
   and they are largest where K is close to I (m > n), where h² is weakly
   identified.
@@ -198,14 +222,20 @@ per-cell tables are in [`s2_h2_recovery/summary.md`](../sims/results/s2_h2_recov
   the 0.99 endpoint. At h² = 1 the cap (bug 3) returns 0.99. The ĥ errors are
   ±0.01. With m > n, REML's own sampling noise (estimator bias −0.05)
   dominates the cap.
-* **The first-optimum rule never lost a mode under REML.** There were 0
+* **The first-optimum rule never lost a mode under REML.** On either grid, there were 0
   "lost-mode" fits among the 3,916 completed S2 replicates, including the
   misspecified-phenotype probe.
 * **ML with m > n is unidentified (bug 17).** The textbook MLE runs to h = 1
   in 100% of these replicates (`ml_cap.csv`). pylmm's ML answer is then set
   by its grid (−0.16) and clamp (−0.06). Its mean happens to land near the
-  truth, but the RMSE is 0.13 and 22% of fits sit at 0.99, against 10% for
-  REML. In 225 of 992 fits, pylmm picks a lower ML mode.
+  truth (+0.031 over all 992 fits, +0.027 above REML), but the RMSE is 0.13
+  and 22% of fits sit at 0.99, against 10% for REML. On pylmm's own range
+  [0, 0.99], its first-optimum rule returns a lower ML mode in 16 of 992 fits
+  (`s2_lostmode.csv`): it stops at an interior maximum at ĥ = 0.74–0.91 while
+  the LL is higher, by 0.03–0.38, at the 0.99 endpoint, where the unbounded
+  ML profile keeps rising. The study's own flag counted 225, but its 201-point
+  grid includes h = 0.995 and 1, which pylmm can never return, so a rising
+  boundary counted as a lost mode.
 * σ² and β are reported as expected. The ML σ is Q/(n−q), which is bug 9, a
   convention: the error is n/(n−1), i.e. 0.5% at n = 200 (`sigma_beta.csv`).
   The intercept β is unbiased.
@@ -249,13 +279,17 @@ Wilson 95% CIs over 80 causal SNPs
 
 ![Calibrated power](../sims/results/synthesis/power_calibrated.png)
 
-* **pylmm ≥ OLS everywhere, and much better under structure (confirmed).** On
-  unrelated data the CIs overlap. Even there, at h² = 0.8 pylmm gains from
-  removing polygenic noise: 0.60 vs 0.43 at 2% (suggestive, the CIs overlap).
+* **pylmm ≥ OLS almost everywhere, and much better under structure
+  (confirmed).** On unrelated data the CIs overlap. Even there, at h² = 0.8
+  pylmm gains from removing polygenic noise: 0.60 vs 0.43 at 2% (suggestive,
+  the CIs overlap). OLS is ahead in 3 of the 72 main cells, all trivially:
+  0.988 vs 0.975 (unrelated, h² = 0.5, 5%), 0.520 vs 0.515 (unrelated, 5
+  causal at 2%), and 0.012 vs 0 (BED, h² = 0.2, 0.5%).
 * **Refit and fixed-h give the same power.** The two power curves coincide
   within their CIs. The paired mean Δlog10 p (refit − fixed) is −0.002 to
   −0.07 ([`s3_checks.csv`](../sims/results/synthesis/s3_checks.csv)).
-  However, refit is where 12 of the 14 S3 crashes happened (§4).
+  However, refit is where 12 of the 14 S3 crashes happened; adding those
+  replicates back moves refit power by ≤ 0.007 (§4).
 * **The oracle check passes.** pylmm's t at causal SNPs matches the oracle
   Wald to ≤ 1.8e-7, and ĥ to ≤ 1.3e-7.
 * **Proximal contamination costs power.** With K from 500 SNPs, adding the 5
@@ -322,7 +356,8 @@ The full per-cell list for S2 is in `crash_accounting.csv`. Its rate is 1–3 of
 replicates). Oracle-based S2 columns exclude the same replicates.
 
 **Does the exclusion bias anything?** The crashes are not random.
-`synthesis.py` replayed every crashed replicate from its seed:
+`synthesis.py` replayed every crashed replicate from its seed, and checks that
+pylmm still crashes on the replayed data (it does, in all 107):
 
 * **They select on ĥ.** For all 25 S1 crashes, the textbook REML optimum is in
   0.960–0.975. For 63 of the 68 S2 crashes it is ≥ 0.955; the other 5 crashed
@@ -336,9 +371,16 @@ replicates). Oracle-based S2 columns exclude the same replicates.
   pooled type-I error at 0.05 by ≤ 0.0008 (BED h² = 0.95: 0.0495 → 0.0503)
   and leaves 1e-3 unchanged to 4 decimals
   ([`crash_bias_s1.csv`](../sims/results/synthesis/crash_bias_s1.csv)).
-* **S3 power: no material bias.** Adding the replayed replicates back changes
-  pylmm's Bonferroni power by ≤ 0.006
-  ([`crash_bias_s3.csv`](../sims/results/synthesis/crash_bias_s3.csv)).
+* **S3 power: no material bias, for fixed-h or refit.** For the fixed-h scan
+  the replay uses pylmm's null ĥ (or the capped oracle ĥ for the 2 null-fit
+  crashes). For the refit it refits every SNP the study refits (the causal
+  SNPs and the 100-SNP null sample) with pylmm, and uses the capped oracle ĥ
+  of [1, x] for each SNP whose refit crashes. Adding the replayed replicates
+  back changes pylmm's Bonferroni power by ≤ 0.006 with fixed h and by
+  ≤ 0.007 with refit
+  ([`crash_bias_s3.csv`](../sims/results/synthesis/crash_bias_s3.csv)). In
+  those 14 replicates, 1–27% of the 101–105 refitted SNPs crash (1–4% in 9 of
+  them), and 32% and 63% in the two whose null fit also crashed.
 * **S2 h² summaries: a small, real bias in some cells.** Excluding high-ĥ
   replicates pulls the reported mean ĥ down, except at true h² ≥ 0.98, where
   pylmm's 0.99 is above the crashed replicates' optimum. Including them, with
@@ -354,6 +396,31 @@ replicates). Oracle-based S2 columns exclude the same replicates.
   `s2_h2_recovery/summary.md` should be read as "conditional on pylmm not
   crashing".
 
+**Bug 4 on older scipy (replayed).** The crash needs scipy ≥ 1.11, where
+scipy's bracket search raises `BracketError` on the nan it gets above h = 1.
+`pylmm` declares `scipy>=1.9`, and its lowest-direct CI job runs scipy 1.9.
+We replayed the 95 crashed *null* fits of S1–S3 (25 S1, 68 S2, 2 S3) with the
+same pylmm code on Python 3.10, numpy 1.22.0 and scipy 1.9.0:
+
+* none crashes;
+* 90 (all 89 REML fits and the one ML fit with a bounded profile) return the
+  correct optimum: |ĥ − oracle ĥ| ≤ 7e-8 against the textbook oracle with
+  pylmm's 1e-6 eigenvalue clamp (ĥ = 0.960–0.975, so the 0.99 cap does not
+  bind). Brent's bracket search wanders above 1, gets nan, and still
+  converges to the interior optimum;
+* the other 5 are ML fits of an S2 m > n cell, where the ML profile is
+  unbounded (bug 17). There scipy 1.9 returns ĥ = 1.002–1.035, outside
+  [0, 1]: pylmm's LL at that ĥ is nan, while σ² and the association t
+  stay finite, so the output looks plausible;
+* pylmm's nan → H[i−1] fallback (lmm.py `getMax`) never fired, on either scipy.
+
+So the crash is a behaviour change of the Python 3 port on a current scipy,
+not a property of the original code: on the old stack the same search gave
+correct REML fits. The bounded-search fix (§6) is unchanged; it also removes
+the ĥ > 1 answers on old scipy. The 12 per-SNP refit crashes in S3 were not
+replayed on old scipy; they are the same REML search with one more
+covariate.
+
 ## 5. Consolidated bug ledger
 
 The machine-readable version is
@@ -364,7 +431,7 @@ fix changes results.
 
 | # | issue | verdict | severity | measured impact | path | phase |
 |---|---|---|---|---|---|---|
-| 4 | Brent unbounded above h = 1 | CONFIRMED | **high** | crash: S1 25/2,000, S2 68/3,984, S3 14/7,040; up to 12.5% per cell; per-SNP refit 1–3% of SNPs | every null fit and refit | **5** |
+| 4 | Brent unbounded above h = 1 | CONFIRMED | **high** | scipy ≥ 1.11: crash in S1 25/2,000, S2 68/3,984, S3 14/7,040; up to 12.5% per cell; per-SNP refit 0.25–2.8% of SNPs. scipy < 1.11: no crash; correct REML ĥ (90/95 replayed fits), ĥ = 1.002–1.035 with nan LL for unbounded ML (5/95) | every null fit and refit | **5** |
 | 16 | `--kfile` read unchecked | CONFIRMED | **high** | wrong-size K accepted, exit 0 (6/6); a headered K becomes all zeros on numpy < 2.3 | CLI `--kfile` | **5** |
 | 21 | K not validated (order, symmetry, PSD, nan) — new | CONFIRMED | high | permuted K: Δĥ up to 0.78, corr(t) < 0.9, no warning | `LMM`; CLI | 5 |
 | 20 | saturated design (n ≤ q+1) gives finite t — new | CONFIRMED | high | 8–20 of 20 SNPs, every replicate | `LMM`/`GWAS` | 5 |
@@ -372,7 +439,7 @@ fix changes results.
 | 3 | h grid stops at 0.99 (also `fitTwo`) | CONFIRMED | medium | ĥ = 0.99 for every well-identified fit at h² = 1 (S2); 38–46% of fits at h² 0.95–0.99; max Δ−log10 p 0.81 (BED h² = 0.99) | every null fit; `misc.fitTwo` | 6.3 |
 | 10 | `getPhenos` skips individuals | CONFIRMED | medium | CLI crashes; a silent row shift only for library callers | CLI; `input.plink` | 5 |
 | 11 | all-missing SNP gives an empty array | CONFIRMED | medium | the whole scan aborts (6/6) | `GWAS`; CLIs | 5 |
-| 17 | ML unbounded, centred GRM with m > n | NOT A BUG (property) | medium | pylmm ML ĥ +0.14 vs REML; 33–52% of ML fits at 0.99 | ML paths only | 6.3 |
+| 17 | ML unbounded, centred GRM with m > n | NOT A BUG (property) | medium | pylmm ML ĥ up to +0.16 vs REML (S4), ≈ +0.03 on average (S2, h² ≤ 0.95); 33–52% of ML fits at 0.99 | ML paths only | 6.3 |
 | 19 | non-estimable SNP gets t ≈ 0, not nan — new | CONFIRMED | medium | \|t\| ≤ 1e-6, 17–100% of replicates | `GWAS`; CLI | 5 |
 | 22 | constant phenotype gives h = 0.99, σ ≈ 0, or a crash — new | CONFIRMED | medium | 50–67% of replicates give finite numbers | `LMM`; CLI | 5 |
 | 23 | collinear covariates give a bare `LinAlgError` — new | CONFIRMED | medium | crash, no message about covariates (6/6) | `LMM`; CLI | 5 |
@@ -429,9 +496,20 @@ The manager's default recommendation is in bold.
 5. **Dead CLI flags: remove `--kfile2` (6) and fix `--eigen` (7)** so it reads
    what pylmmKinship writes. *Alternative:* implement `--kfile2` via
    `misc.fitTwo`, which is new functionality and belongs after Phase 6.3.
-6. **Acceptance check: after the bug-4 fix, re-run only the crashed cells of
-   S1–S3**, about 15 min. Confirm 0 crashes and replicate counts back at
-   80/12/80. The runner resumes; use a fresh results directory.
+6. **Acceptance check: after the bug-4 fix, re-run only the crashed
+   replicates of S1–S3**, about 15 min. The runner only computes
+   replicates missing from `raw/full.jsonl`, and crashed replicates are
+   never written there, so rerunning each study in place
+   (`just sim s1_null_calibration --jobs 4`, likewise S2 and S3) runs exactly
+   the 107 crashed replicates and nothing else; `--cells <id> …` (ids from
+   `python -m sims plan <study>`, or the `cell_id` column of
+   `crash_accounting.csv`) restricts it further. Confirm 0 errors and
+   replicate counts back at 80/12/80, then regenerate the reports and the
+   synthesis. Note that the rerun mixes old-pylmm and fixed-pylmm rows in one
+   file, which is what this check wants (the other replicates did not crash
+   and a bounded search changes them only within the optimizer's tolerance); for any change that alters
+   non-crashing results, bump the study's `STUDY_VERSION` instead, so the
+   whole study reruns and the loaders ignore the old rows.
 
 ## 7. Phase 5 test targets
 
@@ -442,7 +520,8 @@ lands. The marker must then be removed and the matching `test_bugN_current_*`
 test inverted.
 
 * Phase 5:
-  * `test_bug4_fit_with_peak_near_one`
+  * `test_bug4_fit_with_peak_near_one` (an expected failure only on
+    scipy ≥ 1.11; it already passes on older scipy, see §4)
   * `test_bug16_wrong_size_kinship_rejected`
   * `test_bug10_absent_individuals_treated_as_missing`
   * `test_bug11_cli_gwas_all_missing_snp`
@@ -506,25 +585,41 @@ targets"), and each has an exact cell in `s5_edge_cases/summary.csv`.
     1e-3 is up to 0.03.
   * The calibrated threshold rests on about 8 null p-values per cell at
     1e-3, and the Wilson CIs on power ignore that uncertainty.
-* **S3's own summary pools two designs in 8 rows.** In
-  `s3_power/summary.csv` and `power_table.csv`, the rows for (BN, BED) ×
-  h² = 0.5 × 5 causal × contam = 0 combine the main cell (K from 1,500 SNPs)
-  with the contamination arm's control (K from 500 SNPs), giving 160
-  replicates. `synthesis.py` keeps them apart, by `m_kin`. The fix belongs in
-  `s3_power.report()`, which should key on `m_kin`. This is a reporting issue,
-  not a pylmm finding.
-* **S1/S2 simulate from the same K that is fitted** (no misspecification,
-  except S2's probe and S1's BED/BN cells, where K estimates the structure).
-  Real-data calibration can be worse for reasons pylmm cannot control.
+* **Fixed: S3's summary used to pool two designs in 8 rows.** The rows for
+  (BN, BED) × h² = 0.5 × 5 causal × contam = 0 combined the main cell (K from
+  1,500 SNPs) with the contamination arm's control (K from 500 SNPs).
+  `s3_power.report()` now keys on `m_kin`, and `s3_power/summary.*` and
+  `power_table.csv` were regenerated from the raw rows. Only those 8 rows
+  changed; `synthesis.py` had always kept the designs apart. More generally,
+  every loader now keeps only the rows of the current grid and
+  `STUDY_VERSION` (`runner.current_rows`), and groups on every grid key.
+* **The model is exactly specified.** Every study draws the polygenic
+  effect u ~ N(0, h²σ²K) from the very K that is then fitted, on every
+  structure (BED and Balding–Nichols included: K is the GRM of the K SNPs,
+  and it is also the simulation covariance). The only deliberate
+  misspecifications are S2's small probe and S3's contamination arm (K
+  rebuilt with the causal SNPs). The calibration and power results therefore
+  hold under the correctly specified model. They also flatter the LMM
+  against OLS a little: the structure OLS ignores is exactly the structure
+  the LMM is given. **Robustness to K misspecification** (u drawn from the
+  true relatedness, or from causal SNPs, while K is estimated from other
+  SNPs) **is not tested**; it is a candidate for a later study. Real-data
+  calibration can be worse for reasons pylmm cannot control.
 * **Sample sizes are modest.**
   * n ≤ 600 everywhere; large-n behaviour is not tested.
   * S4 cells have 20–40 replicates, S2 has 24 per (source, n, m_K, h²), and
     S5 has 6 per case. S5 frequencies are a guide only.
   * The S2 oracle at n = 600 runs on about a third of the replicates.
 * **Bug 4 depends on the software version.** The crash needs scipy ≥ 1.11.
-  With older scipy, pylmm falls back to H[i−1], an h error of ≤ 0.02 by S4's
-  analysis. This was not measured at scale here. All runs used one software
-  stack, listed in §2.
+  On scipy 1.9 the 95 crashed null fits replayed (§4) give the correct REML
+  ĥ, or ĥ slightly above 1 for an unbounded ML profile; the nan → H[i−1]
+  fallback never fires. Apart from that replay, all runs used the one
+  software stack listed in §2.
+* **The raw results are not archived (won't fix here).** The
+  `raw/full.jsonl` files (about 100 MB) are gitignored, so the synthesis and
+  every recomputation in this report need a checkout that has them. Archiving
+  them, e.g. as a release asset, belongs with the Zenodo data work in the
+  cleanup phase.
 * **The oracle shares pylmm's model** (V = σ²(hK + (1−h)I), a Wald test with
   t(n−q)). It checks pylmm's arithmetic and optimisation, not the choice of
   model.

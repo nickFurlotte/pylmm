@@ -105,7 +105,13 @@ All tables are written as CSV and into `summary.md`; figures are PNGs.
    best point on the 201-point grid of pylmm's own likelihood by more than
    1e-3 LL units); "lost-mode" (the same, and the profile has more than one
    mode, so it is a first-optimum failure and not a grid-edge failure);
-   fraction multimodal; `ml_unbounded` frequency.
+   fraction multimodal; `ml_unbounded` frequency. Caveat: the 201-point grid
+   runs to h = 1, past pylmm's 0.99 cap, so an ML profile that keeps rising
+   beyond 0.99 (m > n, bug 17) is flagged "non-global" and, if it has an
+   interior bump, "lost-mode", although pylmm could not have returned the
+   higher point. `sims/synthesis.py` (part `s2lost`) recomputes both flags on
+   [0, 0.99] (`synthesis/s2_lostmode.csv`): ML lost-mode fits with m > n and
+   h² ≤ 0.95 drop from 225 to 16 of 992; REML stays at 0.
 4. `attribution` (and `attribution_pooled_n`): decomposition of the mean pylmm
    bias, using the oracle variants on oracle replicates:
    `total = pylmm - truth = est + opt + clamp + inter` where
