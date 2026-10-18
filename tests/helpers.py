@@ -5,7 +5,6 @@ readers, input loaders and CLI runners.
 Everything here must work unchanged on Python 2.7 (today) and Python 3
 (after the Phase 3 port), so: no f-strings, no py2-only builtins.
 """
-from __future__ import division, print_function
 
 import gzip
 import os

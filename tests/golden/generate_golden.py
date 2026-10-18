@@ -22,7 +22,6 @@ Output formats (all loadable from Python 3 without pickle):
              written with str(); for numpy>=1.14 float64 that is the shortest
              round-trip repr, 'nan' for missing).
 """
-from __future__ import print_function
 
 import gzip
 import os

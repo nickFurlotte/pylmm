@@ -1,5 +1,4 @@
 """scripts/example.py runs end to end and produces the golden values."""
-from __future__ import division, print_function
 
 import os
 import runpy

@@ -7,7 +7,6 @@ L.fit() is REML regardless of --REML: docs/phase1-baseline.md bug #1.)  That
 check is what catches a kinship that was read wrongly, e.g. silently
 zero-filled.
 """
-from __future__ import division, print_function
 
 import numpy as np
 import pytest

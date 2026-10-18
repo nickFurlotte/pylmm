@@ -1,5 +1,4 @@
 """Kinship: lmm.calculateKinship (Python API) and scripts/pylmmKinship.py."""
-from __future__ import division, print_function
 
 import os
 
