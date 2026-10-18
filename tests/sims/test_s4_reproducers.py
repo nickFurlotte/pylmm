@@ -255,10 +255,8 @@ def test_bug4_fit_with_peak_near_one():
     assert abs(L.fit()[0] - 0.972) < 1e-6
 
 
-def _high_h2_case():
-    """A real GRM (n = 60, m = 30) and y simulated at h2 = 0.97 whose REML
-    grid peak is at index 97 with LL(0.98) > LL(0.96) (seed found by search)."""
-    rng = np.random.default_rng(2)
+def _simulate_high_h2(seed):
+    rng = np.random.default_rng(seed)
     n, m = 60, 30
     G = rng.binomial(2, 0.3, size=(n, m)).astype(float)
     K = calculateKinship(G.copy())
@@ -268,6 +266,26 @@ def _high_h2_case():
     return y, K
 
 
+def _reml_grid(y, K):
+    with quiet():
+        L = LMM(y, K)
+    return L, np.array([L.LL(h, REML=True)[0] for h in np.arange(100) / 100.0])
+
+
+def _high_h2_case():
+    """A real GRM (n = 60, m = 30) and y simulated at h2 = 0.97 whose REML
+    grid peak is at index 97 with LL(0.98) > LL(0.96) -- the shape on which
+    the old unbounded Brent stepped past h = 1.  The profile near h = 1 of a
+    rank-deficient K is sensitive to platform round-off, so the seed is
+    searched for here rather than hard-coded."""
+    for seed in range(500):
+        y, K = _simulate_high_h2(seed)
+        _, LLs = _reml_grid(y, K)
+        if LLs[96] < LLs[97] > LLs[98] and LLs[98] > LLs[96]:
+            return y, K
+    pytest.fail("no seed in range(500) gives a REML peak at grid index 97")
+
+
 def test_bug4_high_h2_case_matches_oracle():
     """Regression (bug 4, fixed in Phase 5.1) on real likelihoods, null fit
     and per-SNP refit: pylmm matches the oracle with pylmm's conventions
@@ -275,10 +293,7 @@ def test_bug4_high_h2_case_matches_oracle():
     the old unbounded Brent raised BracketError on this case."""
     from scipy import optimize
     y, K = _high_h2_case()
-    with quiet():
-        L = LMM(y, K)
-    LLs = np.array([L.LL(h, REML=True)[0] for h in np.arange(100) / 100.0])
-    assert LLs[96] < LLs[97] > LLs[98] and LLs[98] > LLs[96]
+    L, _ = _reml_grid(y, K)
     if SCIPY_HAS_BRACKETERROR:
         old = lambda h: 1e6 if h < 0 else -L.LL(h, stack=False, REML=True)[0]  # noqa: E731
         with pytest.raises(BracketError), np.errstate(all="ignore"):
