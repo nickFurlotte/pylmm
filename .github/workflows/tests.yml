@@ -35,8 +35,14 @@ jobs:
       # Slow full-dataset tests are skipped unless --runslow is given.
       # The py27 Docker baseline (docker/py27/) is kept for reference only
       # and is not run in CI.
+      # --group sims adds pandas/matplotlib/statsmodels for the sims/ tests
+      # (they skip the parts needing those packages when the group is absent,
+      # as in the lowest-direct job below).
       - name: Run tests
-        run: uv run --locked pytest
+        run: uv run --locked --group sims pytest
+
+      - name: Simulation framework smoke run
+        run: uv run --locked --group sims python -m sims run example_null --quick --report
 
       - name: Console entry points
         run: |
