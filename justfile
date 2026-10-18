@@ -1,5 +1,9 @@
 # Common pylmm development commands.  Run `just` to list them.
 
+# Pass recipe arguments through as "$@" so quoted pytest args such as
+# `just test -k "a or b"` survive intact.
+set positional-arguments
+
 # List the available recipes
 default:
     @just --list
@@ -10,15 +14,15 @@ sync:
 
 # Run the test suite (slow tests skipped); extra args go to pytest
 test *args:
-    uv run pytest {{args}}
+    uv run pytest "$@"
 
 # Run the test suite including the slow full-dataset tests
 test-slow *args:
-    uv run pytest --runslow {{args}}
+    uv run pytest --runslow "$@"
 
 # Run the test suite in the Python 2.7 baseline Docker image
 test-py27 *args:
-    docker/py27/test.sh {{args}}
+    docker/py27/test.sh "$@"
 
 # Run scripts/example.py
 example:
