@@ -66,6 +66,21 @@ def test_bounded_search_never_leaves_its_bracket(h2, reml):
     assert ran > 0
 
 
+def test_s5_seed1177_small_n_null_fit_does_not_crash():
+    """S5 P1-7 reproducer (n = 10): the grid maximum is at 0.96 with a nearly
+    flat profile to 0.99; on scipy >= 1.11 this raised BracketError."""
+    rng = np.random.default_rng(1177)
+    W = rng.binomial(2, rng.uniform(.05, .5, 100), (10, 100)).astype(float)
+    K = calculateKinship(W)
+    y = rng.standard_normal(10)
+    L = make(y, K)
+    with np.errstate(all='raise'):
+        hmax, beta, sigma, ll = L.fit()
+    h = float(np.sum(hmax))
+    assert 0.95 <= h <= 0.99 and np.isfinite(np.sum(ll))
+    check_evals_inside_bracket(L)
+
+
 def test_ll_brent_guards_outside_unit_interval():
     y, K, _ = problem(0, 0.5)
     L = make(y, K)
