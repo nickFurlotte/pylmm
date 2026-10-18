@@ -12,6 +12,7 @@ that calls main().
 """
 
 import sys
+import warnings
 from optparse import OptionParser, OptionGroup
 
 import numpy as np
@@ -43,7 +44,9 @@ def buildParser():
 
     # NOTE (kept): the value given to -e is ignored; output always goes to
     # <outfile>.kva / <outfile>.kve.
-    basicGroup.add_option("-e", "--efile", dest="saveEig", help="Save eigendecomposition to this file.")
+    basicGroup.add_option("-e", "--efile", dest="saveEig", help="Save the eigendecomposition as text files <outfile>.kva and <outfile>.kve (the value of this option is ignored).  pylmmGWAS --eigen <outfile> reads them.")
+    basicGroup.add_option("--eigenNpz", dest="eigenNpz", default=None,
+                      help="Save the eigendecomposition to this .npz file (arrays Kva and Kve), which pylmmGWAS --eigen reads.  Binary and exact, and faster to read than -e.")
     basicGroup.add_option("-n", default=1000,dest="computeSize", type="int", help="The maximum number of SNPs to read into memory at once (default 1000).  This is important when there is a large number of SNPs, because memory could be an issue.")
 
     basicGroup.add_option("-v", "--verbose",
@@ -85,11 +88,15 @@ def main(argv=None):
     if options.emmaFile: IN.numSNPs = options.numSNPs
     i = 0
     K = None
+    nAllMissing = 0
     while i < IN.numSNPs:
         j = 0
         while j < options.computeSize and i < IN.numSNPs:
             snp,id = next(IN)
-            if snp.var() == 0:
+            # Skip monomorphic SNPs and SNPs with no called genotype (bug 11:
+            # an all-missing SNP used to crash, or to make K all nan).
+            if not np.isfinite(snp).all() or snp.var() == 0:
+                if np.isnan(snp).all(): nAllMissing += 1
                 i += 1
                 continue
             W[:,j] = snp
@@ -107,17 +114,24 @@ def main(argv=None):
             K_j = np.dot(W,W.T)
             K = K + K_j
 
+    if nAllMissing:
+        warnings.warn("skipped %d SNPs with no called genotype" % nAllMissing)
+    if K is None:
+        parser.error("No SNP with a non-constant genotype was read; cannot compute a kinship.")
     K = K / float(IN.numSNPs)
     if options.verbose: sys.stderr.write("Saving Kinship file to %s\n" % outFile)
     np.savetxt(outFile,K)
 
-    if options.saveEig:
+    if options.saveEig or options.eigenNpz:
         if options.verbose: sys.stderr.write("Obtaining Eigendecomposition\n")
         Kva,Kve = linalg.eigh(K)
+    if options.saveEig:
         if options.verbose: sys.stderr.write("Saving eigendecomposition to %s.[kva | kve]\n" % outFile)
         np.savetxt(outFile+".kva",Kva)
         np.savetxt(outFile+".kve",Kve)
-
+    if options.eigenNpz:
+        if options.verbose: sys.stderr.write("Saving eigendecomposition to %s\n" % options.eigenNpz)
+        np.savez(options.eigenNpz, Kva=Kva, Kve=Kve)
 
 if __name__ == '__main__':
     main()
