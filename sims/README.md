@@ -42,6 +42,7 @@ QUICK_GRID = {"n": [200], "h2": [0.5], "geno_seed": [1]}                  # tiny
 REPS, QUICK_REPS = 50, 2
 SEED_PARAMS = None   # optional: ["n", "h2"] makes cells that differ only in
                      # other params (e.g. method) share seeds (common random numbers)
+STUDY_VERSION = 1    # optional; bump when run_cell's output changes meaning
 
 def run_cell(params: dict, seed: int) -> dict:
     rng = np.random.default_rng(seed)
@@ -58,6 +59,13 @@ def report(df, outdir):      # optional; the default is a mean/SE table per cell
   id is a hash of the params, so changing a param value makes a new cell.
   Renaming a param also makes new cells, so don't rename params once a full
   run exists.
+- If you change what `run_cell` computes for the same params (a metric's
+  definition, a simulation fix), bump `STUDY_VERSION`. Every row records its
+  version, and from version 2 on the version is part of the cell id, so the
+  next run recomputes every cell and the loaders (`runner.current_rows`,
+  `report.load_results`, `synthesis.py`) ignore the old rows. They also
+  ignore rows of cells that are no longer in the grid. Rows written before
+  `STUDY_VERSION` existed count as version 1.
 - `run_cell` must be a pure function of `(params, seed)`. Draw all randomness
   from `np.random.default_rng(seed)`. Keep the genotype design fixed per cell
   with a `geno_seed` param passed to `genotypes.get`. That also lets the
@@ -96,8 +104,13 @@ def report(df, outdir):      # optional; the default is a mean/SE table per cell
   evaluations per fit. That is about 0.1 s at n = 200 and about 0.6 s at
   n = 500. Use it for n ≤ 500, and on a subset of replicates or SNPs.
 - Runs are resumable. If you interrupt a run and start it again, finished
-  (cell, rep) pairs are skipped. Running with a larger `--reps` adds only the
-  new replicates. `--force` discards that mode's raw results.
+  (cell, rep) pairs are skipped, so a rerun in place computes only the
+  missing replicates. Failed replicates are never written to
+  `raw/<mode>.jsonl` (only to `<mode>.errors.jsonl`, rewritten on each run),
+  so they are always among the missing ones and are retried. `--cells ID …`
+  restricts a run to some cells (ids from `python -m sims plan <study>`).
+  Running with a larger `--reps` adds only the new replicates. `--force`
+  discards that mode's raw results.
 
 ## Where results go, and what to commit
 

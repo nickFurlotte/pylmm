@@ -95,6 +95,42 @@ def test_errors_are_logged_and_retried(fake, tmp_path, monkeypatch):
     assert (s["ran"], s["skipped"], s["errors"]) == (3, 3, 0)
 
 
+def test_cells_option_runs_only_those_cells(fake):
+    ids = [t[0] for t in runner.plan(fake, quick=False)]
+    a2 = runner.cell_id({"a": 2, "b": "x"})
+    s = runner.run(fake, cells=[a2], verbose=False)
+    assert (s["ran"], s["tasks"]) == (3, 3)
+    assert {r["cell_id"] for r in _rows()} == {a2}
+    s = runner.run(fake, verbose=False)          # the rest, then nothing
+    assert (s["ran"], s["skipped"]) == (3, 3) and set(ids) == {r["cell_id"] for r in _rows()}
+    with pytest.raises(ValueError):
+        runner.run(fake, cells=["nope"], verbose=False)
+
+
+def test_study_version_in_rows_ids_and_loaders(fake, tmp_path):
+    import hashlib
+    params = {"a": 1, "b": "x"}
+    # version 1 ids are the historical ones (params only), so old raw files stay valid
+    assert runner.cell_id(params) == hashlib.sha1(runner.canonical(params).encode()).hexdigest()[:12]
+    assert runner.cell_id(params, 2) != runner.cell_id(params)
+    runner.run(fake, verbose=False)
+    assert all(r["study_version"] == 1 for r in _rows())
+    # rows of a cell that left the grid, and duplicates, are ignored by the loaders
+    stale = dict(_rows()[0], cell_id=runner.cell_id({"a": 9, "b": "x"}), params={"a": 9, "b": "x"})
+    runner._append(runner.raw_path("fake", False), [stale, _rows()[0]])
+    assert len(_rows()) == 8 and len(runner.current_rows(fake)) == 6
+    # bump the version: old rows no longer count, and a rerun recomputes everything
+    v2 = tmp_path / "fake_v2.py"
+    v2.write_text(open(fake).read() + "\nSTUDY_VERSION = 2\n")
+    runner._LOADED.pop(str(v2), None)
+    assert runner.current_rows(str(v2)) == []
+    s = runner.run(str(v2), verbose=False)
+    assert (s["ran"], s["skipped"]) == (6, 0)
+    cur = runner.current_rows(str(v2))
+    assert len(cur) == 6 and all(r["study_version"] == 2 for r in cur)
+    assert len(runner.current_rows(fake)) == 6     # v1 view unchanged
+
+
 def test_truncated_line_is_skipped(fake):
     runner.run(fake, verbose=False)
     with open(runner.raw_path("fake", False), "a") as f:
@@ -122,7 +158,8 @@ def test_report_load(fake):
     from sims import report
     runner.run(fake, verbose=False)
     df = report.load_results("fake")
-    assert len(df) == 6 and {"a", "b", "x", "arr", "rep"} <= set(df.columns)
+    assert len(df) == 6
+    assert len(report.load_results("fake", mod=runner.load_study(fake))) == 6 and {"a", "b", "x", "arr", "rep"} <= set(df.columns)
     s = report.summarize(df, ["a"], ["x", "a2"])
     assert list(s["n_reps"]) == [3, 3] and "x_se" in s.columns
     out = report.report(fake)

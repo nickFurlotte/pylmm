@@ -30,6 +30,9 @@ def main(argv=None):
     r.add_argument("--force", action="store_true",
                    help="discard existing raw results for this mode first")
     r.add_argument("--report", action="store_true", help="run the report afterwards")
+    r.add_argument("--cells", nargs="+", metavar="ID",
+                   help="run only these cell ids (from `plan`); only their missing "
+                        "or failed replicates run")
 
     p = sub.add_parser("report", help="summarise results (summary.csv/md, PNGs)")
     p.add_argument("study")
@@ -48,15 +51,17 @@ def main(argv=None):
     if a.cmd == "plan":
         mod = runner.load_study(a.study)
         grid = runner.study_grid(mod, a.quick)
+        ver = runner.study_version(mod)
         for g in grid:
-            print(runner.cell_id(g), runner.canonical(g))
+            print(runner.cell_id(g, ver), runner.canonical(g))
         print("%d cells x %d reps = %d tasks"
               % (len(grid), runner.study_reps(mod, a.quick),
                  len(grid) * runner.study_reps(mod, a.quick)))
         return 0
     if a.cmd == "run":
         s = runner.run(a.study, quick=a.quick, jobs=a.jobs, reps=a.reps, force=a.force,
-                       job_cap=10 ** 6 if a.no_job_cap else runner.MAX_JOBS)
+                       job_cap=10 ** 6 if a.no_job_cap else runner.MAX_JOBS,
+                       cells=a.cells)
         if a.report and s["ran"] + s["skipped"]:
             from sims import report
             print("report written to", report.report(a.study, quick=a.quick))

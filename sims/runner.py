@@ -11,6 +11,12 @@ defining::
     SEED_PARAMS  optional list of param names that alone determine the seed
                  (common random numbers across cells that differ only in the
                  other params, e.g. the method)
+    STUDY_VERSION  optional int (default 1).  Bump it whenever run_cell's
+                 output changes meaning for the same params (a new metric
+                 definition, a bug fix in the simulation).  It is stored in
+                 every row, and from version 2 on it is part of cell_id, so a
+                 resumed run never mixes rows of two versions and the loaders
+                 (``current_rows``, ``report.load_results``) ignore stale rows.
 
 Instead of the grid constants a study may define ``grid(quick: bool)``
 returning a list of param dicts, and ``reps(quick: bool)``.
@@ -22,12 +28,18 @@ always gets the same seed regardless of grid order, --jobs or resumption.
 Storage: ``sims/results/<study>/raw/<mode>.jsonl`` (mode = quick | full), one
 JSON object per finished replicate::
 
-    {"cell_id", "rep", "seed", "params": {...}, "metrics": {...}, "elapsed", "time"}
+    {"cell_id", "rep", "seed", "study_version", "params": {...}, "metrics": {...},
+     "elapsed", "time"}
 
-Rows are appended (and flushed) as soon as a chunk finishes; on restart,
-(cell_id, rep) pairs already present are skipped.  Failed replicates go to
-``raw/<mode>.errors.jsonl`` with the traceback and are retried on the next
-run.  ``raw/runs.jsonl`` logs each invocation (git SHA, args, wall time).
+(rows written before STUDY_VERSION existed have no ``study_version``; they
+count as version 1).  Rows are appended (and flushed) as soon as a chunk
+finishes; on restart, (cell_id, rep) pairs already present are skipped, so
+rerunning a study in place computes only the missing replicates.  Failed
+replicates are never written to ``<mode>.jsonl``: they go to
+``raw/<mode>.errors.jsonl`` with the traceback, and since they stay missing
+they are retried on the next run (the errors file is rewritten with that
+run's failures only).  ``--cells ID [ID ...]`` restricts a run to some cells
+(ids as printed by ``python -m sims plan``).  ``raw/runs.jsonl`` logs each invocation (git SHA, args, wall time).
 Set ``SIMS_RESULTS_DIR`` to put results elsewhere (the tests do).
 """
 
@@ -134,8 +146,17 @@ def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, default=_json_default, separators=(",", ":"))
 
 
-def cell_id(params: dict) -> str:
-    return hashlib.sha1(canonical(params).encode()).hexdigest()[:12]
+def cell_id(params: dict, version: int = 1) -> str:
+    """12-hex id of a cell.  Version 1 hashes the params alone (the ids of
+    every raw file written before STUDY_VERSION existed); later versions hash
+    the version too, so their rows never collide with older ones."""
+    key = canonical(params) if int(version) == 1 else \
+        canonical({"params": params, "study_version": int(version)})
+    return hashlib.sha1(key.encode()).hexdigest()[:12]
+
+
+def study_version(mod) -> int:
+    return int(getattr(mod, "STUDY_VERSION", 1))
 
 
 def task_seed(study: str, params: dict, rep: int, seed_params=None) -> int:
@@ -188,6 +209,34 @@ def _append(path: str, rows: Iterable[dict]) -> None:
         os.fsync(f.fileno())
 
 
+def row_version(row: dict) -> int:
+    return int(row.get("study_version", 1))
+
+
+def current_rows(ref: str, quick: bool = False, mod=None) -> List[dict]:
+    """Rows of ``raw/<mode>.jsonl`` that belong to the study as it is now:
+    cell_id in the current grid and row version == STUDY_VERSION (extra
+    replicates from a ``--reps`` run are kept).  Rows of a cell that is no
+    longer in the grid, of an older version, or duplicates of a (cell_id,
+    rep) are dropped with a note on stderr, so summaries never mix designs."""
+    mod = mod or load_study(ref)
+    name = study_name(ref, mod)
+    ver = study_version(mod)
+    want = {cell_id(p, ver) for p in study_grid(mod, quick)}
+    rows = read_rows(raw_path(name, quick))
+    keep, seen = [], set()
+    for r in rows:
+        k = (r["cell_id"], r["rep"])
+        if r["cell_id"] in want and row_version(r) == ver and k not in seen:
+            seen.add(k)
+            keep.append(r)
+    if len(keep) < len(rows):
+        sys.stderr.write("note: %s: ignoring %d of %d raw rows not in the current plan "
+                         "(grid or STUDY_VERSION %d) or duplicated\n"
+                         % (name, len(rows) - len(keep), len(rows), ver))
+    return keep
+
+
 def git_sha() -> str:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO,
@@ -207,6 +256,7 @@ def git_sha() -> str:
 def _execute(ref: str, tasks: List[tuple]) -> List[dict]:
     """Run tasks [(cell_id, params, rep, seed), ...] in this process."""
     mod = load_study(ref)
+    ver = study_version(mod)
     out = []
     for cid, params, rep, seed in tasks:
         t0 = time.perf_counter()
@@ -220,12 +270,12 @@ def _execute(ref: str, tasks: List[tuple]) -> List[dict]:
             # round-trip now so a non-serialisable metric fails here, not later
             metrics = json.loads(json.dumps(metrics, default=_json_default))
             out.append({"ok": True, "cell_id": cid, "rep": rep, "seed": seed,
-                        "params": params, "metrics": metrics,
+                        "study_version": ver, "params": params, "metrics": metrics,
                         "elapsed": time.perf_counter() - t0,
                         "time": _dt.datetime.now().isoformat(timespec="seconds")})
         except Exception:
             out.append({"ok": False, "cell_id": cid, "rep": rep, "seed": seed,
-                        "params": params, "error": traceback.format_exc(),
+                        "study_version": ver, "params": params, "error": traceback.format_exc(),
                         "elapsed": time.perf_counter() - t0,
                         "time": _dt.datetime.now().isoformat(timespec="seconds")})
     return out
@@ -242,9 +292,10 @@ def plan(ref: str, quick: bool, reps: Optional[int] = None, mod=None) -> List[tu
     name = study_name(ref, mod)
     seed_params = getattr(mod, "SEED_PARAMS", None)
     n_reps = study_reps(mod, quick) if reps is None else reps
+    ver = study_version(mod)
     tasks = []
     for params in study_grid(mod, quick):
-        cid = cell_id(params)
+        cid = cell_id(params, ver)
         for rep in range(n_reps):
             tasks.append((cid, params, rep, task_seed(name, params, rep, seed_params)))
     return tasks
@@ -252,8 +303,11 @@ def plan(ref: str, quick: bool, reps: Optional[int] = None, mod=None) -> List[tu
 
 def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None,
         force: bool = False, chunk: Optional[int] = None, verbose: bool = True,
-        job_cap: int = MAX_JOBS) -> dict:
-    """Run (or resume) a study.  Returns a small summary dict."""
+        job_cap: int = MAX_JOBS, cells: Optional[Iterable[str]] = None) -> dict:
+    """Run (or resume) a study.  Returns a small summary dict.
+
+    Only replicates missing from ``raw/<mode>.jsonl`` run (earlier failures
+    included).  ``cells``: restrict the run to these cell ids."""
     mod = load_study(ref)
     name = study_name(ref, mod)
     path = raw_path(name, quick)
@@ -269,13 +323,20 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
                 os.remove(p)
 
     tasks = plan(ref, quick, reps, mod)
+    if cells is not None:
+        cells = set(cells)
+        unknown = cells - {t[0] for t in tasks}
+        if unknown:
+            raise ValueError("unknown cell ids for %s: %s (see `python -m sims plan`)"
+                             % (name, ", ".join(sorted(unknown))))
+        tasks = [t for t in tasks if t[0] in cells]
     done = {(r["cell_id"], r["rep"]) for r in read_rows(path)}
     todo = [t for t in tasks if (t[0], t[2]) not in done]
     if os.path.exists(err_path):
         os.remove(err_path)       # failures are retried; keep only this run's
     log = lambda msg: verbose and sys.stderr.write(msg + "\n")   # noqa: E731
     log("%s [%s]: %d cells x %d reps = %d tasks; %d already done, %d to run, jobs=%d"
-        % (name, "quick" if quick else "full", len(study_grid(mod, quick)),
+        % (name, "quick" if quick else "full", len({t[0] for t in tasks}),
            study_reps(mod, quick) if reps is None else reps, len(tasks),
            len(tasks) - len(todo), len(todo), jobs))
 
@@ -325,6 +386,8 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
 
     wall = time.time() - t0
     summary = {"study": name, "mode": "quick" if quick else "full", "tasks": len(tasks),
+               "study_version": study_version(mod),
+               "cells": None if cells is None else sorted(cells),
                "skipped": len(tasks) - len(todo), "ran": n_ok, "errors": n_err,
                "jobs": jobs, "wall_s": round(wall, 2), "task_cpu_s": round(task_time, 2),
                "git": git_sha(), "time": _dt.datetime.now().isoformat(timespec="seconds"),

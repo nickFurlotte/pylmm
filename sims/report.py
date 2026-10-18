@@ -20,8 +20,13 @@ import numpy as np
 from sims import runner
 
 
-def load_results(name: str, quick: bool = False):
-    """All finished replicates of a study as a DataFrame.
+def load_results(name: str, quick: bool = False, mod=None):
+    """Finished replicates of a study as a DataFrame.
+
+    With ``mod`` (the study module; ``report`` always passes it) only rows of
+    the current plan and STUDY_VERSION are kept (``runner.current_rows``), so
+    rows left over from an older grid or version never leak into a summary.
+    Without it every row of ``raw/<mode>.jsonl`` is returned.
 
     Columns: cell_id, rep, seed, elapsed, one column per param, one per
     metric.  List-valued metrics stay as Python lists (object columns);
@@ -29,7 +34,10 @@ def load_results(name: str, quick: bool = False):
     be grouped on.
     """
     import pandas as pd
-    rows = runner.read_rows(runner.raw_path(name, quick))
+    if mod is not None:
+        rows = runner.current_rows(name, quick, mod=mod)
+    else:
+        rows = runner.read_rows(runner.raw_path(name, quick))
     recs = []
     for r in rows:
         rec = {"cell_id": r["cell_id"], "rep": r["rep"], "seed": r["seed"],
@@ -147,7 +155,7 @@ def report(ref: str, quick: bool = False) -> str:
     """CLI entry: load results, call the study's ``report(df, outdir)``."""
     mod = runner.load_study(ref)
     name = runner.study_name(ref, mod)
-    df = load_results(name, quick)
+    df = load_results(ref, quick, mod=mod)
     if df.empty:
         raise SystemExit("no results for %s (%s); run it first"
                          % (name, "quick" if quick else "full"))
