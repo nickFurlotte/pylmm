@@ -221,13 +221,14 @@ def test_bug3_fittwo_can_select_k1_alone():
     assert h2 == 0.0
 
 
-def test_bug4_current_pylmm_ll_is_nan_above_one():
+def test_bug4_ll_is_nan_above_one_but_ll_brent_guards_both_ends():
     G, K, y, _ = toy()
     with quiet():
         L = LMM(y, K)
     with np.errstate(invalid="ignore"):
         assert np.isnan(L.LL(1.02)[0])            # log(h*Kva + 1 - h) of a negative number
-    assert L.LL_brent(-0.1) == 1e6                 # only h < 0 is guarded
+    assert L.LL_brent(-0.1) == 1e6
+    assert L.LL_brent(1.02) == 1e6                 # fixed in Phase 5.1: h > 1 guarded too
 
 
 def _peak_0972(h):
@@ -237,24 +238,64 @@ def _peak_0972(h):
 
 
 @pytest.mark.skipif(not SCIPY_HAS_BRACKETERROR, reason="scipy < 1.11 returns instead of raising")
-def test_bug4_current_brent_crashes_with_bracketerror():
-    """Peak at grid index 97 with LL(0.98) > LL(0.96): Brent's bracket search
-    steps to 0.98 + 1.618 * 0.02 = 1.012, gets nan, and on scipy >= 1.11 the
-    whole fit raises BracketError (the nan -> H[i-1] fallback is dead code)."""
-    L = fake_lmm(_peak_0972)
+def test_bug4_old_unbounded_brent_crashed_with_bracketerror():
+    """Why this case is the regression test: peak at grid index 97 with
+    LL(0.98) > LL(0.96), so the unbounded optimize.brent pylmm used before
+    Phase 5.1 stepped to 0.98 + 1.618 * 0.02 = 1.012, got nan, and on
+    scipy >= 1.11 raised BracketError."""
+    from scipy import optimize
     with pytest.raises(BracketError):
-        L.fit()
+        optimize.brent(lambda h: 1e6 if h < 0 else -_peak_0972(h), brack=(0.96, 0.98))
 
 
-@pytest.mark.xfail(SCIPY_HAS_BRACKETERROR, strict=True,
-                   reason="bug 4: Brent is unbounded above h = 1; scipy >= 1.11 raises BracketError")
 def test_bug4_fit_with_peak_near_one():
-    """The correct answer.  Version-dependent: on scipy < 1.11 the same
-    unbounded search steps above 1, gets nan, and still converges to the
-    interior optimum (the nan -> H[i-1] fallback never fires), so this passes
-    there and is only an expected failure on scipy >= 1.11."""
+    """Regression (bug 4, fixed in Phase 5.1): the bounded search returns the
+    interior optimum on every scipy (it used to raise BracketError on
+    scipy >= 1.11)."""
     L = fake_lmm(_peak_0972)
-    assert abs(L.fit()[0] - 0.972) < 1e-4
+    assert abs(L.fit()[0] - 0.972) < 1e-6
+
+
+def _high_h2_case():
+    """A real GRM (n = 60, m = 30) and y simulated at h2 = 0.97 whose REML
+    grid peak is at index 97 with LL(0.98) > LL(0.96) (seed found by search)."""
+    rng = np.random.default_rng(2)
+    n, m = 60, 30
+    G = rng.binomial(2, 0.3, size=(n, m)).astype(float)
+    K = calculateKinship(G.copy())
+    d, V = linalg.eigh(K)
+    u = V @ (np.sqrt(np.clip(d, 0, None)) * rng.standard_normal(n))
+    y = np.sqrt(0.97) * u + np.sqrt(0.03) * rng.standard_normal(n)
+    return y, K
+
+
+def test_bug4_high_h2_case_matches_oracle():
+    """Regression (bug 4, fixed in Phase 5.1) on real likelihoods, null fit
+    and per-SNP refit: pylmm matches the oracle with pylmm's conventions
+    (eig_clamp=1e-6, the pylmm grid and search) to ~1e-6.  On scipy >= 1.11
+    the old unbounded Brent raised BracketError on this case."""
+    from scipy import optimize
+    y, K = _high_h2_case()
+    with quiet():
+        L = LMM(y, K)
+    LLs = np.array([L.LL(h, REML=True)[0] for h in np.arange(100) / 100.0])
+    assert LLs[96] < LLs[97] > LLs[98] and LLs[98] > LLs[96]
+    if SCIPY_HAS_BRACKETERROR:
+        old = lambda h: 1e6 if h < 0 else -L.LL(h, stack=False, REML=True)[0]  # noqa: E731
+        with pytest.raises(BracketError), np.errstate(all="ignore"):
+            optimize.brent(old, brack=(0.96, 0.98))
+    f = oracle.fit(y, K, reml=True, eig_clamp=1e-6, h_grid="pylmm")
+    assert 0.96 < f.h < 0.98
+    h = float(np.sum(L.fit(REML=True)[0]))
+    assert abs(h - f.h) < 1e-6
+    # the 0.99 cap does not bind: the clamped global optimum is the same h
+    assert abs(h - oracle.fit(y, K, reml=True, eig_clamp=1e-6).h) < 1e-6
+    # per-SNP refit path (fit(X=x)) on the same data: no crash, h in [0, 1]
+    x = np.random.default_rng(3).binomial(2, 0.3, size=(len(y), 1)).astype(float)
+    with quiet():
+        hx = float(np.sum(L.fit(X=x, REML=True)[0]))
+    fx = oracle.fit(y, K, X=np.c_[np.ones(len(y)), x], reml=True, eig_clamp=1e-6, h_grid="pylmm")
+    assert 0.0 <= hx <= 1.0 and abs(hx - fx.h) < 1e-6
 
 
 # ---------------------------------------------------------------------------
