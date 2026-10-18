@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    env:
+      # Same single-threaded BLAS setting as the py27 baseline image.
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-uv stopped publishing floating major tags after v7, so this is
+      # pinned to an exact release; bump it deliberately.
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # Slow full-dataset tests are skipped unless --runslow is given.
+      # The py27 Docker baseline (docker/py27/) is kept for reference only
+      # and is not run in CI.
+      - name: Run tests
+        run: uv run --locked pytest
