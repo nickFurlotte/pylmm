@@ -318,7 +318,9 @@ def run_remlml(params, rng):
     if null_reml["crashed"]:                 # bug 4: GWAS would raise too
         return out
     t_reml, p_reml = methods.pylmm_gwas(y, G, kin, REML=True)
-    t_cli, p_cli = methods.pylmm_gwas(y, G, kin, REML=False)          # CLI default
+    # the pre-Phase-5.2 CLI default (REML null, Q/(n-q) Wald) == REML=True;
+    # since 5.2, REML=False would be a real ML scan (bug 1 fixed)
+    t_cli, p_cli = methods.pylmm_gwas(y, G, kin, REML=True)           # CLI default (pre-5.2)
     out["cli_vs_reml_max_abs_dt"] = float(np.nanmax(np.abs(t_cli - t_reml)))
     out.update(h_reml_pylmm=null_reml["h"], h_ml_pylmm=null_ml["h"],
                ml_pylmm_cap=null_ml["cap"], ml_pylmm_crashed=null_ml["crashed"])
@@ -363,12 +365,14 @@ def run_remlml(params, rng):
         x = G[:, j].reshape(-1, 1)
         try:
             with np.errstate(all="ignore"):
+                # pre-Phase-5.2 CLI --refit: ML refit, Q/(n-q) Wald, which is
+                # association(REML=True) since 5.2 (REML=False now uses Q/n)
                 L.fit(X=x, REML=False)
                 h_r_cli.append(L.optH)
-                t_r_cli.append(L.association(x, REML=False)[0])
+                t_r_cli.append(L.association(x, REML=True)[0])
                 L.fit(X=x)                                   # lmm.GWAS(refit=True)
                 h_r_lib.append(L.optH)
-                t_r_lib.append(L.association(x, REML=False)[0])
+                t_r_lib.append(L.association(x, REML=True)[0])
         except Exception:
             crash += 1
     out["refit_crashes"] = crash

@@ -42,10 +42,11 @@ def pylmm_gwas(y: np.ndarray, G: np.ndarray, kin, X0: Optional[np.ndarray] = Non
                REML: bool = True, refit: bool = False):
     """``pylmm.lmm.GWAS`` on the columns of G -> (t, p) float arrays.
 
-    Note what GWAS does (and these studies measure): ``REML`` only reaches
-    the per-SNP ``association`` call, never the null ``fit`` (bug 1), and
-    SNPs with missing genotypes are refit on the non-missing subset with a
-    fresh eigh each.  Monomorphic SNPs give nan.
+    Note what GWAS does: since Phase 5.2 ``REML`` reaches the null fit,
+    every refit and the test (before, it only reached ``association``, and
+    REML=False gave the REML Wald test: bugs 1 and 9).  SNPs with missing
+    genotypes are refit on the non-missing subset with a fresh eigh each.
+    Non-estimable SNPs (monomorphic, collinear with X0) give nan.
     """
     from pylmm.lmm import GWAS
     Kva, Kve = kin.eig_for_pylmm()

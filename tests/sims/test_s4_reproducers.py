@@ -137,43 +137,87 @@ def _ml_bounded_case():
     return Gt, K, y
 
 
-def test_bug1_current_gwas_reml_flag_does_not_change_t_or_p():
+def test_bug1_gwas_reml_flag_changes_t():
+    """Regression (bug 1, fixed in Phase 5.2): REML=False used to give the
+    REML t and p exactly; it is now an ML scan."""
     Gt, K, y = _ml_bounded_case()
     with quiet():
         t1, p1 = GWAS(y, Gt, K, REML=True)
         t0, p0 = GWAS(y, Gt, K, REML=False)
-    np.testing.assert_array_equal(t0, t1)
-    np.testing.assert_array_equal(p0, p1)
+    assert np.max(np.abs(np.subtract(t0, t1))) > 1e-3
 
 
-def test_bug1_current_cli_refit_fits_ml_but_library_refit_fits_reml():
-    """CLI --refit calls L.fit(X=x, REML=options.REML) (ML by default);
-    lmm.GWAS(refit=True, REML=False) calls L.fit(X=x) (REML)."""
-    Gt, K, y = _ml_bounded_case()
-    src = inspect.getsource(pylmm_lmm.GWAS)
-    assert "L.fit(X=x)" in src and "Ls.fit(X=xs)" in src
-    assert "L.fit(X=x,REML=options.REML)" in inspect.getsource(cli_gwas.main)
+def _imputed(G):
+    G = G.copy()
+    for j in range(G.shape[1]):
+        G[np.isnan(G[:, j]), j] = np.nanmean(G[:, j])
+    return G
+
+
+def test_bug1_cli_refit_follows_reml_choice(bed_toy):
+    """Regression (bug 1, fixed in Phase 5.2): CLI --refit used to fit h by
+    ML per SNP while the library fitted REML.  Now --refit is REML, --refit
+    --ML is ML, and both match the oracle refit (CLI SNPs are mean-imputed)."""
+    d = bed_toy["dir"]
+    K = np.loadtxt(bed_toy["kin"])
+    G = _imputed(bed_toy["G"])
+    for flags, reml in (([], True), (["--ML"], False)):
+        out = str(d / ("refit%d.out" % reml))
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--refit"] + flags + [out])
+        t = read_out(out)[:, 2]
+        for j in range(6):
+            w = oracle.wald(bed_toy["y"], K, G[:, j], null_reml=reml, refit=True,
+                            eig_clamp=1e-6, h_grid="pylmm")
+            assert t[j] == pytest.approx(w.t, rel=1e-5, abs=1e-6), (flags, j)
+
+
+def test_bug1_cli_ml_flag(bed_toy):
+    """--ML fits the null model and runs the test by ML (sigma^2 = Q/n);
+    --REML is a no-op; both together are a usage error."""
+    d = bed_toy["dir"]
+    K = np.loadtxt(bed_toy["kin"])
+    G = _imputed(bed_toy["G"])
+    outs = {}
+    for tag, flags in (("default", []), ("reml", ["--REML"]), ("ml", ["--ML"])):
+        outs[tag] = str(d / (tag + ".out"))
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"]] + flags + [outs[tag]])
+    np.testing.assert_array_equal(read_out(outs["default"]), read_out(outs["reml"]))
+    t_ml = read_out(outs["ml"])[:, 2]
+    for j in range(bed_toy["m"]):
+        w = oracle.wald(bed_toy["y"], K, G[:, j], null_reml=False, eig_clamp=1e-6, h_grid="pylmm")
+        assert t_ml[j] == pytest.approx(w.t, rel=1e-5, abs=1e-6)
+    with pytest.raises(SystemExit):
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--REML", "--ML", str(d / "x")])
+
+
+def test_bug1_remove_missing_follows_reml_choice(bed_toy):
+    """Regression (bug 1 / S5 P0-4, fixed in Phase 5.2): with
+    --removeMissingGenotypes the SNP with a missing call (SNP 2) is refitted
+    on its non-missing individuals by REML, like the library, or by ML with
+    --ML; complete SNPs give the same t as without the flag."""
+    d = bed_toy["dir"]
+    G = bed_toy["G"]
     with quiet():
-        L = LMM(y, K)
-    x = Gt[:, :1]
-    L.fit(X=x, REML=False)
-    h_ml = L.optH
-    L.fit(X=x)
-    h_reml = L.optH
-    assert abs(h_ml - h_reml) > 1e-3
+        lib_reml = GWAS(bed_toy["y"], G, np.loadtxt(bed_toy["kin"]), REML=True)[0]
+        lib_ml = GWAS(bed_toy["y"], G, np.loadtxt(bed_toy["kin"]), REML=False)[0]
+    for flags, lib in (([], lib_reml), (["--ML"], lib_ml)):
+        a, b = str(d / "rm.out"), str(d / "imp.out")
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--removeMissingGenotypes"] + flags + [a])
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"]] + flags + [b])
+        ta, tb = read_out(a)[:, 2], read_out(b)[:, 2]
+        complete = np.delete(np.arange(bed_toy["m"]), 2)
+        np.testing.assert_allclose(ta[complete], tb[complete], rtol=1e-8)
+        np.testing.assert_allclose(ta, lib, rtol=1e-6, atol=1e-8)
 
 
-@pytest.mark.xfail(strict=True, reason="bug 1: GWAS(REML=False) uses a REML null h, not the ML Wald")
 def test_bug1_gwas_ml_equals_textbook_ml_wald():
-    """An ML null fit + ML Wald, isolated from bug 9: the reference keeps
-    pylmm's sigma^2 = Q/(n-q) (``sigma_convention='pylmm'``), so fixing bug 1
-    alone flips this test (an ML-fitted pylmm matches it to ~5e-8 here, while
-    the textbook Q/n would still differ by sqrt(n/(n-q)) = 1.0127; that is
-    bug 9's own reproducer below)."""
+    """Regression (bug 1 and, under ML only, bug 9; fixed in Phase 5.2):
+    GWAS(REML=False) is an ML null fit plus the textbook ML Wald test,
+    sigma^2 = Q/n."""
     Gt, K, y = _ml_bounded_case()
     with quiet():
         t0, _ = GWAS(y, Gt, K, REML=False)
-    w = [oracle.wald(y, K, Gt[:, j], null_reml=False, sigma_convention="pylmm").t
+    w = [oracle.wald(y, K, Gt[:, j], null_reml=False, sigma_convention="textbook").t
          for j in range(Gt.shape[1])]
     np.testing.assert_allclose(t0, w, atol=1e-4)
 
@@ -356,30 +400,46 @@ def test_cli_toy_default_run_works(bed_toy):
     assert read_out(out).shape == (bed_toy["m"], 4)
 
 
-@pytest.mark.xfail(strict=True, raises=NameError, reason="bug 6: --kfile2 uses undefined LMM_withK2")
-def test_bug6_kfile2(bed_toy):
+def test_bug6_kfile2_removed(bed_toy):
+    """Regression (bug 6, fixed in Phase 5.2): --kfile2 called the undefined
+    LMM_withK2 (NameError); the option is removed, so it is a usage error."""
     out = str(bed_toy["dir"] / "k2.out")
-    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--kfile2", bed_toy["kin"], out])
+    with pytest.raises(SystemExit):
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--kfile2", bed_toy["kin"], out])
 
 
-@pytest.mark.xfail(strict=True, raises=(ValueError, OSError),
-                   reason="bug 7: --eigen np.load()s <base>.Kva; pylmmKinship -e writes text <out>.kva")
-def test_bug7_eigen_reads_pylmmkinship_output(bed_toy):
+@pytest.mark.parametrize("fmt", ["text", "npz"])
+def test_bug7_eigen_reads_pylmmkinship_output(bed_toy, fmt):
+    """Regression (bug 7, fixed in Phase 5.2): --eigen reads what
+    pylmmKinship writes, as text (-e: <kin>.kva/.kve) or .npz (--eigenNpz),
+    and gives the same results as without it."""
+    d = bed_toy["dir"]
+    npz = str(d / "eig.npz")
     with quiet():
-        cli_kinship.main(["--bfile", bed_toy["base"], "-e", "x", bed_toy["kin"]])
-    assert os.path.exists(bed_toy["kin"] + ".kva")
-    out = str(bed_toy["dir"] / "eig.out")
-    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--eigen", bed_toy["kin"], out])
+        cli_kinship.main(["--bfile", bed_toy["base"], "-e", "x", "--eigenNpz", npz, bed_toy["kin"]])
+    assert os.path.exists(bed_toy["kin"] + ".kva") and os.path.exists(npz)
+    np.testing.assert_array_equal(np.loadtxt(bed_toy["kin"] + ".kva"), np.load(npz)["Kva"])
+    ref, out = str(d / "ref.out"), str(d / "eig.out")
+    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], ref])
+    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--eigen",
+              npz if fmt == "npz" else bed_toy["kin"], out])
+    np.testing.assert_allclose(read_out(out), read_out(ref), rtol=1e-8, atol=1e-10)
 
 
-def test_bug14_current_no_pheno_file_raises_typeerror(bed_toy):
-    os.remove(bed_toy["base"] + ".phenos")
-    with pytest.raises(TypeError):
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], str(bed_toy["dir"] / "x")])
+def test_bug7_eigen_of_another_kinship_rejected(bed_toy):
+    """A decomposition of another K, of the wrong size, or a missing file is
+    a usage error."""
+    d = bed_toy["dir"]
+    np.savez(str(d / "bad.npz"), Kva=np.ones(bed_toy["n"]), Kve=np.eye(bed_toy["n"]))
+    np.savez(str(d / "short.npz"), Kva=np.ones(3), Kve=np.eye(3))
+    for f in ("bad.npz", "short.npz", "missing.npz"):
+        with pytest.raises(SystemExit):
+            run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--eigen", str(d / f),
+                      str(d / "x")])
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError, reason="bug 14: os.path.isfile(None) instead of parser.error")
 def test_bug14_no_pheno_file_is_a_usage_error(bed_toy):
+    """Regression (bug 14, fixed in Phase 5.2): used to be a TypeError."""
     os.remove(bed_toy["base"] + ".phenos")
     with pytest.raises(SystemExit):
         run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], str(bed_toy["dir"] / "x")])
@@ -430,71 +490,120 @@ def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
 # bug 9: ML sigma
 # ---------------------------------------------------------------------------
 
-def test_bug9_current_convention_ml_wald_uses_q_over_n_minus_q():
+def test_bug9_ml_wald_uses_q_over_n():
+    """Phase 5.2: association(REML=False) uses the ML sigma^2 = Q/n (it used
+    Q/(n-q) in both modes); REML keeps Q/(n-q).  fit()'s reported sigma is
+    unchanged (Phase 6.3)."""
     Gt, K, y = _ml_bounded_case()
     with quiet():
         L = LMM(y, K)
     L.fit(REML=False)
     x = Gt[:, :1]
     t_ml, _ = L.association(x, REML=False)
-    w9 = oracle.wald(y, K, x, h=L.optH, null_reml=False, sigma_convention="pylmm")
+    t_r, _ = L.association(x, REML=True)
     wtb = oracle.wald(y, K, x, h=L.optH, null_reml=False, sigma_convention="textbook")
-    assert t_ml == pytest.approx(w9.t, rel=1e-5)
+    assert t_ml == pytest.approx(wtb.t, rel=1e-5)
     n, p = len(y), 2
-    assert wtb.t / w9.t == pytest.approx(np.sqrt(n / (n - p)), rel=1e-10)
+    assert t_ml / t_r == pytest.approx(np.sqrt(n / (n - p)), rel=1e-10)
 
 
 # ---------------------------------------------------------------------------
 # bug 10: phenotype file missing individuals
 # ---------------------------------------------------------------------------
 
-def test_bug10_current_getphenos_shifts_rows(bed_toy):
+def test_bug10_getphenos_aligns_by_id(bed_toy):
+    """Regression (bug 10, fixed in Phase 5.2): absent individuals get nan
+    in their own row (they used to shift everyone after them), with a
+    warning that counts them."""
     fn = str(bed_toy["dir"] / "miss.ph")
     write_phenos(fn, bed_toy["y"], skip=(5, 17))
-    with quiet():
+    with quiet(), pytest.warns(UserWarning, match="2 of 40 individuals are not in the phenotype file"):
         IN = pinput.plink(bed_toy["base"], type="b", phenoFile=fn)
-    assert IN.phenos.shape[0] == bed_toy["n"] - 2 and len(IN.indivs) == bed_toy["n"]
-    # by position, individual I5 is now paired with I6's phenotype
-    assert IN.indivs[5] == ("F5", "I5")
-    assert IN.phenos[5, 0] == pytest.approx(bed_toy["y"][6])
+    assert IN.phenos.shape == (bed_toy["n"], 1)
+    assert np.isnan(IN.phenos[[5, 17], 0]).all()
+    keep = np.setdiff1d(np.arange(bed_toy["n"]), [5, 17])
+    np.testing.assert_allclose(IN.phenos[keep, 0], bed_toy["y"][keep], atol=1e-10)   # %.10f
 
 
-def test_bug10_current_cli_crashes_on_pheno_missing_individuals(bed_toy):
-    fn = str(bed_toy["dir"] / "miss.ph")
-    write_phenos(fn, bed_toy["y"], skip=(5, 17))
-    with pytest.raises(ValueError, match="reshape"):
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", fn,
-                  str(bed_toy["dir"] / "x")])
-    write_phenos(fn, bed_toy["y"], skip=(5, 17), na=(9,))
-    with pytest.raises(IndexError):
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", fn,
-                  str(bed_toy["dir"] / "x")])
+def test_bug10_pheno_file_reordered_or_with_strangers(bed_toy):
+    """Rows in another order, plus an unknown individual: same as the plain file."""
+    d = bed_toy["dir"]
+    y = bed_toy["y"]
+    with open(str(d / "shuf.ph"), "w") as f:
+        f.write("FX IX 1.0\n")
+        for i in np.random.default_rng(0).permutation(len(y)):
+            f.write("F%d I%d %.10f\n" % (i, i, y[i]))
+    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], str(d / "a.out")])
+    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "shuf.ph"),
+              str(d / "b.out")])
+    np.testing.assert_allclose(read_out(str(d / "b.out")), read_out(str(d / "a.out")), rtol=1e-12)
 
 
-@pytest.mark.xfail(strict=True, raises=ValueError,
-                   reason="bug 10: individuals absent from the pheno file are skipped, not set to NA")
+def test_bug10_unalignable_pheno_file_is_a_usage_error(bed_toy):
+    d = bed_toy["dir"]
+    with open(str(d / "none.ph"), "w") as f:
+        f.write("A B 1.0\nC D 2.0\n")
+    with open(str(d / "dup.ph"), "w") as f:
+        f.write("F0 I0 1.0\nF0 I0 2.0\n")
+    for fn in ("none.ph", "dup.ph"):
+        with pytest.raises(SystemExit):
+            run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / fn),
+                      str(d / "x")])
+
+
 def test_bug10_absent_individuals_treated_as_missing(bed_toy):
+    """Regression (bug 10, fixed in Phase 5.2)."""
     d = bed_toy["dir"]
     write_phenos(str(d / "na.ph"), bed_toy["y"], na=(5, 17))
     write_phenos(str(d / "skip.ph"), bed_toy["y"], skip=(5, 17))
     run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "na.ph"),
               str(d / "na.out")])
-    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "skip.ph"),
-              str(d / "skip.out")])
+    with pytest.warns(UserWarning, match="not in the phenotype file"):
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "skip.ph"),
+                  str(d / "skip.out")])
     np.testing.assert_allclose(read_out(str(d / "skip.out")), read_out(str(d / "na.out")))
+
+
+def test_bug10_covariate_file_absent_individuals_dropped(bed_toy):
+    """A covariate file missing an individual, or with NA: those individuals
+    are dropped with a warning, the same as setting their phenotype to NA
+    (a missing covariate used to be a fatal error)."""
+    d = bed_toy["dir"]
+    c = np.cos(np.arange(bed_toy["n"]))
+    with open(str(d / "cov.txt"), "w") as f:
+        for i in range(bed_toy["n"]):
+            if i == 5:
+                continue
+            f.write("F%d I%d %s\n" % (i, i, "NA" if i == 17 else "%.10f" % c[i]))
+    with open(str(d / "cov_full.txt"), "w") as f:
+        for i in range(bed_toy["n"]):
+            f.write("F%d I%d %.10f\n" % (i, i, c[i]))
+    write_phenos(str(d / "na.ph"), bed_toy["y"], na=(5, 17))
+    with pytest.warns(UserWarning) as rec:
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--covfile", str(d / "cov.txt"),
+                  str(d / "a.out")])
+    msgs = " | ".join(str(w.message) for w in rec)
+    assert "1 of 40 individuals are not in the covariate file" in msgs
+    assert "dropping 2 individuals with a missing covariate" in msgs
+    run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--covfile", str(d / "cov_full.txt"),
+              "--phenofile", str(d / "na.ph"), str(d / "b.out")])
+    np.testing.assert_allclose(read_out(str(d / "a.out")), read_out(str(d / "b.out")))
 
 
 # ---------------------------------------------------------------------------
 # bug 11: an all-missing SNP
 # ---------------------------------------------------------------------------
 
-def test_bug11_current_normalize_all_missing_returns_empty():
+def test_bug11_normalize_all_missing_keeps_length():
+    """Regression (bug 11, fixed in Phase 5.2): used to return an empty array."""
     g = pinput.plink.normalizeGenotype(None, np.full(5, np.nan))
-    assert g.shape == (0,)
+    assert g.shape == (5,) and np.isnan(g).all()
 
 
-@pytest.mark.xfail(strict=True, raises=IndexError, reason="bug 11: all-missing SNP -> empty array -> crash")
-def test_bug11_cli_gwas_all_missing_snp(tmp_path):
+@pytest.mark.parametrize("flags", [[], ["--removeMissingGenotypes"]])
+def test_bug11_cli_gwas_all_missing_snp(tmp_path, flags):
+    """Regression (bug 11, fixed in Phase 5.2): nan for that SNP, and the
+    scan continues."""
     rng = np.random.default_rng(4)
     G = rng.binomial(2, 0.4, size=(24, 6)) / 2.0
     G[:, 3] = np.nan
@@ -502,27 +611,50 @@ def test_bug11_cli_gwas_all_missing_snp(tmp_path):
     write_bed(base, G)
     write_phenos(base + ".phenos", rng.standard_normal(24))
     np.savetxt(str(tmp_path / "k"), calculateKinship(G[:, [0, 1, 2, 4, 5]].copy()))
-    run_gwas(["--bfile", base, "--kfile", str(tmp_path / "k"), str(tmp_path / "o")])
-    assert np.isnan(read_out(str(tmp_path / "o"))[3]).all()
+    run_gwas(["--bfile", base, "--kfile", str(tmp_path / "k")] + flags + [str(tmp_path / "o")])
+    r = read_out(str(tmp_path / "o"))
+    assert r.shape == (6, 4)
+    assert np.isnan(r[3]).all() and np.isfinite(np.delete(r, 3, axis=0)).all()
 
 
-@pytest.mark.xfail(strict=True, raises=ValueError, reason="bug 11: pylmmKinship crashes on an all-missing SNP")
+def test_bug11_library_all_missing_snp():
+    """GWAS: nan for the all-missing SNP (it used to raise LinAlgError)."""
+    G, K, y, _ = toy()
+    X = G[:, :4].copy()
+    X[:, 1] = np.nan
+    with quiet():
+        t, p = GWAS(y, X, K)
+    assert np.isnan(t[1]) and np.isnan(p[1]) and np.isfinite(np.delete(t, 1)).all()
+
+
 def test_bug11_cli_kinship_all_missing_snp(tmp_path):
+    """Regression (bug 11, fixed in Phase 5.2): pylmmKinship skips the SNP
+    with a warning (it used to raise).  The denominator still counts it
+    (bug 8, Phase 6.3)."""
     rng = np.random.default_rng(4)
     G = rng.binomial(2, 0.4, size=(24, 6)) / 2.0
     G[:, 3] = np.nan
     base = str(tmp_path / "allmiss")
     write_bed(base, G)
-    with quiet(), np.errstate(all="ignore"), pytest.warns(RuntimeWarning):
+    with quiet(), pytest.warns(UserWarning, match="skipped 1 SNPs with no called genotype"):
         cli_kinship.main(["--bfile", base, str(tmp_path / "k")])
+    K = np.loadtxt(str(tmp_path / "k"))
+    np.testing.assert_allclose(K, calculateKinship(G[:, [0, 1, 2, 4, 5]]) * 5 / 6, rtol=1e-10)
+
+
+def test_bug11_calculatekinship_skips_all_missing_snp():
+    G, _, _, _ = toy(n=30, m=10)
+    K = calculateKinship(np.hstack([G, np.full((30, 1), np.nan)]))
+    assert np.isfinite(K).all()
+    np.testing.assert_allclose(K, calculateKinship(G) * 10 / 11, rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------
 # bug 12: callers' arrays mutated
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="bug 12: LMM.__init__ clamps the caller's Kva in place")
 def test_bug12_lmm_does_not_mutate_kva():
+    """Regression (bug 12, fixed in Phase 5.2)."""
     G, K, y, _ = toy()
     Kva, Kve = linalg.eigh(K)
     before = Kva.copy()
@@ -531,8 +663,8 @@ def test_bug12_lmm_does_not_mutate_kva():
     np.testing.assert_array_equal(Kva, before)
 
 
-@pytest.mark.xfail(strict=True, reason="bug 12: calculateKinship imputes/standardises its argument in place")
 def test_bug12_calculatekinship_does_not_mutate_w():
+    """Regression (bug 12, fixed in Phase 5.2)."""
     G, _, _, _ = toy()
     W = G.copy()
     W[0, 0] = np.nan
@@ -545,10 +677,11 @@ def test_bug12_calculatekinship_does_not_mutate_w():
 # bug 13: zero-variance filters
 # ---------------------------------------------------------------------------
 
-def test_bug13_current_filters_differ_between_branches(tmp_path):
-    """--removeMissingGenotypes, EMMA dosages: two SNPs with the same tiny
-    variance; the one with a missing call is dropped (var <= 1e-6), the
-    complete one is tested (var == 0 check)."""
+def test_bug13_one_filter_for_both_branches(tmp_path):
+    """Regression (bug 13, fixed in Phase 5.2), --removeMissingGenotypes,
+    EMMA dosages: two SNPs with the same tiny variance, one with a missing
+    call.  Both branches use the same estimability check, so both are tested
+    (the one with the missing call used to be dropped by var <= 1e-6)."""
     rng = np.random.default_rng(6)
     n = 30
     tiny = np.zeros(n)
@@ -570,35 +703,34 @@ def test_bug13_current_filters_differ_between_branches(tmp_path):
               str(tmp_path / "k"), "--removeMissingGenotypes", out])
     r = read_out(out)
     assert np.isfinite(r[1]).all()          # complete tiny-variance SNP: tested
-    assert np.isnan(r[2]).all()             # same SNP with one missing call: skipped
-    assert "xs.var() <= 1e-6" in inspect.getsource(cli_gwas.main)
-    assert "x.var() == 0" in inspect.getsource(cli_gwas.main)
+    assert np.isfinite(r[2]).all()          # same SNP with one missing call: tested too
+    assert "var() <= 1e-6" not in inspect.getsource(cli_gwas.main)
 
 
 # ---------------------------------------------------------------------------
 # bug 15: return types
 # ---------------------------------------------------------------------------
 
-def test_bug15_current_return_types():
+def test_bug15_current_fit_return_shapes():
+    """fit and association(returnBeta=True) still return 1x1 / qx1 arrays
+    (the rest of bug 15, open)."""
     G, K, y, _ = toy()
     with quiet():
-        r_all_missing = GWAS(np.full(len(y), np.nan), G[:, :3], K)
-        r_normal = GWAS(y, G[:, :3], K)
         L = LMM(y, K)
-    assert isinstance(r_all_missing[0], np.ndarray) and isinstance(r_normal[0], list)
     h, beta, sigma, ll = L.fit()
     assert np.shape(sigma) == (1, 1) and np.shape(beta) == (1, 1)
     _, _, b, bvar = L.association(G[:, :1], returnBeta=True)
     assert np.shape(bvar) == (1, 1) and np.ndim(b) == 0
 
 
-@pytest.mark.xfail(strict=True, reason="bug 15: GWAS returns lists normally but arrays when all Y are missing")
 def test_bug15_gwas_return_type_consistent():
+    """Regression (bug 15, the GWAS part, fixed in Phase 5.2): always lists."""
     G, K, y, _ = toy()
     with quiet():
         a = GWAS(np.full(len(y), np.nan), G[:, :3], K)
         b = GWAS(y, G[:, :3], K)
-    assert type(a[0]) is type(b[0])
+    assert type(a[0]) is type(b[0]) is list
+    assert len(a[0]) == 3 and np.isnan(a[0]).all()
 
 
 # ---------------------------------------------------------------------------
