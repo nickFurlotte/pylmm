@@ -166,6 +166,8 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
 4. **Brent search is unbounded above.** lmm.py:250 guards `h < 0` only. For
    h > 1, `h*Kva + (1-h)` can go negative, giving a log of a negative number or
    nan. lmm.py:295 then quietly replaces nan with `H[i-1]`.
+   **Status: fixed in Phase 5.1** (bounded search inside the bracketing grid
+   interval; see docs/phase4-simulations.md §4).
 5. **`tstat(log=True)`** (lmm.py:370) computes `2.0 + logsf`; it should be
    `log(2) + logsf`. This path is unused.
 6. **`--kfile2` is broken:** `LMM_withK2` and `optW` are undefined anywhere
@@ -209,3 +211,5 @@ differ by ≤5e-12 relative, only because numpy 1.12 `str()` prints 12 digits.
     is raised; with a headered file the kinship is all zeros and the run is
     effectively OLS (found in the Phase 2 review: the first EMMA CLI goldens
     had been generated this way).
+    **Status: fixed in Phase 5.1** (a wrong size, non-numeric token or
+    nan/inf is an error naming the file; an asymmetric K warns).
