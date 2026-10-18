@@ -1,0 +1,8 @@
+# misc.fitTwo(Y, K1, K2, wgrids=100): Y=data/hmdp.liver.exprs.1,
+# K1=data/hmdp.liver.K.npdump, K2=kinship_hmdp_snps1000.txt (calculateKinship of first 1000 hmdp SNPs).
+h1 0.44457234318824301
+h2 0.0044906297291741762
+e 0.55093702708258285
+sigma 0.040266017974644075
+LL 23.433237717774617
+beta_0 6.9801223404255275

@@ -1,0 +1,50 @@
+# LMM.fit() null-model results (ngrids=100). Keys are <config>.<field>.
+# Fields: h=optH (heritability), sigma=optSigma, LL=optLL, beta_i=optBeta,
+# h_posterior_mean/var=LMM.meanAndVar(), N=individuals used.
+# hmdp_*: Y=data/hmdp.liver.exprs.1, K=data/hmdp.liver.K.npdump.
+# hmdp_missingY_reml: Y[[5, 23, 60]]=nan.
+# hmdp_cov_reml: X0=[1, mean-imputed hmdp SNP 10 (0-based)].
+# bed_*: Y=column 0 of data/snps.132k.clean.noX.fake.phenos, K=data/snps.132k.clean.noX.pylmm.kin.
+hmdp_reml.h 0.45441302744338757
+hmdp_reml.sigma 0.040302522887840128
+hmdp_reml.LL 23.501285446021349
+hmdp_reml.beta_0 6.9801223404255301
+hmdp_reml.h_posterior_mean 0.44959873752149476
+hmdp_reml.h_posterior_var 0.025085691698387251
+hmdp_reml.N 94
+hmdp_ml.h 0.4794927889388681
+hmdp_ml.sigma 0.040787385589578916
+hmdp_ml.LL 24.49960098802606
+hmdp_ml.beta_0 6.9801223404255293
+hmdp_ml.h_posterior_mean 0.46887734780599388
+hmdp_ml.h_posterior_var 0.025568997712584932
+hmdp_ml.N 94
+hmdp_missingY_reml.h 0.47494543064460387
+hmdp_missingY_reml.sigma 0.041375003338831512
+hmdp_missingY_reml.LL 21.795142763660525
+hmdp_missingY_reml.beta_0 6.9796732712461536
+hmdp_missingY_reml.h_posterior_mean 0.46644212922691991
+hmdp_missingY_reml.h_posterior_var 0.025669077497929904
+hmdp_missingY_reml.N 91
+hmdp_cov_reml.h 0.43541530378708088
+hmdp_cov_reml.sigma 0.039482765067465043
+hmdp_cov_reml.LL 24.205219427831771
+hmdp_cov_reml.beta_0 6.9396872292786824
+hmdp_cov_reml.beta_1 0.11321831121117271
+hmdp_cov_reml.h_posterior_mean 0.42606707851453385
+hmdp_cov_reml.h_posterior_var 0.029514576204225127
+hmdp_cov_reml.N 94
+bed_reml.h 0
+bed_reml.sigma 0.98606971661051235
+bed_reml.LL -1719.7237420349943
+bed_reml.beta_0 0.023886484466665237
+bed_reml.h_posterior_mean 0.010302038902421557
+bed_reml.h_posterior_var 0.00011845589876493168
+bed_reml.N 1219
+bed_ml.h 0
+bed_ml.sigma 0.98606971661051235
+bed_ml.LL -1720.6356664580103
+bed_ml.beta_0 0.023886484466665237
+bed_ml.h_posterior_mean 0.010338169307630091
+bed_ml.h_posterior_var 0.00011883022961002431
+bed_ml.N 1219

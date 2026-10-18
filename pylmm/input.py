@@ -177,7 +177,7 @@ class plink:
 	 return G
 
    def normalizeGenotype(self,G):
-      x = True - np.isnan(G)
+      x = ~np.isnan(G)
       if not len(G[x]): return G[x]
       m = G[x].mean()
       if G[x].var() == 0: s = 1.0

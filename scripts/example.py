@@ -13,8 +13,8 @@ from pylmm import lmm
 Y = np.genfromtxt('data/hmdp.liver.exprs.1')
 
 # Loading npdump and first 1000 snps for speed
-K = np.load('data/hmdp.liver.K.npdump')
-snps = np.load('data/hmdp.liver.snps.1000.npdump').T
+K = np.load('data/hmdp.liver.K.npdump', allow_pickle=True)
+snps = np.load('data/hmdp.liver.snps.1000.npdump', allow_pickle=True).T
 
 # These three lines will load all SNPs (from npdump or from txt) and 
 # calculate the kinship
@@ -28,7 +28,7 @@ L.fit()
 
 # Manually calculate the association at one SNP
 X = snps[:,0]
-X[np.isnan(X)] = X[True - np.isnan(X)].mean() # Fill missing with MAF
+X[np.isnan(X)] = X[~np.isnan(X)].mean() # Fill missing with MAF
 X = X.reshape(len(X),1)
 if X.var() == 0: ts,ps = (np.nan,np.nan)
 else: ts,ps = L.association(X)
