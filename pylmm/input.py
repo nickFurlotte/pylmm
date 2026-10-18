@@ -8,8 +8,6 @@
 import os
 import sys
 import numpy as np
-import struct
-import pdb
 
 class plink:
     def __init__(self,fbase,kFile=None,phenoFile=None,type='b',normGenotype=True,readKFile=False,fastLMM_kinship=False):
@@ -20,7 +18,7 @@ class plink:
         else:
             # Just read a line from the SNP file and see how many individuals we have
             f = open(fbase,'r')
-            self.indivs = range(len(f.readline().strip().split()))
+            self.indivs = list(range(len(f.readline().strip().split())))
             f.close()
         self.kFile = kFile
         self.phenos = None
@@ -93,15 +91,14 @@ class plink:
         self.have_read = 0
         self.snpFileHandle = open(file,'r')
 
-        self.BytestoRead = self.N / 4 + (self.N % 4 and 1 or 0)
-        self._formatStr = 'c'*self.BytestoRead
+        self.BytestoRead = self.N // 4 + (self.N % 4 and 1 or 0)
 
         file = self.fbase + '.bed'
         self.fhandle = open(file,'rb')
 
         magicNumber = self.fhandle.read(2)
         order = self.fhandle.read(1)
-        if not order == '\x01':
+        if not order == b'\x01':
             sys.stderr.write("This is not in SNP major order - you did not handle this case\n")
             raise StopIteration
 
@@ -109,14 +106,16 @@ class plink:
 
     def __iter__(self): return self.getSNPIterator()
 
-    def next(self):
+    def __next__(self):
         if self.have_read == self.numSNPs: raise StopIteration
         self.have_read += 1
 
         if self.type == 'b':
             X = self.fhandle.read(self.BytestoRead)
-            XX = [bin(ord(x)) for x in struct.unpack(self._formatStr,X)]
-            return self.formatBinaryGenotypes(XX,self.normGenotype),self.snpFileHandle.readline().strip().split()[1]
+            if len(X) != self.BytestoRead:
+                raise ValueError("Truncated BED file %s.bed: expected %d bytes for SNP %d, got %d"
+                                 % (self.fbase, self.BytestoRead, self.have_read, len(X)))
+            return self.formatBinaryGenotypes(X,self.normGenotype),self.snpFileHandle.readline().strip().split()[1]
 
         elif self.type == 't':
             X = self.fhandle.readline()
@@ -142,6 +141,9 @@ class plink:
 
         else: sys.stderr.write("Do not understand type %s\n" % (self.type))
 
+    # Python 2 spelling, kept so existing callers of IN.next() keep working.
+    next = __next__
+
     def getGenos_tped(self,X):
         G = []
         for i in range(0,len(X)-1,2):
@@ -154,25 +156,20 @@ class plink:
             G.append(g)
         return np.array(G)
 
-    def formatBinaryGenotypes(self,X,norm=True):
-        D = { \
-              '00': 0.0, \
-              '10': 0.5, \
-              '11': 1.0, \
-              '01': np.nan \
-           }
+    # 2-bit PLINK code -> genotype value.  The four codes of each byte are
+    # read from the low bits up (individual 4k+j is bits 2j..2j+1).  Same
+    # mapping as the original string-based decoder: low bit 0/high bit 0 ->
+    # 0.0, 01 (missing) -> nan, 10 -> 0.5, 11 -> 1.0, where the pair is
+    # written high bit first.
+    _BED_CODE_VALUES = np.array([0.0, np.nan, 0.5, 1.0])
+    _BED_SHIFTS = np.array([0, 2, 4, 6], dtype=np.uint8)
 
-        G = []
-        for x in X:
-            if not len(x) == 10:
-                xx = x[2:]
-                x = '0b' + '0'*(8 - len(xx)) + xx
-            a,b,c,d = (x[8:],x[6:8],x[4:6],x[2:4])
-            L = [D[y] for y in [a,b,c,d]]
-            G += L
+    def formatBinaryGenotypes(self,X,norm=True):
+        # X is the raw bytes for one SNP (self.BytestoRead bytes).
+        B = np.frombuffer(X, dtype=np.uint8)
+        codes = (B[:,None] >> self._BED_SHIFTS) & 3
         # only take the leading values because whatever is left should be null
-        G = G[:self.N]
-        G = np.array(G)
+        G = self._BED_CODE_VALUES[codes.reshape(-1)[:self.N]]
         if norm: G = self.normalizeGenotype(G)
         return G
 
@@ -209,7 +206,7 @@ class plink:
             L = []
             for i in range(len(keys)): D[keys[i]] = i
             for i in range(len(self.indivs)):
-                if not D.has_key(self.indivs[i]): continue
+                if self.indivs[i] not in D: continue
                 L.append(D[self.indivs[i]])
             P = P[L,:]
 
@@ -242,7 +239,7 @@ class plink:
         # This will read in the kinship matrix and then reorder it
         # according to self.indivs - additionally throwing out individuals
         # that are not in both sets
-        if self.indivs == None or len(self.indivs) == 0:
+        if self.indivs is None or len(self.indivs) == 0:
             sys.stderr.write("Did not read any individuals so can't load kinship\n")
             return
 
@@ -272,7 +269,7 @@ class plink:
             KK = []
             X = []
             for i in range(len(self.indivs)):
-                if not D.has_key(self.indivs[i]): X.append(self.indivs[i])
+                if self.indivs[i] not in D: X.append(self.indivs[i])
                 else:
                     KK.append(self.indivs[i])
                     L.append(D[self.indivs[i]])
@@ -312,7 +309,7 @@ class plink:
         L = []
         for i in range(len(keys)): D[keys[i]] = i
         for i in range(len(self.indivs)):
-            if not D.has_key(self.indivs[i]): continue
+            if self.indivs[i] not in D: continue
             L.append(D[self.indivs[i]])
         P = P[L,:]
 

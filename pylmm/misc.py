@@ -5,7 +5,6 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
-#!/usr/bin/python
 
 import sys
 import numpy as np

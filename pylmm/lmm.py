@@ -15,30 +15,10 @@ from scipy import stats
 #np.seterr('raise')
 
 def matrixMult(A,B):
-
-    # If there is no fblas then we will revert to np.dot()
-    try:
-        linalg.fblas
-    except AttributeError:
-        return np.dot(A,B)
-
-    # If the matrices are in Fortran order then the computations will be faster
-    # when using dgemm.  Otherwise, the function will copy the matrix and that takes time.
-    if not A.flags['F_CONTIGUOUS']:
-        AA = A.T
-        transA = True
-    else:
-        AA = A
-        transA = False
-
-    if not B.flags['F_CONTIGUOUS']:
-        BB = B.T
-        transB = True
-    else:
-        BB = B
-        transB = False
-
-    return linalg.fblas.dgemm(alpha=1.,a=AA,b=BB,trans_a=transA,trans_b=transB)
+    # The original code tried scipy.linalg.fblas.dgemm first.  scipy has had
+    # no linalg.fblas since 0.12, so that path was dead and every call fell
+    # back to np.dot -- which is what the Phase 1 goldens were computed with.
+    return np.dot(A,B)
 
 def calculateKinship(W,center=False):
     """
@@ -347,7 +327,7 @@ class LMM:
             self.X0t_stack[:,(self.q)] = matrixMult(self.Kve.T,X)[:,0]
             X = self.X0t_stack
 
-        if h == None: h = self.optH
+        if h is None: h = self.optH
 
         L,beta,sigma,betaVAR = self.LL(h,X,stack=False,REML=REML)
         q  = len(beta)
