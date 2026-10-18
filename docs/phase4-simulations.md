@@ -421,18 +421,75 @@ the ĥ > 1 answers on old scipy. The 12 per-SNP refit crashes in S3 were not
 replayed on old scipy; they are the same REML search with one more
 covariate.
 
+### After the Phase 5.1 fix
+
+Phase 5.1 replaced the unbounded Brent with a bounded search inside the
+bracketing grid interval (`minimize_scalar(method="bounded")`, xatol 1e-10),
+for the null fit and the per-SNP refit. The 0.99 cap, the `range(1, n−2)`
+scan and first-not-best are kept (bugs 2 and 3, Phase 6.3). The oracle's
+`h_grid="pylmm"` search mirrors the change. We reran only the missing
+replicates of S1–S3 in place (`python -m sims run <study> --jobs 4`), on
+scipy 1.18.1 and numpy 2.5.4:
+
+| study | crashed before | crashed after | replicates rerun | wall time (4 jobs) |
+|---|---|---|---|---|
+| S1 | 25 / 2,000 | **0** / 2,000 | 25 | 33 s |
+| S2 | 68 / 3,984 | **0** / 3,984 | 68 | 51 s |
+| S3 | 14 / 7,040 | **0** / 7,040 | 14 | 5 s |
+
+Every cell is back to its full count (80 for S1 and S3, 12 for S2), and
+`raw/full.errors.jsonl` is empty. The rerun added exactly the 107 formerly
+crashed (cell, rep) pairs, with the same seeds.
+
+The new search is strictly "the local optimum within the first grid peak's
+bracket". The old unbounded Brent could in principle escape into a
+neighbouring mode. That was observed in 8.8% of adversarial synthetic
+two-bump profiles, but in 0/2,100 simulated fits and 0/183 real bimodal S2
+fits. On non-crashing fits the largest differences are |Δh| = 7e-8 and
+|Δt| = 2.8e-7.
+
+**Previously completed replicates are unchanged.** Their rows were not
+rerun, and `raw/full.jsonl` is a byte-identical prefix of the new file. As a
+check that the new search reproduces them, we recomputed 124 completed
+replicates with the fixed code: 2 from each of the 62 cells that had a
+crash (18 S1, 92 S2, 14 S3). Every stored metric matched to ≤ 1.4e-7
+absolute (ĥ, σ², λ_GC, p-value samples), which is optimizer tolerance. The
+Phase 1 goldens moved by ≤ 7.3e-9 on any fitted h and ≤ 2.8e-7 on any
+t-statistic, which is at most 7% of the `tests/helpers.py` tolerances.
+
+The study summaries (`sims/results/s1_null_calibration`, `s2_h2_recovery`,
+`s3_power`) and the synthesis parts `s1`, `s2lost`, `s2` and `s3` were
+regenerated with the added replicates. The changes match the crash-bias
+replay above:
+
+* S1 pooled type-I error of the pylmm methods changes by ≤ 0.0002 at 0.05
+  (BED REML h² > 0: 0.0496 → 0.0498).
+* S2: unrelated n = 200 m > n h² = 0.3 REML bias goes from −0.054 to −0.024.
+  Family n = 200 and unrelated n = 600 at m > n h² = 0.7 move by +0.010.
+  Every other cell moves by ≤ 0.008.
+* S3 Bonferroni power changes by ≤ 0.006 for fixed h and ≤ 0.007 for refit.
+
+The h² ≥ 0.95 rows of the S2 summary no longer exclude any replicates. The
+numbers in §3, and earlier in this section, are the pre-fix
+(crash-excluded) ones.
+`crash_accounting.csv`, `crash_by_h2.csv` and `crash_bias_*.csv` are kept as
+the pre-fix record and were not regenerated. Rerunning `synthesis.py crash`
+now reports 0 crashed and 0 other missing in all three studies.
+`crashbias` has nothing left to replay.
+
 ## 5. Consolidated bug ledger
 
 The machine-readable version is
 [`bug_ledger.csv`](../sims/results/synthesis/bug_ledger.csv). Items 1–18 are
 S4's ledger, with impacts updated from the full runs; 19–25 are new from S5.
 Phase 5 means behaviour and robustness; Phase 6.3 means numerics, where the
-fix changes results.
+fix changes results. Its `status` column marks the fixed items (4 and 16:
+fixed in Phase 5.1). The measured impacts are the pre-fix ones.
 
 | # | issue | verdict | severity | measured impact | path | phase |
 |---|---|---|---|---|---|---|
-| 4 | Brent unbounded above h = 1 | CONFIRMED | **high** | scipy ≥ 1.11: crash in S1 25/2,000, S2 68/3,984, S3 14/7,040; up to 12.5% per cell; per-SNP refit 0.25–2.8% of SNPs. scipy < 1.11: no crash; correct REML ĥ (90/95 replayed fits), ĥ = 1.002–1.035 with nan LL for unbounded ML (5/95) | every null fit and refit | **5** |
-| 16 | `--kfile` read unchecked | CONFIRMED | **high** | wrong-size K accepted, exit 0 (6/6); a headered K becomes all zeros on numpy < 2.3 | CLI `--kfile` | **5** |
+| 4 | Brent unbounded above h = 1 (**fixed in Phase 5.1**) | CONFIRMED | **high** | scipy ≥ 1.11: crash in S1 25/2,000, S2 68/3,984, S3 14/7,040; up to 12.5% per cell; per-SNP refit 0.25–2.8% of SNPs. scipy < 1.11: no crash; correct REML ĥ (90/95 replayed fits), ĥ = 1.002–1.035 with nan LL for unbounded ML (5/95) | every null fit and refit | **5** |
+| 16 | `--kfile` read unchecked (**fixed in Phase 5.1**) | CONFIRMED | **high** | wrong-size K accepted, exit 0 (6/6); a headered K becomes all zeros on numpy < 2.3 | CLI `--kfile` | **5** |
 | 21 | K not validated (order, symmetry, PSD, nan) — new | CONFIRMED | high | permuted K: Δĥ up to 0.78, corr(t) < 0.9, no warning | `LMM`; CLI | 5 |
 | 20 | saturated design (n ≤ q+1) gives finite t — new | CONFIRMED | high | 8–20 of 20 SNPs, every replicate | `LMM`/`GWAS` | 5 |
 | 1 | null fit always REML; `REML=` only reaches the Wald step | CONFIRMED | medium | default path: CLI ≡ REML (25/25 S1 cells), max \|Δt\| 0.039 vs ML Wald; `--removeMissingGenotypes`: t off by 2–10% | CLI default; `GWAS(REML=False)`; `--refit` | 5 (needs a decision) |
@@ -520,9 +577,8 @@ lands. The marker must then be removed and the matching `test_bugN_current_*`
 test inverted.
 
 * Phase 5:
-  * `test_bug4_fit_with_peak_near_one` (an expected failure only on
-    scipy ≥ 1.11; it already passes on older scipy, see §4)
-  * `test_bug16_wrong_size_kinship_rejected`
+  * done in Phase 5.1, now regression tests: `test_bug4_fit_with_peak_near_one`
+    and `test_bug16_wrong_size_kinship_rejected`
   * `test_bug10_absent_individuals_treated_as_missing`
   * `test_bug11_cli_gwas_all_missing_snp`
   * `test_bug11_cli_kinship_all_missing_snp`
@@ -546,7 +602,8 @@ New Phase 5 tests to write. Each is from S5
 targets"), and each has an exact cell in `s5_edge_cases/summary.csv`.
 
 1. A `--kfile` of 95×95 or 105×105 for 100 individuals, or with a `#`
-   header, gives a clear error (P0-1, bug 16).
+   header, gives a clear error (P0-1, bug 16). Done in Phase 5.1
+   (`tests/test_kinship_file.py`).
 2. A constant-dosage SNP, or SNP = covariate, gives nan on `GWAS` and both
    CLI branches, using one `snp_estimable` helper (P0-2, issues 19 and 13).
 3. `X0` with ≥ n−1 columns raises `ValueError` (P0-3, issue 20).
@@ -557,7 +614,9 @@ targets"), and each has an exact cell in `s5_edge_cases/summary.csv`.
    issue 21).
 6. A constant or infinite phenotype raises `ValueError` (P0-6, issue 22).
 7. The seed-1177 n = 10 null fit, and `smalln` n = 20, return h at the
-   boundary rather than `BracketError` (P1-7, bug 4).
+   boundary rather than `BracketError` (P1-7, bug 4). The seed-1177 case is
+   done in Phase 5.1 (`tests/test_h_search.py`; ĥ = 0.961, the interior
+   optimum).
 8. An all-missing SNP gives nan for that SNP, and the scan continues (P1-8,
    bug 11).
 9. Collinear or duplicate covariates, or a column of ones together with the

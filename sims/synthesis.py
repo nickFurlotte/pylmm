@@ -807,10 +807,16 @@ LEDGER = [
 ]
 
 
+# fix status by id (not listed: "open", or "-" for NOT A BUG); impacts above are pre-fix
+STATUS = {"4": "fixed in Phase 5.1", "16": "fixed in Phase 5.1"}
+
+
 def ledger():
     import pandas as pd
     df = pd.DataFrame(LEDGER, columns=["id", "title", "verdict", "severity", "impact_metric",
                                        "impact_value", "path", "phase", "evidence"])
+    df["status"] = [STATUS.get(i, "-" if v.startswith("NOT A BUG") else "open")
+                    for i, v in zip(df["id"], df["verdict"])]
     _write(df, "bug_ledger.csv")
 
 

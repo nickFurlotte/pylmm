@@ -225,9 +225,11 @@ class LMM:
         return beta,sigma,Q,XX_i,XX
 
     def LL_brent(self,h,X=None,REML=False):
-        #brent will not be bounded by the specified bracket.
-        # I return a large number if we encounter h < 0 to avoid errors in LL computation during the search.
-        if h < 0: return 1e6
+        # Objective (-LL) for the bounded search in getMax.  That search never
+        # leaves its grid interval inside [0, 0.99], so the h > 1 guard is purely
+        # defensive; it is kept so LL is never evaluated where it is nan:
+        # for h > 1, h*Kva + (1-h) can be negative and LL is nan (bug 4).
+        if h < 0 or h > 1: return 1e6
         return -self.LL(h,X,stack=False,REML=REML)[0]
 
     def LL(self,h,X=None,stack=True,REML=False):
@@ -263,16 +265,28 @@ class LMM:
         """
            Helper functions for .fit(...).
            This function takes a set of LLs computed over a grid and finds possible regions
-           containing a maximum.  Within these regions, a Brent search is performed to find the
-           optimum.
+           containing a maximum.  Within these regions, a bounded Brent search is performed
+           to find the optimum.
 
         """
         n = len(self.LLs)
         HOpt = []
         for i in range(1,n-2):
             if self.LLs[i-1] < self.LLs[i] and self.LLs[i] > self.LLs[i+1]:
-                HOpt.append(optimize.brent(self.LL_brent,args=(X,REML),brack=(H[i-1],H[i+1])))
-                if np.isnan(HOpt[-1]): HOpt[-1] = H[i-1]
+                # Bounded to the bracketing grid interval [H[i-1], H[i+1]].  The
+                # unbounded optimize.brent used before could step above h = 1,
+                # where LL is nan, and scipy >= 1.11 then raised BracketError
+                # (bug 4, fixed in Phase 5.1).  With xatol this small the
+                # stopping rule is ~sqrt(eps)*|h| relative, like optimize.brent.
+                # Strictly, this is "the local optimum within the first grid
+                # peak's bracket".  The old unbounded Brent could in principle
+                # escape into a neighbouring mode (seen in 8.8% of adversarial
+                # synthetic two-bump profiles, but in 0/2,100 simulated fits
+                # and 0/183 real bimodal S2 fits; max |dh| = 7e-8 and
+                # |dt| = 2.8e-7 on non-crashing fits).
+                res = optimize.minimize_scalar(self.LL_brent,args=(X,REML),bounds=(H[i-1],H[i+1]),
+                                               method='bounded',options={'xatol':1e-10})
+                HOpt.append(np.float64(res.x))
                 #if np.isnan(HOpt[-1]): HOpt[-1] = self.LLs[i-1]
                 #if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
 

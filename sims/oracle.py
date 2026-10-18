@@ -79,9 +79,10 @@ eigenvalues of K < 1e-6 raised to   fit/wald               ``eig_clamp=1e-6``
 has 1109/1219 below 1e-6)
 grid 0..0.99 step 0.01 (#3),        fit/wald               ``h_grid='pylmm'``
 ``range(1, n-2)`` scan (#2), first  ``h_grid='fine'``
-(not best) local optimum, unbounded
-Brent with h<0 guard and nan ->
-H[i-1] (#4), endpoint fallback
+(not best) local optimum, Brent
+bounded to the bracketing grid
+interval (#4, fixed in Phase 5.1),
+endpoint fallback
 null fit always REML in ``GWAS``    wald ``null_reml``     ``null_reml=True,
 while the test uses REML=... (#1)   = ``test_reml``        test_reml=False``
 sigma reported/used as Q/(n-q)      fit reports both       ``sigma2_reml``;
@@ -250,7 +251,7 @@ def _search_pylmm(ll):
     L = np.array([ll(h) for h in H])
 
     def LL_brent(h):
-        if h < 0:
+        if h < 0 or h > 1:
             return 1e6                                    # pylmm's guard
         v = ll(h)
         # pylmm takes log(h*Kva + 1 - h): any non-positive term (h > 1) gives nan
@@ -260,9 +261,10 @@ def _search_pylmm(ll):
     HOpt = []
     for i in range(1, n - 2):                             # off-by-one kept (#2)
         if L[i - 1] < L[i] and L[i] > L[i + 1]:
-            HOpt.append(optimize.brent(LL_brent, brack=(H[i - 1], H[i + 1])))
-            if np.isnan(HOpt[-1]):
-                HOpt[-1] = H[i - 1]
+            # bounded to the bracketing grid interval, like pylmm since Phase 5.1 (#4)
+            res = optimize.minimize_scalar(LL_brent, bounds=(H[i - 1], H[i + 1]),
+                                           method="bounded", options={"xatol": 1e-10})
+            HOpt.append(float(res.x))
     if len(HOpt) >= 1:
         h = HOpt[0]                                       # first, not best
     elif L[0] > L[n - 1]:

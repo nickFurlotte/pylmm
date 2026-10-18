@@ -89,9 +89,10 @@ and record the reason here.
 
 ## CLI inputs must be header-less
 
-`pylmmGWAS.py` reads `--kfile` with `np.fromfile(sep=' ')`, which stops at
-the first `#`, and then `K.resize()` zero-fills the rest without a warning
-(`docs/phase1-baseline.md` bug 16). `tests/golden/hmdp_K_npdump.txt` has `#`
+Before Phase 5.1, `pylmmGWAS.py` read `--kfile` with `np.fromfile(sep=' ')`,
+which stops at the first `#`, and then `K.resize()` zero-filled the rest
+without a warning (`docs/phase1-baseline.md` bug 16); it now rejects any
+non-numeric token with an error. `tests/golden/hmdp_K_npdump.txt` has `#`
 header lines, so the EMMA tests write a header-less copy
 (`helpers.write_headerless_kinship`). `helpers.run_script` (and the
 generator's `run_cli`) refuse any input file that starts with `#`.

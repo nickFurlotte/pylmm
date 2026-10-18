@@ -15,6 +15,7 @@ import gzip
 import os
 import sys
 import time
+import warnings
 from optparse import OptionParser, OptionGroup
 
 import numpy as np
@@ -40,22 +41,67 @@ def outputResult(out,id,beta,betaSD,ts,ps):
 
 
 def readKinshipFile(fn, n):
-    """Read a whitespace-separated n x n kinship (optionally .gz)."""
-    # This method seems to be the fastest and works if you already know the size of the matrix
-    if fn[-3:] == '.gz':
-        f = gzip.open(fn,'rt')
-        F = f.read() # might exhaust mem if the file is huge
-        K = np.fromstring(F,sep=' ') # Assume that space separated
-        f.close()
-    else:
-        K = np.fromfile(fn,sep=" ")
-    # ndarray.resize (not np.resize): zero-fills / truncates like the original.
-    # refcheck=False because the refcount check is unreliable on Python 3.14.
-    K.resize((n,n), refcheck=False)
-    # Other slower ways
-    #K = np.loadtxt(fn)
-    #K = np.genfromtxt(fn)
+    """Read a whitespace-separated n x n kinship (plain text, or gzip if fn
+    ends in .gz): n lines of n numbers, no header or comment lines.
+
+    Raises ValueError, naming the file, if a token is not a number, the file
+    is not exactly n rows of n values, or K has a nan/inf.  Warns (does not
+    fail) if K is noticeably asymmetric.  (Bug 16, fixed in Phase 5.1: the
+    old np.fromfile + resize read silently zero-filled or truncated K.)
+    """
+    try:
+        if fn[-3:] == '.gz':
+            f = gzip.open(fn,'rt')
+        else:
+            f = open(fn,'r')
+    except OSError as e:
+        raise ValueError("kinship file %s: cannot read (%s)" % (fn, e))
+    K = np.zeros((n,n))
+    nrows = 0
+    nvalues = 0
+    lengths = set()
+    try:
+        with f:
+            for lineno, line in enumerate(f, 1):
+                v = line.split()
+                if not v: continue
+                try:
+                    row = np.array(v, dtype=np.float64)
+                except ValueError:
+                    bad = next((x for x in v if not _isNumber(x)), v[0])
+                    raise ValueError("kinship file %s, line %d: %r is not a number (expected %d rows of %d "
+                                     "whitespace-separated numbers, with no header or comment lines)"
+                                     % (fn, lineno, bad[:40], n, n))
+                if nrows < n and len(row) == n: K[nrows] = row
+                nrows += 1
+                nvalues += len(row)
+                lengths.add(len(row))
+    except (OSError, UnicodeDecodeError) as e:
+        # missing file, bad gzip, binary content: a usage-style error, not a traceback
+        raise ValueError("kinship file %s: cannot read (%s: %s)" % (fn, type(e).__name__, e))
+    if nrows != n or lengths != set([n]):
+        lengths = sorted(lengths)
+        raise ValueError("kinship file %s: expected a %d x %d matrix (%d values, one row and column per "
+                         "individual in the genotype input), found %d values in %d rows (row lengths: %s)"
+                         % (fn, n, n, n * n, nvalues, nrows,
+                            ", ".join(str(x) for x in lengths[:5]) + (", ..." if len(lengths) > 5 else "")))
+    bad = ~np.isfinite(K)
+    if bad.any():
+        i, j = np.argwhere(bad)[0]
+        raise ValueError("kinship file %s: %d non-finite values (nan/inf), the first at row %d, column %d"
+                         % (fn, bad.sum(), i + 1, j + 1))
+    asym = np.abs(K - K.T).max() if n else 0.0
+    if asym > 1e-6 * max(1.0, np.abs(K).max()):
+        warnings.warn("kinship file %s is not symmetric: max |K - K'| = %g" % (fn, asym), stacklevel=2)
     return K
+
+
+def _isNumber(x):
+    try:
+        float(x)
+        return True
+    except ValueError:
+        return False
 
 
 def buildParser():
@@ -191,14 +237,20 @@ def main(argv=None):
     # READING Kinship - major bottleneck for large datasets
     if options.verbose: sys.stderr.write("Reading kinship...\n")
     begin = time.time()
-    K = readKinshipFile(options.kfile, len(IN.indivs))
+    try:
+        K = readKinshipFile(options.kfile, len(IN.indivs))
+    except ValueError as e:
+        parser.error(str(e))
     end = time.time()
     if options.verbose: sys.stderr.write("Read the %d x %d kinship matrix in %0.3fs \n" % (K.shape[0],K.shape[1],end-begin))
 
     if options.kfile2:
         if options.verbose: sys.stderr.write("Reading second kinship...\n")
         begin = time.time()
-        K2 = readKinshipFile(options.kfile2, len(IN.indivs))
+        try:
+            K2 = readKinshipFile(options.kfile2, len(IN.indivs))
+        except ValueError as e:
+            parser.error(str(e))
         end = time.time()
         if options.verbose: sys.stderr.write("Read the %d x %d second kinship matrix in %0.3fs \n" % (K2.shape[0],K2.shape[1],end-begin))
 

@@ -373,8 +373,7 @@ def test_pylmm_convention_reproduces_example_null_failures():
     above 0.99).
 
     Those two replicates have optima within FP noise of 0.99, so whether the
-    fine fit lands above 0.99 (or pylmm even hits bug 4's BracketError) is
-    platform dependent; for them only the implication is checked.  The constructed case (h2 = 1, optimum at the
+    fine fit lands above 0.99 is platform dependent; for them only the implication is checked.  The constructed case (h2 = 1, optimum at the
     h = 1 boundary) is unambiguous on every platform."""
     from sims import phenotypes, runner
     from sims.studies import example_null as ex
@@ -385,14 +384,9 @@ def test_pylmm_convention_reproduces_example_null_failures():
     for rep in (1, 15):
         rng = np.random.default_rng(runner.task_seed(ex.NAME, params, rep))
         y = phenotypes.simulate(kin, 0.5, rng).y
-        try:
-            _check_matches_pylmm(y, kin, None, G)
-        except Exception as e:      # noqa: BLE001
-            # an optimum this close to 0.99 can, on some platforms, put a grid
-            # peak at 0.97 and send Brent above 1: bug 4 itself, not a mismatch
-            if type(e).__name__ != "BracketError":
-                raise
-            continue
+        # (before Phase 5.1 an optimum this close to 0.99 could, on some
+        # platforms, send the unbounded Brent above 1: bug 4's BracketError)
+        _check_matches_pylmm(y, kin, None, G)
         fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
         if fine.h > 0.99:
             assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
