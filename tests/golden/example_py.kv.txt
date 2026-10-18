@@ -1,0 +1,19 @@
+# Values computed by the exact sequence of scripts/example.py.
+# Note example.py mean-imputes snps[:,0] IN PLACE before calling
+# lmm.GWAS(..., REML=True, refit=True), so SNP 0 differs from
+# assoc_hmdp_GWAS.txt column ts_reml_refit; all other SNPs match it.
+null_h 0.45441302744338757
+null_sigma 0.040302522887840128
+null_LL 23.501285446021349
+snp0_ts -0.77298798701937887
+snp0_ps 0.44151096891510666
+snp0_refit_h 0.45139621144654773
+snp0_refit_ts -0.77361550670599688
+snp0_refit_ps 0.44114152585193311
+gwas_n 1000
+gwas_n_nan 68
+gwas_ts_0 -0.77361550670599688
+gwas_ps_0 0.44114152585193311
+gwas_ps_min 0.0088777876297833555
+gwas_ps_argmin 400
+gwas_sum_log10_ps -286.23776696541569
