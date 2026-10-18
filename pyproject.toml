@@ -1,5 +1,6 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+# 1.27: first hatchling that accepts the PEP 639 `license-files` list form.
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -11,9 +12,16 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Nick Furlotte", email = "nick.furlotte@gmail.com" }]
 requires-python = ">=3.10"
+# Lower bounds are the oldest versions that are tested: CI runs
+# `uv run --python 3.10 --resolution lowest-direct pytest` on ubuntu, which
+# installs numpy 1.22.0 + scipy 1.9.0; the same pins also pass on macOS arm64.
+# scipy 1.8.0 and 1.8.1 have py3.10 macOS arm64 wheels but segfault in the
+# suite there, hence scipy>=1.9.  numpy 1.22.0 passes on both platforms; older
+# numpy is untested.  Only py3.10 has wheels this old, so newer Pythons
+# resolve newer releases anyway.
 dependencies = [
     "numpy>=1.22",
-    "scipy>=1.8",
+    "scipy>=1.9",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -36,4 +44,6 @@ dev = [
 packages = ["pylmm"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/data", "/docker", "/docs", "/tests/golden", "/.github"]
+# tests/ needs tests/golden and data/ (~215MB), and scripts/ only holds
+# source-checkout shims, so the sdist ships the package alone.
+exclude = ["/data", "/docker", "/docs", "/tests", "/scripts", "/.github"]

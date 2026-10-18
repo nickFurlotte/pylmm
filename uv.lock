@@ -308,7 +308,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=1.22" },
-    { name = "scipy", specifier = ">=1.8" },
+    { name = "scipy", specifier = ">=1.9" },
 ]
 
 [package.metadata.requires-dev]
