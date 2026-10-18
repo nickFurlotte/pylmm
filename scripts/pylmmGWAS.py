@@ -194,7 +194,7 @@ if options.kfile2:
 # Keep will now index into the "full" data to select what we keep (either everything or a subset of non missing data
 Y = IN.phenos[:,options.pheno]
 v = np.isnan(Y)
-keep = True - v
+keep = ~v
 if v.sum():
    if options.verbose: sys.stderr.write("Cleaning the phenotype vector by removing %d individuals...\n" % (v.sum()))
    Y = Y[keep]
@@ -242,7 +242,7 @@ for snp,id in IN:
    v = np.isnan(x).reshape((-1,))
    # Check SNPs for missing values
    if v.sum():
-      keeps = True - v
+      keeps = ~v
       xs = x[keeps,:]
       if keeps.sum() <= 1 or xs.var() <= 1e-6: 
 	 PS.append(np.nan)

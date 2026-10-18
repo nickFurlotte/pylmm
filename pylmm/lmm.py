@@ -51,7 +51,7 @@ def calculateKinship(W,center=False):
       m = W.shape[1]
       keep = []
       for i in range(m):
-	 mn = W[True - np.isnan(W[:,i]),i].mean()
+	 mn = W[~np.isnan(W[:,i]),i].mean()
 	 W[np.isnan(W[:,i]),i] = mn
 	 vr = W[:,i].var()
 	 if vr == 0: continue
@@ -88,13 +88,13 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
       n = X.shape[0]
       m = X.shape[1]
 
-      if X0 == None: 
+      if X0 is None: 
          X0 = np.ones((n,1))
       
       # Remove missing values in Y and adjust associated parameters
       v = np.isnan(Y)
       if v.sum():
-	 keep = True - v
+	 keep = ~v
 	 keep = keep.reshape((-1,))
 	 Y = Y[keep]
 	 X = X[keep,:]
@@ -119,7 +119,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False):
 	 x = X[:,i].reshape((n,1))
 	 v = np.isnan(x).reshape((-1,))
 	 if v.sum():
-	    keep = True - v
+	    keep = ~v
 	    xs = x[keep,:]
 	    if xs.var() == 0: 
 	       PS.append(np.nan) 
@@ -176,14 +176,14 @@ class LMM:
       When this parameter is not provided, the constructor will set X0 to an n x 1 matrix of all ones to represent a mean effect.
       """
 
-      if X0 == None: 
+      if X0 is None: 
 	 X0 = np.ones(len(Y)).reshape(len(Y),1)
       self.verbose = verbose
 
-      x = True - np.isnan(Y)
+      x = ~np.isnan(Y)
       x = x.reshape(-1,)
       if not x.sum() == len(Y):
-	 if self.verbose: sys.stderr.write("Removing %d missing values from Y\n" % ((True - x).sum()))
+	 if self.verbose: sys.stderr.write("Removing %d missing values from Y\n" % ((~x).sum()))
 	 Y = Y[x]
 	 K = K[x,:][:,x]
 	 X0 = X0[x,:]
@@ -259,7 +259,7 @@ class LMM:
 	 REML is computed by adding additional terms to the standard LL and can be computed by setting REML=True.
       """
 
-      if X == None: X = self.X0t
+      if X is None: X = self.X0t
       elif stack: 
 	 self.X0t_stack[:,(self.q)] = matrixMult(self.Kve.T,X)[:,0]
 	 X = self.X0t_stack
@@ -314,7 +314,7 @@ class LMM:
 	 Given this optimum, the function computes the LL and associated ML solutions.
       """
       
-      if X == None: X = self.X0t
+      if X is None: X = self.X0t
       else: 
 	 #X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
 	 self.X0t_stack[:,(self.q)] = matrixMult(self.Kve.T,X)[:,0]
