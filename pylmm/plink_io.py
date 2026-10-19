@@ -364,7 +364,7 @@ class PlinkReader:
             xx = X.strip().split()
             chrm, rsid, pos1, pos2 = tuple(xx[:4])
             xx = xx[4:]
-            G = self._get_genos_tped(xx)
+            G = self._get_genos_tped(xx, rsid)
             if self.norm_genotype:
                 G = self.normalize_genotype(G)
             return G, self.snp_file_handle.readline().strip().split()[1]
@@ -389,12 +389,33 @@ class PlinkReader:
             sys.stderr.write("Do not understand type %s\n" % (self.type))
             # TODO(5b): falls through and returns None (unreachable: type is validated earlier)
 
-    def _get_genos_tped(self, X: list[str]) -> NDArray[np.float64]:
+    # Allele codes of a 1/2-recoded TPED (PLINK --recode12 / --transpose):
+    # 1 and 2 are the alleles, 0 is PLINK's default missing-genotype code.
+    _TPED_ALLELE_CODES = frozenset(("0", "1", "2"))
+
+    def _get_genos_tped(self, X: list[str], snp: str = "?") -> NDArray[np.float64]:
         """Convert one TPED row's allele pairs to 0 / 0.5 / 1 / nan.
 
-        ``0 0`` is missing, ``1 1`` is 0, ``2 2`` is 1, mixed is 0.5.
+        ``0 0`` is missing, ``1 1`` is 0, ``2 2`` is 1, mixed is 0.5 (so a
+        half-missing ``0 1`` / ``0 2`` is also 0.5, as before).
+
+        Raises
+        ------
+        ValueError
+            If an allele code is not ``0``, ``1`` or ``2`` (e.g. a nucleotide
+            letter: the alleles must be recoded to 1/2 first, ``plink
+            --recode12``), naming the SNP (`snp`) and the code.  Before this
+            check such a code silently reused the previous individual's
+            genotype or raised UnboundLocalError.
         """
-        G = []
+        bad = set(X) - self._TPED_ALLELE_CODES
+        if bad:
+            raise ValueError(
+                "TPED file %s.tped, SNP %s: allele code %r is not 0, 1 or 2; pylmm reads "
+                "1/2-recoded TPED files only (0 = missing; recode with plink --recode12)"
+                % (self.fbase, snp, sorted(bad)[0])
+            )
+        G: list[float] = []
         for i in range(0, len(X) - 1, 2):
             a = X[i]
             b = X[i + 1]
@@ -437,9 +458,9 @@ class PlinkReader:
         Parameters
         ----------
         G : numpy.ndarray
-            Raw genotypes of one SNP, shape ``(n,)``, nan where missing.  The
-            array is modified in place when imputing (missing entries are
-            filled with the mean); the standardised result is a new array.
+            Raw genotypes of one SNP, shape ``(n,)``, nan where missing.  It
+            is not modified: the mean imputation is done on a copy (it used
+            to fill the caller's array in place; fixed in Phase 5.5).
 
         Returns
         -------
@@ -465,7 +486,7 @@ class PlinkReader:
             s = 1.0
         else:
             s = np.sqrt(G[x].var())
-        G[np.isnan(G)] = m
+        G = np.where(np.isnan(G), m, G)
         if s == 0:
             G = G - m
         else:
@@ -787,7 +808,7 @@ class PlinkReader:
                     ) from None
         return self._emma_columns(P, emma_file, "covariate")
 
-    def get_covariates(self, cov_file: str | None = None) -> NDArray[np.float64]:
+    def get_covariates(self, cov_file: str) -> NDArray[np.float64]:
         """Read a PLINK-style covariate file, aligned to ``self.indivs``.
 
         Format ``FID IID c1 c2 ...`` with an optional header; ``NA`` is
@@ -797,8 +818,8 @@ class PlinkReader:
         Parameters
         ----------
         cov_file : str
-            Path of the covariate file.  (Typed optional for historical
-            reasons; None raises TypeError.)
+            Path of the covariate file (required; there is no default file,
+            unlike `get_phenos`).
 
         Returns
         -------
@@ -808,9 +829,12 @@ class PlinkReader:
         Raises
         ------
         ValueError
-            If the file is missing or malformed, has duplicate IDs, or no
-            individual matches.
+            If `cov_file` is None (it used to raise TypeError), or the file
+            is missing or malformed, has duplicate IDs, or no individual
+            matches.
         """
+        if cov_file is None:
+            raise ValueError("get_covariates needs the path of a covariate file; cov_file is None")
         if not os.path.isfile(cov_file):
             raise ValueError("Could not find covariate file: %s" % (cov_file))
         keys, P = self._read_table(cov_file, lambda x: x == "NA", "covariate")
