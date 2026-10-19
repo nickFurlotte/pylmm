@@ -38,6 +38,10 @@ Run the tests with `uv run pytest`. Add `--runslow` to include the full-dataset 
 The [justfile](justfile) holds the common commands. Run `just` to list them, for example
 `just test`, `just test-slow`, `just example` and `just test-py27`.
 
+Lint and formatting use [ruff](https://docs.astral.sh/ruff/): `just lint` checks and `just fmt`
+applies fixes. CI runs the same checks. An optional [pre-commit](https://pre-commit.com) config
+(`.pre-commit-config.yaml`) runs ruff on commit; it is not required.
+
 pylmm is offered under the MIT License. See [LICENSE](LICENSE).
 
 

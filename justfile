@@ -12,6 +12,16 @@ default:
 sync:
     uv sync --group sims
 
+# Check lint and formatting (ruff check + ruff format --check)
+lint:
+    uv run --locked ruff check
+    uv run --locked ruff format --check
+
+# Apply formatting and auto-fixable lint fixes
+fmt:
+    uv run ruff format
+    uv run ruff check --fix
+
 # Run the test suite (slow tests skipped); extra args go to pytest
 test *args:
     uv run --group sims pytest "$@"
