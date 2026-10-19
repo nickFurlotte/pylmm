@@ -18,7 +18,7 @@ The model, for ``n`` individuals, is::
     e ~ N(0, sigma2 * (1 - h) * I)
 
 where ``y`` is the phenotype (n,), ``X0`` the covariates (n, q; the default is
-an intercept), ``x`` one SNP (an (n, 1) column), ``K`` the kinship matrix (n, n), ``sigma2``
+an intercept), ``x`` one SNP ((n,) or (n, 1)), ``K`` the kinship matrix (n, n), ``sigma2``
 the total phenotypic variance and ``h`` in [0, 1) the heritability (the share
 of ``sigma2`` due to ``K``).  ``K`` is eigendecomposed once, ``K = V diag(kva)
 V'``; every likelihood is then evaluated on ``V' y`` and ``V' X`` with a
@@ -27,7 +27,10 @@ rotation.
 
 Conventions (see `LMM` and ``docs/conventions.md`` for details):
 
-* REML is the default everywhere (``reml=True``); ``reml=False`` uses ML.
+* REML is the default of every function and method that takes ``reml``
+  (``reml=True``); ``reml=False`` uses ML.
+* Scalars are returned as floats (``sigma``, ``Q``, ``beta_var``, the
+  log-likelihood), vectors and matrices as arrays.
 * ``sigma2`` is ``Q / (n - p)`` everywhere (``p`` is the number of columns of
   the design), including `LMM.fit` with ``reml=False`` and `LMM.ml_solution`,
   EXCEPT the ML Wald test of one SNP (``association(reml=False)`` and
@@ -35,7 +38,7 @@ Conventions (see `LMM` and ``docs/conventions.md`` for details):
   weighted residual sum of squares.
 * ``X0`` is used exactly as given; the default (``X0=None``) is a single
   column of ones.  If you pass covariates (for example from
-  ``PlinkReader.get_covariates``, which returns the covariate columns only,
+  ``PlinkReader.read_covariates``, which returns the covariate columns only,
   no intercept) you must add the intercept yourself, or the model has none:
   ``X0 = np.column_stack([np.ones(n), cov])``.
 * The h search runs on a grid (for the default ``ngrids=100``, 0, 0.01, ...,
@@ -65,7 +68,7 @@ import sys
 import time
 import warnings
 from collections.abc import Sequence
-from typing import Any, Literal, TypeAlias, overload
+from typing import Any, Literal, NamedTuple, TypeAlias, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -418,6 +421,58 @@ def _check_design_size(n: int, q: int, what: str = "model") -> None:
         )
 
 
+def _check_eigen_args(kva: ArrayLike | None, kve: ArrayLike | None) -> None:
+    """Raise unless ``kva`` and ``kve`` are both None or both non-empty.
+
+    Before Phase 5b an empty sequence (the old mutable default ``[]``) also
+    meant "compute the eigendecomposition"; None is now the only way to say so.
+    """
+    for name, v in (("kva", kva), ("kve", kve)):
+        if v is not None and np.size(v) == 0:
+            raise ValueError(
+                "%s is empty; pass None (the default) to compute the eigendecomposition of K" % name
+            )
+    if (kva is None) != (kve is None):
+        raise ValueError(
+            "pass both kva and kve (eigenvalues and eigenvectors of K) or neither; got only %s"
+            % ("kva" if kve is None else "kve")
+        )
+
+
+def _snp_column(X: ArrayLike, n: int) -> FloatArray:
+    """One SNP, given as (n,) or (n, 1), as an (n, 1) float64 column."""
+    x = np.asarray(X, dtype=np.float64)
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+    if x.shape != (n, 1):
+        raise ValueError(
+            "the SNP must have shape (%d,) or (%d, 1) (one value per individual with a "
+            "phenotype), got %s" % (n, n, np.shape(X))
+        )
+    return x
+
+
+class LogLikResult(NamedTuple):
+    """The result of `LMM.log_likelihood` (a tuple: ``ll, beta, sigma, xx_inv = ...``).
+
+    Attributes
+    ----------
+    ll : float
+        The log-likelihood (REML or ML).
+    beta : (p, 1) array
+        Coefficient estimates.
+    sigma : float
+        ``Q / (N - p)``, see `LMM.ml_solution`.
+    xx_inv : (p, p) array
+        ``(X'SX)^-1``.
+    """
+
+    ll: float
+    beta: FloatArray
+    sigma: float
+    xx_inv: FloatArray
+
+
 def gwas(
     Y: ArrayLike,
     X: ArrayLike,
@@ -452,14 +507,14 @@ def gwas(
         numpy ndarray (not a list of lists).
     kva : (n,) array, optional
         Eigenvalues of ``K``, as from ``kva, kve = scipy.linalg.eigh(K)``.
-        None (or empty) computes them.  Ignored (recomputed) if ``Y`` has
-        missing values.
+        None (the default) computes them; pass both ``kva`` and ``kve`` or
+        neither.  Ignored (recomputed) if ``Y`` has missing values.
     kve : (n, n) array, optional
         Matching eigenvectors (columns), see ``kva``.
     X0 : (n, q) array, optional
         Covariates, full column rank.  Default: one column of ones (an
         intercept).  If you pass ``X0`` it is used exactly as given, with NO
-        intercept added: covariates from ``PlinkReader.get_covariates`` have
+        intercept added: covariates from ``PlinkReader.read_covariates`` have
         no intercept column, so passing them alone silently fits a model
         without one (the test statistics can change a lot).  Add the
         intercept yourself: ``X0 = np.column_stack([np.ones(n), cov])``.
@@ -530,6 +585,7 @@ def gwas(
     >>> bool(p_values[0] < 1e-3)               # the causal SNP
     True
     """
+    _check_eigen_args(kva, kve)
     Y = _check_phenotype(Y)
     X = np.asarray(X, dtype=np.float64)
     n = len(Y)
@@ -679,14 +735,15 @@ class LMM:
         Not modified.
     kva : (n,) array, optional
         Eigenvalues of ``K``, e.g. from ``kva, kve = scipy.linalg.eigh(K)``.
-        None (the default) or empty: computed here.
+        None (the default): computed here.  Pass both ``kva`` and ``kve`` or
+        neither; an empty sequence is an error (use None).
     kve : (n, n) array, optional
         Eigenvectors of ``K`` (columns), matching ``kva``.
     X0 : (n, q) array, optional
         Covariates, full column rank.  Default: a single column of ones, the
         mean.  The SNP is *not* part of ``X0``.  A given ``X0`` is used
         exactly as passed, with NO intercept added: covariates from
-        ``PlinkReader.get_covariates`` have no intercept column, so passing
+        ``PlinkReader.read_covariates`` have no intercept column, so passing
         them alone silently fits a model without one.  Use
         ``X0 = np.column_stack([np.ones(n), cov])``.
     verbose : bool, default False
@@ -744,7 +801,8 @@ class LMM:
     ValueError
         (with ``validate=True``) for a nan/inf in ``K`` or ``X0``; an infinite
         or constant phenotype; no non-missing phenotype; a ``K`` that is not
-        ``(n, n)``; ``kva``/``kve`` of the wrong shape or with nan/inf;
+        ``(n, n)``; ``kva``/``kve`` of the wrong shape or with nan/inf, empty,
+        or only one of them given;
         rank-deficient, all-zero or duplicated covariate columns; ``X0`` with
         the wrong number of rows; ``n <= q + 1``; ``ids`` that do not match
         ``kinship_ids``.
@@ -760,9 +818,8 @@ class LMM:
     -----
     * Eigenvalues below 1e-6 are set to 1e-6 (on a copy), so a singular or
       slightly indefinite ``K`` still gives a finite likelihood.
-    * `fit` and `association` default to REML.  `log_likelihood` and
-      `ml_solution` are lower-level; `log_likelihood` defaults to ML
-      (``reml=False``).
+    * Every method that takes ``reml`` defaults to REML (``reml=True``):
+      `fit`, `association` and `log_likelihood`.
     * ``sigma2 = Q / (N - p)`` everywhere, including `fit` with
       ``reml=False``, EXCEPT the ML Wald test of `association` (and
       `gwas`), which uses ``Q / N``.
@@ -785,7 +842,7 @@ class LMM:
     >>> h, beta, sigma, ll = model.fit()          # null model, REML
     >>> bool(0.0 <= h < 1.0)
     True
-    >>> t, p = model.association(W[:, [0]])        # Wald test of one SNP (a column)
+    >>> t, p = model.association(W[:, 0])          # Wald test of one SNP
     >>> bool(0.0 <= p <= 1.0)
     True
     """
@@ -827,6 +884,7 @@ class LMM:
         See the class docstring for the parameters.
         """
 
+        _check_eigen_args(kva, kve)
         if X0 is None:
             n_y = len(np.asarray(Y))
             X0 = np.ones(n_y).reshape(n_y, 1)
@@ -873,7 +931,7 @@ class LMM:
         # float64 arrays (no copy if they already are), or None to compute them
         evals: FloatArray | None = None if kva is None else np.asarray(kva, dtype=np.float64)
         evecs: FloatArray | None = None if kve is None else np.asarray(kve, dtype=np.float64)
-        if evals is None or evecs is None or len(evals) == 0 or len(evecs) == 0:
+        if evals is None or evecs is None:
             if self.verbose:
                 sys.stderr.write(
                     "Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0], K.shape[1])
@@ -972,7 +1030,7 @@ class LMM:
 
     def ml_solution(
         self, h: float, X: FloatArray
-    ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray, FloatArray]:
+    ) -> tuple[FloatArray, float, float, FloatArray, FloatArray]:
         """Generalized least squares at a fixed heritability.
 
         With ``S = 1 / (h * kva + 1 - h)`` (the weights in the rotated basis)
@@ -991,10 +1049,10 @@ class LMM:
         -------
         beta : (p, 1) array
             Coefficient estimates.
-        sigma : (1, 1) array
+        sigma : float
             ``Q / (N - p)``: the estimate of the total variance ``sigma2``
             (REML-style denominator).
-        Q : (1, 1) array
+        Q : float
             Weighted residual sum of squares.
         xx_inv : (p, p) array
             ``(X'SX)^-1``; ``xx_inv[j, j] * sigma`` is the variance of
@@ -1014,13 +1072,12 @@ class LMM:
         xx_inv = linalg.inv(xx)
         beta = _matrix_mult(_matrix_mult(xx_inv, xt), self.yt)
         yt = self.yt - _matrix_mult(X, beta)
-        Q = np.dot(yt.T * S, yt)
-        # TODO(5b): sigma and Q are 1x1 arrays, not scalars; callers call .sum() on them.
+        Q = float(np.dot(yt.T * S, yt)[0, 0])
         sigma = Q * 1.0 / (float(self.N) - float(X.shape[1]))
         return beta, sigma, Q, xx_inv, xx
 
     def _neg_log_likelihood(
-        self, h: float, X: FloatArray | None = None, reml: bool = False
+        self, h: float, X: FloatArray | None = None, reml: bool = True
     ) -> float:
         """Objective ``-log_likelihood(h)`` for the bounded search in `_get_max`;
         1e6 outside [0, 1].  ``X`` is already rotated and not stacked."""
@@ -1030,12 +1087,11 @@ class LMM:
         # for h > 1, h*kva + (1-h) can be negative and LL is nan (bug 4).
         if h < 0 or h > 1:
             return 1e6
-        ll: float = self.log_likelihood(h, X, stack=False, reml=reml)[0]
-        return -ll
+        return -self.log_likelihood(h, X, stack=False, reml=reml).ll
 
     def log_likelihood(
-        self, h: float, X: FloatArray | None = None, stack: bool = True, reml: bool = False
-    ) -> tuple[np.float64, FloatArray, FloatArray, FloatArray]:
+        self, h: float, X: ArrayLike | None = None, stack: bool = True, reml: bool = True
+    ) -> LogLikResult:
         """Log-likelihood of the data at heritability ``h``, profiled over ``beta`` and ``sigma2``.
 
         Parameters
@@ -1045,41 +1101,53 @@ class LMM:
             negative and the result is nan.
         X : array, optional
             If None, the covariates ``x0t`` are used.  If given and
-            ``stack=True``, ``X`` is a **raw** SNP column (N, 1) (a 1-d
-            array raises IndexError) in the original individual order; it is rotated and appended to
+            ``stack=True``, ``X`` is a **raw** SNP, shape (N,) or (N, 1), in
+            the original individual order; it is rotated and appended to
             ``x0t`` (this overwrites ``x0t_stack``).  If given and
             ``stack=False``, ``X`` is a full **already rotated** design
             matrix (N, p) used in place of ``x0t``.
         stack : bool, default True
             See ``X``.
-        reml : bool, default False
-            If True, add the REML terms (an adjustment for the estimated
-            ``beta``); the default is the ML log-likelihood.  Note that this
-            differs from `fit` and `association`, which default to REML.
+        reml : bool, default True
+            REML (the default; adds the REML terms, an adjustment for the
+            estimated ``beta``) or, with False, the ML log-likelihood.  (It
+            defaulted to ML before Phase 5b.)
 
         Returns
         -------
-        log_likelihood : float
-            numpy float64; the full Gaussian log-likelihood, including the
-            ``n log(2 pi)`` term.
-        beta : (p, 1) array
-            Coefficient estimates.
-        sigma : (1, 1) array
-            ``Q / (N - p)``, see `ml_solution`.
-        xx_inv : (p, p) array
+        LogLikResult
+            A named tuple ``(ll, beta, sigma, xx_inv)``: ``ll`` (float) is the
+            full Gaussian log-likelihood, including the ``n log(2 pi)`` term;
+            ``beta`` the (p, 1) coefficients; ``sigma`` (float) is
+            ``Q / (N - p)``, see `ml_solution`; ``xx_inv`` the (p, p)
             ``(X'SX)^-1``.
 
         Notes
         -----
         The likelihood uses ``Q / N`` for the variance, but the returned
         ``sigma`` is ``Q / (N - p)``.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from pylmm.lmm import LMM
+        >>> rng = np.random.default_rng(6)
+        >>> model = LMM(rng.normal(size=30), np.eye(30))
+        >>> res = model.log_likelihood(0.5)
+        >>> ll, beta, sigma, xx_inv = res              # still a tuple
+        >>> type(res.sigma).__name__, beta.shape
+        ('float', (1, 1))
+        >>> bool(res.ll == ll)
+        True
         """
 
         if X is None:
             X = self.x0t
         elif stack:
-            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
+            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
             X = self.x0t_stack
+        else:
+            X = np.asarray(X, dtype=np.float64)
 
         n = float(self.N)
         q = float(X.shape[1])
@@ -1100,10 +1168,9 @@ class LMM:
             )
             ll = ll + 0.5 * ll_reml_part
 
-        ll = ll.sum()
-        return ll, beta, sigma, xx_inv
+        return LogLikResult(float(ll), beta, sigma, xx_inv)
 
-    def _get_max(self, H: FloatArray, X: FloatArray | None = None, reml: bool = False) -> Any:
+    def _get_max(self, H: FloatArray, X: FloatArray | None = None, reml: bool = True) -> Any:
         """Locate the maximiser of the likelihood from the grid, helper of `fit`.
 
         Scans ``self.ll_grid`` for interior local maxima (indices 1 to n-3, so
@@ -1119,7 +1186,7 @@ class LMM:
             The grid of ``h`` values that ``ll_grid`` was computed on.
         X : array, optional
             Rotated design passed to the objective (not stacked).
-        reml : bool, default False
+        reml : bool, default True
             REML or ML objective.
 
         Returns
@@ -1164,7 +1231,7 @@ class LMM:
 
     def fit(
         self, X: ArrayLike | None = None, ngrids: int = 100, reml: bool = True
-    ) -> tuple[np.float64, FloatArray, FloatArray, np.float64]:
+    ) -> tuple[np.float64, FloatArray, float, float]:
         """Estimate the heritability ``h`` (and ``beta``, ``sigma2``) of the model.
 
         The log-likelihood is evaluated on the grid ``h = 0, 1/ngrids, ...,
@@ -1175,8 +1242,8 @@ class LMM:
 
         Parameters
         ----------
-        X : (N, 1) array, optional
-            A SNP as a column (a 1-d array raises IndexError), in the original individual order (of the individuals with
+        X : (N,) or (N, 1) array, optional
+            A SNP, in the original individual order (of the individuals with
             a phenotype).  If given it is added to the covariates for this
             fit (the per-SNP refit of `gwas`); otherwise the null model with
             ``X0`` only is fitted.  Overwrites ``x0t_stack``.
@@ -1192,7 +1259,7 @@ class LMM:
             Estimated heritability in [0, 0.99] (numpy float64).
         beta : (p, 1) array
             Coefficients at ``h`` (``p = q``, or ``q + 1`` with ``X``).
-        sigma : (1, 1) array
+        sigma : float
             ``sigma2 = Q / (N - p)``.
         log_likelihood : float
             The REML or ML log-likelihood at ``h``.
@@ -1223,8 +1290,8 @@ class LMM:
         >>> y = rng.multivariate_normal(np.zeros(80), 0.5 * K + 0.5 * np.eye(80))
         >>> model = LMM(y, K)
         >>> h, beta, sigma, ll = model.fit()
-        >>> beta.shape, sigma.shape
-        ((1, 1), (1, 1))
+        >>> beta.shape, type(sigma).__name__
+        ((1, 1), 'float')
         >>> model.h_grid[[0, -1]]
         array([0.  , 0.99])
         >>> bool(h == model.opt_h)
@@ -1232,30 +1299,30 @@ class LMM:
         """
 
         if X is None:
-            X = self.x0t
+            design = self.x0t
         else:
-            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
-            X = self.x0t_stack
+            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
+            design = self.x0t_stack
 
         H = np.array(range(ngrids)) / float(ngrids)
-        grid_ll = np.array([self.log_likelihood(h, X, stack=False, reml=reml)[0] for h in H])
+        grid_ll = np.array([self.log_likelihood(h, design, stack=False, reml=reml).ll for h in H])
         self.ll_grid = grid_ll
 
-        hmax = self._get_max(H, X, reml)
-        L, beta, sigma, beta_stderr = self.log_likelihood(hmax, X, stack=False, reml=reml)
+        hmax = self._get_max(H, design, reml)
+        L, beta, sigma, beta_stderr = self.log_likelihood(hmax, design, stack=False, reml=reml)
 
         self.h_grid = H
         self.opt_h = hmax.sum()
         self.opt_ll = L
         self.opt_beta = beta
-        self.opt_sigma = sigma.sum()
+        self.opt_sigma = sigma
 
         return hmax, beta, sigma, L
 
     @overload
     def association(
         self,
-        X: FloatArray,
+        X: ArrayLike,
         h: float | None = ...,
         stack: bool = ...,
         reml: bool = ...,
@@ -1265,22 +1332,22 @@ class LMM:
     @overload
     def association(
         self,
-        X: FloatArray,
+        X: ArrayLike,
         h: float | None = ...,
         stack: bool = ...,
         reml: bool = ...,
         *,
         return_beta: Literal[True],
-    ) -> tuple[np.float64, np.float64, np.float64, FloatArray]: ...
+    ) -> tuple[np.float64, np.float64, np.float64, float]: ...
 
     def association(
         self,
-        X: FloatArray,
+        X: ArrayLike,
         h: float | None = None,
         stack: bool = True,
         reml: bool = True,
         return_beta: bool = False,
-    ) -> tuple[np.float64, np.float64] | tuple[np.float64, np.float64, np.float64, FloatArray]:
+    ) -> tuple[np.float64, np.float64] | tuple[np.float64, np.float64, np.float64, float]:
         """Wald test of one SNP, at a fixed heritability.
 
         The SNP is added to the covariates, ``beta`` is re-estimated by
@@ -1290,10 +1357,9 @@ class LMM:
 
         Parameters
         ----------
-        X : (N, 1) array
-            The SNP as a column (raw, original individual order, over the
-            individuals with a phenotype); a 1-d array raises IndexError.
-            It must have NO missing values (see Raises); `gwas` handles
+        X : (N,) or (N, 1) array
+            The SNP (raw, original individual order, over the individuals
+            with a phenotype).  It must have NO missing values (see Raises); `gwas` handles
             missing calls.  With ``stack=False``, a full
             already-rotated design matrix (N, q + 1) whose last column is the
             SNP.
@@ -1322,18 +1388,15 @@ class LMM:
             genotype; with ``norm_genotype=False`` per 0 -> 1 step of the
             A2-allele fraction (two copies of A2), so the sign and scale
             differ from PLINK's per-A1-copy convention.
-        beta_var : ndarray, shape (1, 1)
+        beta_var : float
             Only if ``return_beta``: its variance, ``xx_inv[-1, -1] * sigma``
-            (with the sigma used for the test).  It is a (1, 1) array, not a
-            float (use ``float(beta_var[0, 0])``); a float is planned
-            (TODO(5b)).
+            (with the sigma used for the test).
 
         Raises
         ------
-        IndexError
-            If ``X`` is a 1-d array (``stack=True``).
         ValueError
-            A SNP containing ``nan`` fails inside scipy ("array must not
+            If ``X`` is not (N,) or (N, 1) (``stack=True``).  A SNP
+            containing ``nan`` fails inside scipy ("array must not
             contain infs or NaNs"); `association` does not handle missing
             calls.  Use `gwas`, which tests the called individuals only, or
             impute first.
@@ -1355,22 +1418,25 @@ class LMM:
         >>> y = 1.0 * W[:, 0] + rng.normal(size=80)
         >>> model = LMM(y, K)
         >>> _ = model.fit()
-        >>> t, p, b, var = model.association(W[:, [0]], return_beta=True)
+        >>> t, p, b, var = model.association(W[:, 0], return_beta=True)
         >>> bool(p < 1e-3) and round(float(b)) == 1
         True
-        >>> t2, p2 = model.association(W[:, [1]])
+        >>> type(var).__name__
+        'float'
+        >>> t2, p2 = model.association(W[:, [1]])             # an (n, 1) column works too
         >>> bool(0 <= p2 <= 1)
         True
         """
         if stack:
-            # TODO(5b): accept 1-D x (X must be an (N, 1) column today).
-            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
-            X = self.x0t_stack
+            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
+            design = self.x0t_stack
+        else:
+            design = np.asarray(X, dtype=np.float64)
 
         if h is None:
             h = self.opt_h
 
-        L, beta, sigma, beta_var = self.log_likelihood(h, X, stack=False, reml=reml)
+        L, beta, sigma, beta_var = self.log_likelihood(h, design, stack=False, reml=reml)
         q = len(beta)
         # ML test: sigma^2 = Q/n, the ML estimate (bug 9, Phase 5.2); REML
         # keeps Q/(n-q).  The reference distribution is t(n-q) either way.
@@ -1379,8 +1445,7 @@ class LMM:
         ts, ps = self.tstat(beta[q - 1], beta_var[q - 1, q - 1], sigma, q)
 
         if return_beta:
-            # TODO(5b): beta_var is a (1, 1) array (sigma is (1, 1)); make it a float.
-            return ts, ps, beta[q - 1].sum(), beta_var[q - 1, q - 1].sum() * sigma
+            return ts, ps, beta[q - 1].sum(), float(beta_var[q - 1, q - 1] * sigma)
         return ts, ps
 
     def tstat(
@@ -1403,7 +1468,7 @@ class LMM:
             Coefficient estimate.
         var : float
             Diagonal entry of ``xx_inv`` for the coefficient.
-        sigma : (1, 1) array or float
+        sigma : float
             ``sigma2`` to use.
         q : int
             Number of columns of the design (the degrees of freedom are
@@ -1424,7 +1489,7 @@ class LMM:
             If the inputs are not scalar-like (more than one test).
         """
 
-        # TODO(5b): the log option is wrong (adds 2, not log 2; bug 5) and unreachable.
+        # TODO(6.3): the log option is wrong (adds 2, not log 2; bug 5) and unreachable.
         ts = beta / np.sqrt(var * sigma)
         # ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
         # sf == survival function - this is more accurate -- could also use logsf if the precision is not good enough

@@ -102,8 +102,7 @@ def test_association_imputed_with_beta(hmdp):
             rows.append([i, np.nan, np.nan, np.nan, np.nan])
             continue
         ts, ps, beta, bvar = L.association(x, reml=True, return_beta=True)
-        # bvar comes back as a 1x1 array (beta_var * sigma); flatten to scalars
-        rows.append([i, ts, ps, beta, np.asarray(bvar, dtype=np.float64).sum()])
+        rows.append([i, ts, ps, beta, bvar])  # bvar is a float (Phase 5b)
     rows = np.array(rows, dtype=np.float64)
     for j, name in enumerate(["snp_index", "ts", "ps", "beta", "beta_var"]):
         if name == "ps":

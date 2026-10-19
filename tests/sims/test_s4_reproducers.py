@@ -30,7 +30,7 @@ from pylmm import lmm as pylmm_lmm
 from pylmm import misc, plink_io
 from pylmm.cli import gwas as cli_gwas
 from pylmm.cli import kinship as cli_kinship
-from pylmm.lmm import LMM, calculate_kinship, gwas
+from pylmm.lmm import LMM, LogLikResult, calculate_kinship, gwas
 from sims import oracle
 
 try:  # scipy >= 1.11 (not exported publicly)
@@ -133,8 +133,8 @@ def fake_lmm(ll):
     G, K, y, _ = toy(n=20, m=10)
 
     class Fake(LMM):
-        def log_likelihood(self, h, X=None, stack=True, reml=False):
-            return (np.float64(ll(h)), np.zeros((1, 1)), np.ones((1, 1)), np.eye(1))
+        def log_likelihood(self, h, X=None, stack=True, reml=True):
+            return LogLikResult(float(ll(h)), np.zeros((1, 1)), 1.0, np.eye(1))
 
     with quiet():
         return Fake(y, K)
@@ -302,7 +302,7 @@ def test_bug4_ll_is_nan_above_one_but_ll_brent_guards_both_ends():
     with quiet():
         L = LMM(y, K)
     with np.errstate(invalid="ignore"):
-        assert np.isnan(L.log_likelihood(1.02)[0])  # log(h*kva + 1 - h) of a negative number
+        assert np.isnan(L.log_likelihood(1.02, reml=False).ll)  # log of a negative h*kva + 1 - h
     assert L._neg_log_likelihood(-0.1) == 1e6
     assert L._neg_log_likelihood(1.02) == 1e6  # fixed in Phase 5.1: h > 1 guarded too
 
@@ -856,16 +856,22 @@ def test_bug13_one_filter_for_both_branches(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_bug15_current_fit_return_shapes():
-    """fit and association(return_beta=True) still return 1x1 / qx1 arrays
-    (the rest of bug 15, open)."""
+def test_bug15_fit_and_association_return_scalars():
+    """Regression (the rest of bug 15, fixed in Phase 5b): sigma, Q and
+    beta_var are floats, not 1x1 arrays; beta stays a (q, 1) column."""
     G, K, y, _ = toy()
     with quiet():
         L = LMM(y, K)
     h, beta, sigma, ll = L.fit()
-    assert np.shape(sigma) == (1, 1) and np.shape(beta) == (1, 1)
+    assert type(sigma) is float and type(ll) is float and np.shape(beta) == (1, 1)
+    _, s2, Q, _, _ = L.ml_solution(h, L.x0t)
+    assert type(s2) is float and type(Q) is float and s2 == sigma
+    res = L.log_likelihood(h)
+    assert type(res.ll) is float and type(res.sigma) is float and res.ll == ll
     _, _, b, bvar = L.association(G[:, :1], return_beta=True)
-    assert np.shape(bvar) == (1, 1) and np.ndim(b) == 0
+    assert type(bvar) is float and np.ndim(b) == 0
+    # a 1-D SNP gives the same numbers as the (n, 1) column
+    assert L.association(G[:, 0], return_beta=True) == (*L.association(G[:, :1])[:2], b, bvar)
 
 
 def test_bug15_gwas_return_type_consistent():

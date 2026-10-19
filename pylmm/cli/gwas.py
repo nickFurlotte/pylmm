@@ -490,7 +490,7 @@ def _main(argv=None):
                     L.fit(X=x, reml=reml)
                 ts, ps, beta, beta_var = L.association(x, reml=reml, return_beta=True)
 
-            _output_result(out, id, beta, np.sqrt(beta_var).sum(), ts, ps)
+            _output_result(out, id, beta, np.sqrt(beta_var), ts, ps)
             p_values.append(ps)
             t_stats.append(ts)
 

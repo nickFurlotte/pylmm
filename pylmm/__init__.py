@@ -26,6 +26,9 @@ Module map
     :func:`~pylmm.lmm.gwas`.
 ``pylmm.plink_io``
     Readers for PLINK and EMMA files (:class:`~pylmm.plink_io.PlinkReader`).
+``pylmm.samples``
+    Sample IDs ``(FID, IID)`` and the alignment of genotype, phenotype,
+    covariate and kinship data by ID (:func:`~pylmm.samples.align_samples`).
 ``pylmm.misc``
     :func:`~pylmm.misc.fit_two`, a two-kinship variance-component fit.
 ``pylmm.cli``
@@ -43,7 +46,7 @@ Quick start
 >>> h, beta, sigma, ll = model.fit()                        # null-model fit
 >>> bool(0 <= h < 1)
 True
->>> ts, ps = model.association(W[:, [0]])                   # one SNP (n x 1)
+>>> ts, ps = model.association(W[:, 0])                     # one SNP
 >>> bool(0 <= ps <= 1)
 True
 >>> ts, ps = gwas(Y, W[:, :10], K)                          # a scan
@@ -57,9 +60,15 @@ A BED -> genotype matrix ``W`` (n x m) recipe, for the first ``m`` SNPs
 
 >>> import itertools                                          # doctest: +SKIP
 >>> from pylmm.plink_io import PlinkReader                    # doctest: +SKIP
->>> reader = PlinkReader("data/snps.132k.clean.noX", type="b")  # doctest: +SKIP
->>> W = np.column_stack([g for g, _ in itertools.islice(reader, m)])  # doctest: +SKIP
->>> Y = reader.phenos[:, 0]                                   # doctest: +SKIP
+>>> with PlinkReader("data/snps.132k.clean.noX", type="b") as reader:  # doctest: +SKIP
+...     W = np.column_stack([g for g, _ in itertools.islice(reader, m)])
+...     Y = reader.phenos[:, 0]
+
+Phenotype, covariate and kinship rows are matched to the genotype file by
+``(FID, IID)``, never by position (see ``pylmm.plink_io`` and
+``pylmm.samples``); a kinship with an ID file ``<kinship>.id`` (written by
+``pylmmKinship``) is reordered to the genotypes, and individuals missing
+from it are dropped from the phenotypes and the genotype vectors alike.
 
 ``gwas`` handles missing genotype calls (``nan``); ``LMM.association`` does
 not, and fails on a SNP that contains one.
@@ -71,7 +80,7 @@ Effect scale and covariates
   standardised genotype.  With ``norm_genotype=False`` it is per 0 -> 1 step
   of the A2-allele fraction, i.e. two copies of A2, so its sign and scale
   differ from PLINK's per-A1-copy convention (see ``pylmm.plink_io``).
-* ``PlinkReader.get_covariates`` returns the covariate columns WITHOUT an
+* ``PlinkReader.read_covariates`` returns the covariate columns WITHOUT an
   intercept, and ``X0`` is used as given.  Passing covariates alone fits a
   model with no intercept (test statistics can change a lot); add one:
   ``X0 = np.column_stack([np.ones(n), cov])``.
@@ -82,7 +91,7 @@ Where to read more
   optionally followed by digits, is a math symbol: K, X, Y, X0, K2).
 * ``CHANGELOG.md``: what changed, release by release.
 * ``docs/migration/name-map.csv``: old name to new name for every renamed
-  API name (Phase 5.4).
+  API name (Phase 5.4 and 5b).
 """
 
 from __future__ import annotations
