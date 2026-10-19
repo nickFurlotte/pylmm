@@ -181,7 +181,14 @@ decay distance of the panel) part of its locus, and repeat with the best SNP lef
 are no positions); `--clump-p` starts loci only below a threshold:
 
 ```bash
-uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py scan.tsv --bfile scan --per-allele --clump-kb 100 --clump-p 1e-4 --plot scan.png
+uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py scan.tsv --bfile scan --per-allele --clump-kb 100 --clump-p 1e-4
+```
+
+With `--plot`, the same command also draws the Manhattan and QQ plots (needs matplotlib, in the `sims`
+group):
+
+```bash needs=matplotlib
+uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py scan.tsv --bfile scan --clump-kb 100 --top 1 --plot scan.png
 ```
 
 ```python
