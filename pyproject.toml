@@ -84,6 +84,8 @@ extend-exclude = [
     "tests/golden/generate_golden.py",
     "tests/golden/py2_original",
     "data",
+    # Teaching notebook: scripts-style cells (imports mid-file, multiple statements per line).
+    "notebooks",
 ]
 
 [tool.ruff.lint]

@@ -83,7 +83,7 @@ Options that matter:
 | option | default | when to change it |
 |---|---|---|
 | `--reml` / `--ml` | REML | ML only to match a method that used ML; ML is ill-posed for a centred K from more SNPs than individuals |
-| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in Phase 4 |
+| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in Phase 4; **can abort at high h²** (per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md)): avoid it when the null h is near 0.99 |
 | `--covar F --covar-name a b` | none | covariates; the intercept is added unless `--no-intercept` |
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |

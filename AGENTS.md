@@ -21,6 +21,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `skills/` | agent skills (below); `.claude/skills` links here |
 | `data/` | example data (~215 MB): 1219 mice BED, 94-strain EMMA text |
 | `scripts/example.py` | a short library example |
+| `notebooks/` | `pylmm_tour.ipynb`: executed walkthrough for human readers (simulate, fit, scan, interpret) |
 
 ## Commands
 
