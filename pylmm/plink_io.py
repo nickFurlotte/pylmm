@@ -534,7 +534,7 @@ class PlinkReader:
             for x in xx:
                 try:
                     vals.append(float(x))
-                except Exception:  # noqa: PERF203 - per-value fallback to NaN
+                except Exception:  # per-value fallback to NaN
                     vals.append(np.nan)
             if len(vals) != self.N:
                 raise InputError(
@@ -850,7 +850,7 @@ class PlinkReader:
                 for x in v:
                     try:
                         p.append(float(x))
-                    except ValueError:  # noqa: PERF203 - per-value fallback to NaN
+                    except ValueError:  # per-value fallback to NaN
                         p.append(np.nan)
                 P.append(p)
         return self._emma_columns(P, emma_file, "phenotype")
