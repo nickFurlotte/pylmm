@@ -91,6 +91,7 @@ only-include = [
     "notebooks",
     "AGENTS.md",
     "CHANGELOG.md",
+    "CITATION.cff",
     "LICENSE",
     "README.md",
 ]

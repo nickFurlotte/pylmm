@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use PyLMM, please cite it as below."
+type: software
+title: "PyLMM: a modern, readable, validated mixed-model toolkit for statistical genetics"
+abstract: >-
+  A linear mixed-model toolkit for genome-wide association studies and heritability, built to be
+  used by humans and agents.
+authors:
+  - family-names: Furlotte
+    given-names: Nicholas A.
+    email: nick.furlotte@gmail.com
+version: 1.0.0
+date-released: "2026-10-19"
+license: MIT
+repository-code: "https://github.com/nickFurlotte/pylmm"
+url: "https://github.com/nickFurlotte/pylmm"
+keywords:
+  - GWAS
+  - linear mixed model
+  - heritability
+  - kinship
+  - statistical genetics
