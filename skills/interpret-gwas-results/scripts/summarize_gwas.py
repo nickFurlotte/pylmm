@@ -304,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
         print("loci (+-%s windows, leads with p < %g): %d" % (window, args.clump_p, len(loci)))
     what = "loci (lead SNPs)" if loci is not None else "top SNPs"
     print("%s (beta_std: per SD of the A2 allele; t = F_STAT):" % what)
+    if loci is not None and not loci:
+        print("  none: no SNP has p < %g (--clump-p)" % args.clump_p)
     for h in s["top"]:
         where = (
             " chr%s:%d A1=%s A2=%s" % (h["chrom"], h["pos"], h["a1"], h["a2"])

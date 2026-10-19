@@ -209,3 +209,11 @@ def test_summarize_cli_per_allele_clump_plot(tmp_path):
     )
     assert bad.returncode == 2
     assert "--per-allele needs --bfile" in bad.stderr
+    none = subprocess.run(
+        [sys.executable, SUMMARIZE, str(res), "--clump-snps", "2", "--clump-p", "0"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "loci (+-2 SNPs windows, leads with p < 0): 0" in none
+    assert "none: no SNP has p < 0 (--clump-p)" in none

@@ -139,7 +139,8 @@ flipped allele (BETA signs flip), a kinship for other samples (λ off, h wrong).
 The bundled mice are inbred strains with replicate animals: real LD, ~110 distinct genotypes among 1219
 animals, and missing calls. Three things differ from the synthetic sources:
 
-* **Missing calls.** `phenotypes.simulate` needs complete causal genotypes (`ValueError: causal
+* **Missing calls.** Only ~1% of calls are missing, but they are spread out: about half of the SNPs
+  have at least one. `phenotypes.simulate` needs complete causal genotypes (`ValueError: causal
   genotypes must be complete`). Pick causal SNPs among the complete ones (below), or impute first,
   e.g. `G_imp = np.where(np.isnan(G), np.nanmean(G, axis=0), G)` (then the causal "genotypes" include
   imputed means).
