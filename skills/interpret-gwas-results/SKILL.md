@@ -91,7 +91,7 @@ assert np.isclose(s["top"][0]["beta_a1"], -beta_a2[10])
 |---|---|---|
 | pylmm (today) | A2 (`.bim` col 6; REF for plink2-written files) | per SD |
 | plink2 `--glm` | `A1` column (ALT by default) | per allele |
-| GEMMA `-lmm` | `allele1` (`.bim` A1) | per allele |
+| GEMMA `-lmm` | `allele1`, usually `.bim` A1 (not verified here: check the GEMMA manual for which allele `beta` refers to) | per allele |
 | GCTA `--mlma`, fastGWA | `A1` | per allele |
 | REGENIE | `ALLELE1` (ALT) | per allele |
 | BOLT-LMM | `ALLELE1` | per allele |
