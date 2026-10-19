@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import os
 import sys
 import warnings
 from collections.abc import Iterator
@@ -49,6 +50,51 @@ def positive_int(text: str) -> int:
     if value < 1:
         raise argparse.ArgumentTypeError("%d is not positive (the minimum is 1)" % value)
     return value
+
+
+def genotype_source(args: argparse.Namespace) -> tuple[str, str, str]:
+    """The genotype input option: ``(flag, path, PlinkReader type)``, e.g. ``("--bfile", p, "b")``."""
+    if args.bfile:
+        return "--bfile", args.bfile, "b"
+    if args.tfile:
+        return "--tfile", args.tfile, "t"
+    return "--emma-geno", args.emma_geno, "emma"
+
+
+def check_writable(flag: str, path: str) -> None:
+    """Fail early, before the heavy work, if the output ``path`` cannot be written.
+
+    The file is opened for appending (an existing file is not truncated) and
+    removed again if this created it.
+
+    Raises
+    ------
+    UsageError
+        Naming ``flag``, if the file cannot be opened for writing.
+    """
+    existed = os.path.exists(path)
+    try:
+        with open(path, "a"):
+            pass
+    except OSError as e:
+        raise UsageError("%s %s: cannot write it (%s)" % (flag, path, e)) from e
+    if not existed:
+        os.remove(path)
+
+
+def check_log_file(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """A usage error (exit 2) if ``--log-file`` is the ``-o/--out`` file."""
+    if args.log_file and os.path.realpath(args.log_file) == os.path.realpath(args.out):
+        parser.error("--log-file %s is also the -o/--out file" % args.log_file)
+
+
+def debug_arguments(args: argparse.Namespace) -> dict[str, object]:
+    """The parsed options for the ``--debug`` dump, without the parser and callables."""
+    return {
+        k: v
+        for k, v in vars(args).items()
+        if not callable(v) and not isinstance(v, argparse.ArgumentParser)
+    }
 
 
 def removed_module_main(command: str) -> int:
@@ -101,7 +147,7 @@ def add_logging_options(parser: argparse.ArgumentParser) -> None:
         dest="log_level",
         action="store_const",
         const=logging.ERROR,
-        help="log errors only",
+        help="log errors only (warnings still go to --log-file)",
     )
     group.add_argument(
         "--log-file",

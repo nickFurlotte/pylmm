@@ -31,7 +31,15 @@ from numpy.typing import NDArray
 from scipy import linalg
 
 from pylmm import plink_io, samples
-from pylmm.cli._common import UsageError, add_logging_options, log, positive_int
+from pylmm.cli._common import (
+    UsageError,
+    add_logging_options,
+    check_log_file,
+    check_writable,
+    genotype_source,
+    log,
+    positive_int,
+)
 from pylmm.lmm import LMM, check_covariates, snp_estimable, subset_testable
 
 FloatArray = NDArray[np.float64]
@@ -168,7 +176,8 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--kinship",
         metavar="FILE",
         required=True,
-        help="n x n kinship matrix, whitespace-separated text (or .gz), from `pylmm kinship`.  "
+        help="(required) n x n kinship matrix, whitespace-separated text (or .gz), from "
+        "`pylmm kinship`.  "
         "Its rows are matched to the genotypes by the IDs in FILE.id if that exists; "
         "otherwise they are assumed to be in genotype order (with a warning)",
     )
@@ -223,7 +232,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--out",
         metavar="FILE",
         required=True,
-        help="write the results to FILE (overwritten)",
+        help="(required) write the results to FILE (overwritten)",
     )
     add_logging_options(p)
     return p
@@ -250,6 +259,7 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
     if args.emma_geno and args.id_match != "fid-iid":
         parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    check_log_file(parser, args)
 
 
 # ---------------------------------------------------------------------------
@@ -538,25 +548,25 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
     UsageError
         On an invalid genotype or phenotype file.
     """
-    if args.bfile:
-        base, kind = args.bfile, "b"
-    elif args.tfile:
-        base, kind = args.tfile, "t"
-    else:
-        base, kind = args.emma_geno, "emma"
-    reader: plink_io.PlinkReader = _usage(
-        plink_io.PlinkReader,
-        base,
-        type=kind,
-        pheno_file=args.pheno,
-        norm_genotype=not args.remove_missing_genotypes,
-        id_match=ID_MATCH_CHOICES[args.id_match],
-    )
-    return reader
+    flag, base, kind = genotype_source(args)
+    try:
+        return plink_io.PlinkReader(
+            base,
+            type=kind,
+            pheno_file=args.pheno,
+            norm_genotype=not args.remove_missing_genotypes,
+            id_match=ID_MATCH_CHOICES[args.id_match],
+        )
+    except OSError as e:  # e.g. a missing .fam: name the option
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
+    except ValueError as e:  # the message names the file (genotype or phenotype)
+        raise UsageError(str(e)) from e
 
 
 def _check_input_files(args: argparse.Namespace, reader: plink_io.PlinkReader) -> None:
-    """Fail early, before the kinship is read, if a phenotype or covariate file is missing."""
+    """Fail early, before the kinship is read, if it or a phenotype or covariate file is missing."""
+    if not os.path.isfile(args.kinship):
+        raise UsageError("--kinship %s: no such file" % args.kinship)
     # No phenotype file is a usage error (bug 14, fixed in Phase 5.2: this
     # used to be os.path.isfile(None), a TypeError).
     pheno_file = args.pheno or reader.fbase + ".phenos"
@@ -870,6 +880,7 @@ def run(args: argparse.Namespace) -> None:
     UsageError
         On a usage or input error.
     """
+    check_writable("--out", args.out)
     inputs = load_inputs(args)
     L = fit_null_model(inputs, args)
     try:

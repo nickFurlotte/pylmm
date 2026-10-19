@@ -406,7 +406,7 @@ def _check_phenotype(Y: ArrayLike) -> FloatArray:
         raise ValueError("phenotype has %d infinite values" % np.isinf(obs).sum())
     if len(obs) and np.ptp(obs) == 0:
         raise ValueError(
-            "phenotype has zero variance: all %d non-missing values equal %r" % (len(obs), obs[0])
+            "phenotype has zero variance: all %d non-missing values equal %g" % (len(obs), obs[0])
         )
     return Y
 

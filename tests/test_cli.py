@@ -216,17 +216,61 @@ def test_input_error_exit_2_without_traceback(emma):
     argv = [a if a != emma["kin"] else emma["kin"] + ".missing" for a in emma["argv"]]
     rc, _, err = run(argv)
     assert rc == 2
-    assert "pylmm: error: kinship file" in err and "Traceback" not in err
+    assert "pylmm: error: --kinship %s.missing: no such file" % emma["kin"] in err
+    assert "no kinship ID file" not in err and "Traceback" not in err
     assert not os.path.exists(emma["out"])  # nothing written before the inputs are valid
     rc, _, err = run([*argv, "--debug"])
     assert rc == 2 and "Traceback" in err
 
 
-def test_missing_genotype_file_exit_2(tmp_path):
-    rc, _, err = run(
-        ["gwas", "--bfile", str(tmp_path / "nope"), "--kinship", "k", "-o", str(tmp_path / "o")]
-    )
-    assert rc == 2 and "pylmm: error:" in err and "nope.fam" in err and "Traceback" not in err
+@pytest.mark.parametrize("command", ["gwas", "kinship"])
+def test_missing_genotype_file_exit_2(command, tmp_path):
+    nope = str(tmp_path / "nope")
+    argv = [command, "--bfile", nope, "-o", str(tmp_path / "o")]
+    if command == "gwas":
+        argv += ["--kinship", "k"]
+    rc, _, err = run(argv)
+    assert rc == 2 and "Traceback" not in err
+    assert "pylmm: error: --bfile %s: [Errno 2]" % nope in err and "nope.fam" in err
+
+
+def test_output_is_checked_before_the_work(emma, monkeypatch):
+    """-o (and --eigen-npz) are checked up front, and a check leaves no file."""
+
+    def boom(args):
+        raise AssertionError("the inputs were read before the output was checked")
+
+    monkeypatch.setattr(cli_gwas, "load_inputs", boom)
+    argv = [*emma["argv"][:-1], str(emma["dir"] / "no" / "dir.tsv")]
+    rc, _, err = run(argv)
+    assert rc == 2 and "pylmm: error: --out %s" % argv[-1] in err
+    snps, d = emma["argv"][2], emma["dir"]
+    rc, _, err = run(["kinship", "--emma-geno", snps, "-o", str(d / "no" / "k")])
+    assert rc == 2 and "pylmm: error: --out %s" % (d / "no" / "k") in err
+    npz = str(d / "no" / "e")  # np.savez would write e.npz
+    rc, _, err = run(["kinship", "--emma-geno", snps, "-o", str(d / "k"), "--eigen-npz", npz])
+    assert rc == 2 and "pylmm: error: --eigen-npz %s.npz" % npz in err
+    assert not os.path.exists(d / "k")  # the check of -o left no file behind
+    monkeypatch.undo()
+    out = emma["out"]
+    assert run([*emma["argv"]])[0] == 0 and os.path.getsize(out) > 0
+
+
+@pytest.mark.parametrize("command", ["gwas", "kinship"])
+def test_log_file_cannot_be_the_output(command, emma):
+    out = emma["out"]
+    argv = [command, "--emma-geno", emma["argv"][2], "-o", out, "--log-file", out]
+    if command == "gwas":
+        argv = [*emma["argv"], "--log-file", out]
+    rc, _, err = run(argv)
+    assert rc == 2 and "--log-file %s is also the -o/--out file" % out in err
+
+
+def test_debug_argument_dump_has_no_callables(emma):
+    rc, _, err = run([*emma["argv"], "--debug"])
+    line = next(x for x in err.splitlines() if x.startswith("pylmm: debug: arguments:"))
+    assert rc == 0 and "'kinship':" in line
+    assert "function" not in line and "ArgumentParser" not in line
 
 
 def test_unwritable_output_exit_2(emma):

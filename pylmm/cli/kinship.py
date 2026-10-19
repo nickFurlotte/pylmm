@@ -11,8 +11,8 @@ standardised genotypes (mean-imputed); monomorphic SNPs and SNPs with no
 called genotype are skipped, but still counted in ``m``.  The SNPs are read
 in blocks of ``--block-size``.
 
-Next to the kinship ``OUT`` it writes ``OUT.id``, the (FID, IID) of each row
-(one ``FID IID`` per line), which ``pylmm gwas --kinship OUT`` uses to align
+Next to the kinship ``FILE`` (``-o``) it writes ``FILE.id``, the (FID, IID) of each row
+(one ``FID IID`` per line), which ``pylmm gwas --kinship FILE`` uses to align
 the matrix to its genotype file by ID.  EMMA input has no IDs, so no ID file
 is written for it (and a stale one is removed).
 """
@@ -28,15 +28,26 @@ from numpy.typing import NDArray
 from scipy import linalg
 
 from pylmm import plink_io, samples
-from pylmm.cli._common import UsageError, add_logging_options, log, positive_int
+from pylmm.cli._common import (
+    UsageError,
+    add_logging_options,
+    check_log_file,
+    check_writable,
+    genotype_source,
+    log,
+    positive_int,
+)
 
 FloatArray = NDArray[np.float64]
 
+_REPORT_EVERY = 10000
+"""Log the progress of `compute_kinship` at INFO every this many SNPs."""
+
 _DESCRIPTION = """\
 Compute a realized-relationship kinship matrix K = W W'/m from genotypes,
-for `pylmm gwas --kinship`.  Writes K as whitespace-separated text to OUT
-and the sample IDs of its rows to OUT.id (not for EMMA input, which has no
-IDs)."""
+for `pylmm gwas --kinship`.  Writes K as whitespace-separated text to FILE
+(-o) and the sample IDs of its rows to FILE.id (not for EMMA input, which
+has no IDs)."""
 
 _EPILOG = """\
 examples:
@@ -87,13 +98,6 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         help="optional check: the number of SNPs (non-blank rows) of the --emma-geno file; "
         "it is counted from the file, and a different M is an error",
     )
-    geno.add_argument(
-        "--block-size",
-        metavar="N",
-        type=positive_int,
-        default=1000,
-        help="the number of SNPs held in memory at once (default: 1000)",
-    )
 
     output = p.add_argument_group("output")
     output.add_argument(
@@ -101,7 +105,8 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--out",
         metavar="FILE",
         required=True,
-        help="write the kinship to FILE and its sample IDs to FILE.id (both overwritten)",
+        help="(required) write the kinship to FILE and its sample IDs to FILE.id (both "
+        "overwritten)",
     )
     output.add_argument(
         "--eigen-text",
@@ -114,6 +119,14 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="NPZ",
         help="also write the eigendecomposition to NPZ, arrays Kva and Kve (for "
         "`pylmm gwas --eigen NPZ`; binary, exact and faster to read than --eigen-text)",
+    )
+    performance = p.add_argument_group("performance")
+    performance.add_argument(
+        "--block-size",
+        metavar="N",
+        type=positive_int,
+        default=1000,
+        help="the number of SNPs held in memory at once (default: 1000)",
     )
     add_logging_options(p)
     return p
@@ -131,6 +144,7 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     """
     if args.emma_num_snps is not None and not args.emma_geno:
         parser.error("--emma-num-snps applies only to --emma-geno")
+    check_log_file(parser, args)
 
 
 def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
@@ -141,15 +155,12 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
     UsageError
         On an invalid genotype file.
     """
-    if args.bfile:
-        base, kind = args.bfile, "b"
-    elif args.tfile:
-        base, kind = args.tfile, "t"
-    else:
-        base, kind = args.emma_geno, "emma"
+    flag, base, kind = genotype_source(args)
     try:
         return plink_io.PlinkReader(base, type=kind)
-    except ValueError as e:
+    except OSError as e:  # e.g. a missing .fam: name the option
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
+    except ValueError as e:  # the message names the file
         raise UsageError(str(e)) from e
 
 
@@ -189,6 +200,7 @@ def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray
     i = 0
     K: FloatArray | None = None
     n_all_missing = 0
+    next_report = _REPORT_EVERY
     while i < reader.num_snps:
         j = 0
         while j < block_size and i < reader.num_snps:
@@ -205,7 +217,12 @@ def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray
             j += 1
         if j < block_size:
             W = W[:, list(range(0, j))]
-        log.info("Processing first %d SNPs", i)
+        # Progress at INFO every 10000 SNPs (and at the end), else at DEBUG.
+        if i >= next_report or i >= reader.num_snps:
+            log.info("Processing first %d SNPs", i)
+            next_report = (i // _REPORT_EVERY + 1) * _REPORT_EVERY
+        else:
+            log.debug("Processing first %d SNPs", i)
         K = np.dot(W, W.T) if K is None else K + np.dot(W, W.T)
     if n_all_missing:
         log.warning("skipped %d SNPs with no called genotype", n_all_missing)
@@ -262,6 +279,11 @@ def run(args: argparse.Namespace) -> None:
     UsageError
         On a usage or input error.
     """
+    check_writable("--out", args.out)
+    if args.eigen_npz:
+        # np.savez adds .npz to a name without it
+        npz = args.eigen_npz
+        check_writable("--eigen-npz", npz if npz.endswith(".npz") else npz + ".npz")
     log.info("Reading PLINK input...")
     reader = open_genotypes(args)
     reader.iter_snps()

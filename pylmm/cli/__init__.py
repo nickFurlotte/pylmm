@@ -31,6 +31,7 @@ from pylmm.cli._common import (
     EXIT_USAGE,
     UsageError,
     configured_logging,
+    debug_arguments,
     log,
 )
 from pylmm.samples import InputError
@@ -98,6 +99,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         The exit code: 0 on success, 2 for a usage or input error, 1 for an
         unexpected error.  ``--help`` and ``--version`` return 0.
+
+    Notes
+    -----
+    Each call configures process-global logging for its duration (handlers
+    on the ``pylmm`` logger, ``warnings.showwarning``) and restores it on
+    return, so calls in sequence are fine but `main` is not thread-safe:
+    do not run two calls at once in one process.
     """
     parser = build_parser()
     try:
@@ -115,7 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     """Run the parsed command and turn its errors into exit codes (logging them)."""
-    log.debug("arguments: %s", vars(args))
+    log.debug("arguments: %s", debug_arguments(args))
     try:
         args.run(args)
     except (UsageError, InputError) as e:
