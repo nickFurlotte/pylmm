@@ -7,6 +7,7 @@
 import os
 import sys
 import warnings
+
 import numpy as np
 
 
@@ -30,7 +31,7 @@ class plink:
             self.indivs = self.getIndivs(self.fbase, type)
         else:
             # Just read a line from the SNP file and see how many individuals we have
-            f = open(fbase, "r")
+            f = open(fbase)
             self.indivs = list(range(len(f.readline().strip().split())))
             f.close()
         self.kFile = kFile
@@ -79,7 +80,7 @@ class plink:
         self.have_read = 0
         self.numSNPs = -1
         file = self.fbase
-        self.fhandle = open(file, "r")
+        self.fhandle = open(file)
 
         return self
 
@@ -89,16 +90,16 @@ class plink:
         if not os.path.isfile(file):
             file = self.fbase + ".map"
         i = 0
-        f = open(file, "r")
+        f = open(file)
         for line in f:
             i += 1
         f.close()
         self.numSNPs = i
         self.have_read = 0
-        self.snpFileHandle = open(file, "r")
+        self.snpFileHandle = open(file)
 
         file = self.fbase + ".tped"
-        self.fhandle = open(file, "r")
+        self.fhandle = open(file)
 
         return self
 
@@ -106,15 +107,15 @@ class plink:
         # get the number of snps
         file = self.fbase + ".bim"
         i = 0
-        f = open(file, "r")
+        f = open(file)
         for line in f:
             i += 1
         f.close()
         self.numSNPs = i
         self.have_read = 0
-        self.snpFileHandle = open(file, "r")
+        self.snpFileHandle = open(file)
 
-        self.BytestoRead = self.N // 4 + (self.N % 4 and 1 or 0)
+        self.BytestoRead = self.N // 4 + ((self.N % 4 and 1) or 0)
 
         file = self.fbase + ".bed"
         self.fhandle = open(file, "rb")
@@ -260,7 +261,7 @@ class plink:
         """EMMA phenotypes: one phenotype per row, one column per individual
         (in genotype order); anything that is not a number is missing."""
         P = []
-        with open(emmaFile, "r") as f:
+        with open(emmaFile) as f:
             for line in f:
                 v = line.strip().split()
                 if not v:
@@ -297,7 +298,7 @@ class plink:
         fields are FID IID (case-insensitive) is a header and is skipped."""
         keys = []
         P = []
-        with open(fn, "r") as f:
+        with open(fn) as f:
             first = True
             for lineno, line in enumerate(f, 1):
                 v = line.strip().split()
@@ -384,7 +385,7 @@ class plink:
 
         keys = []
         i = 0
-        f = open(famFile, "r")
+        f = open(famFile)
         for line in f:
             v = line.strip().split()
             famId = v[0]
@@ -410,7 +411,7 @@ class plink:
 
         sys.stderr.write("Reading kinship matrix from %s\n" % (kFile))
 
-        f = open(kFile, "r")
+        f = open(kFile)
         # read indivs
         if self.fastLMM_kinship_style:
             v = f.readline().strip().split("\t")[1:]
@@ -454,7 +455,7 @@ class plink:
 
     def getCovariatesEMMA(self, emmaFile):
         P = []
-        with open(emmaFile, "r") as f:
+        with open(emmaFile) as f:
             for line in f:
                 v = line.strip().split()
                 if not v:

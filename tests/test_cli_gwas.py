@@ -10,10 +10,9 @@ check is what catches a kinship that was read wrongly, e.g. silently
 zero-filled.
 """
 
+import helpers as h
 import numpy as np
 import pytest
-
-import helpers as h
 
 BED_N = 1219
 HMDP_N = 94

@@ -178,7 +178,7 @@ def _record(out, name, p_c, b_c, beta, p_null, thresholds):
         if p_null is not None:
             out["t1_%s_%s" % (name, lab)] = int((p_null <= thr).sum())
     if p_null is not None:
-        out["nn_" + name] = int(len(p_null))
+        out["nn_" + name] = len(p_null)
     out["rel_" + name] = float(rel.sum())
     out["sq_" + name] = float((rel**2).sum())
     sig = p_c <= 1e-5

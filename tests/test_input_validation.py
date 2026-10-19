@@ -379,7 +379,7 @@ def test_covariate_nan_only_where_y_is_nan_is_accepted(prob):
     t2, p2 = GWAS(y[keep], X[keep], K[keep][:, keep], X0=X0[keep])
     np.testing.assert_allclose(t, t2, rtol=1e-10)
     L = LMM(y, K, X0=X0)
-    assert L.N == keep.sum()
+    assert keep.sum() == L.N
     # a nan on an individual that has a phenotype is still an error
     X0[5, 1] = np.nan
     with pytest.raises(ValueError, match="nan/inf"):

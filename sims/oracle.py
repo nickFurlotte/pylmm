@@ -101,7 +101,6 @@ as pylmm does.
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional
 
 import numpy as np
 from scipy import linalg, optimize, stats
@@ -123,7 +122,7 @@ class OracleFit:
     ml_unbounded: bool = False  # ML profile -> +inf as h -> 1 (see module docstring)
     n: int = 0
     p: int = 0
-    eig_clamp: Optional[float] = None
+    eig_clamp: float | None = None
     search: str = "fine"
 
     @property
@@ -216,9 +215,9 @@ def profile_loglik(
     h: float,
     y: np.ndarray,
     K: np.ndarray,
-    X: Optional[np.ndarray] = None,
+    X: np.ndarray | None = None,
     reml: bool = True,
-    eig_clamp: Optional[float] = None,
+    eig_clamp: float | None = None,
 ):
     """(ll, beta_hat, sigma2_hat) at a fixed h; ll = -inf if H(h) is singular.
     sigma2_hat is Q/(n-p) for REML and Q/n for ML.  ``eig_clamp`` applies
@@ -294,10 +293,10 @@ def _search_pylmm(ll):
 def fit(
     y: np.ndarray,
     K: np.ndarray,
-    X: Optional[np.ndarray] = None,
+    X: np.ndarray | None = None,
     reml: bool = True,
     n_grid: int = 201,
-    eig_clamp: Optional[float] = None,
+    eig_clamp: float | None = None,
     h_grid: str = "fine",
 ) -> OracleFit:
     """Maximise the profile (RE)ML over h; see module docstring.
@@ -347,13 +346,13 @@ def wald(
     y: np.ndarray,
     K: np.ndarray,
     x: np.ndarray,
-    X0: Optional[np.ndarray] = None,
+    X0: np.ndarray | None = None,
     null_reml: bool = True,
-    test_reml: Optional[bool] = None,
-    h: Optional[float] = None,
+    test_reml: bool | None = None,
+    h: float | None = None,
     refit: bool = False,
     sigma_convention: str = "textbook",
-    eig_clamp: Optional[float] = None,
+    eig_clamp: float | None = None,
     h_grid: str = "fine",
     n_grid: int = 201,
 ) -> OracleWald:

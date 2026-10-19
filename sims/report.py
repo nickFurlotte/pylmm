@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Iterable, List, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -54,7 +54,7 @@ def load_results(name: str, quick: bool = False, mod=None):
     return pd.DataFrame(recs)
 
 
-def param_columns(df, mod=None) -> List[str]:
+def param_columns(df, mod=None) -> list[str]:
     """Names of the param columns (from the study grid if given)."""
     if mod is not None:
         keys = []
@@ -64,7 +64,7 @@ def param_columns(df, mod=None) -> List[str]:
     raise ValueError("pass the study module")
 
 
-def scalar_metric_columns(df, exclude: Sequence[str] = ()) -> List[str]:
+def scalar_metric_columns(df, exclude: Sequence[str] = ()) -> list[str]:
     skip = {"cell_id", "rep", "seed", "elapsed"} | set(exclude)
     out = []
     for c in df.columns:
@@ -75,7 +75,7 @@ def scalar_metric_columns(df, exclude: Sequence[str] = ()) -> List[str]:
     return out
 
 
-def summarize(df, by: Sequence[str], metrics: Optional[Sequence[str]] = None, se: bool = True):
+def summarize(df, by: Sequence[str], metrics: Sequence[str] | None = None, se: bool = True):
     """Per-cell mean (and standard error over replicates) of scalar metrics.
 
     Returns one row per combination of ``by`` with columns ``n_reps``,
@@ -131,7 +131,7 @@ def write_summary(
     title: str,
     notes: str = "",
     extra_tables: Iterable = (),
-    md_columns: Optional[Sequence[str]] = None,
+    md_columns: Sequence[str] | None = None,
 ) -> None:
     """Write summary.csv (all columns) and summary.md (title, run info, notes,
     then the table restricted to ``md_columns`` if given, plus any

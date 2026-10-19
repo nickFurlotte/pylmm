@@ -13,7 +13,7 @@ that calls main().
 
 import sys
 import warnings
-from optparse import OptionParser, OptionGroup
+from optparse import OptionGroup, OptionParser
 
 import numpy as np
 from scipy import linalg

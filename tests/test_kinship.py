@@ -2,10 +2,10 @@
 
 import os
 
+import helpers as h
 import numpy as np
 import pytest
 
-import helpers as h
 from pylmm import lmm
 
 

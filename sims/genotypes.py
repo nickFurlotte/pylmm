@@ -28,7 +28,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -42,7 +43,7 @@ class Genotypes:
     G: np.ndarray  # n x m float64, nan = missing
     snp_ids: list
     indiv_ids: list
-    pops: Optional[np.ndarray] = None  # population / family label per individual
+    pops: np.ndarray | None = None  # population / family label per individual
     meta: dict = dataclasses.field(default_factory=dict)
 
     @property
@@ -53,7 +54,7 @@ class Genotypes:
     def m(self) -> int:
         return self.G.shape[1]
 
-    def copy(self) -> "Genotypes":
+    def copy(self) -> Genotypes:
         return dataclasses.replace(
             self,
             G=self.G.copy(),
@@ -61,7 +62,7 @@ class Genotypes:
             meta=dict(self.meta),
         )
 
-    def subset(self, snps=None, indivs=None) -> "Genotypes":
+    def subset(self, snps=None, indivs=None) -> Genotypes:
         """Column/row subset (index arrays, slices or boolean masks); copies."""
         G = self.G
         snp_ids, indiv_ids, pops = self.snp_ids, self.indiv_ids, self.pops
@@ -90,8 +91,8 @@ class Genotypes:
 
 def _choose(
     total: int,
-    count: Optional[int],
-    idx: Optional[Sequence[int]],
+    count: int | None,
+    idx: Sequence[int] | None,
     select: str,
     rng: np.random.Generator,
 ) -> np.ndarray:
@@ -148,10 +149,10 @@ def with_missing(G: np.ndarray, rate: float, rng: np.random.Generator) -> np.nda
 
 
 def bed(
-    n_snps: Optional[int] = None,
-    snps: Optional[Sequence[int]] = None,
-    n_indivs: Optional[int] = None,
-    indivs: Optional[Sequence[int]] = None,
+    n_snps: int | None = None,
+    snps: Sequence[int] | None = None,
+    n_indivs: int | None = None,
+    indivs: Sequence[int] | None = None,
     select: str = "first",
     seed: int = 0,
     base: str = BED_BASE,
@@ -203,10 +204,10 @@ def bed(
 
 
 def hmdp(
-    n_snps: Optional[int] = None,
-    snps: Optional[Sequence[int]] = None,
-    n_indivs: Optional[int] = None,
-    indivs: Optional[Sequence[int]] = None,
+    n_snps: int | None = None,
+    snps: Sequence[int] | None = None,
+    n_indivs: int | None = None,
+    indivs: Sequence[int] | None = None,
     select: str = "first",
     seed: int = 0,
     path: str = HMDP_SNPS,
@@ -260,7 +261,7 @@ def balding_nichols(
     k: int = 2,
     fst: float = 0.1,
     maf: Any = ("uniform", 0.05, 0.5),
-    admixture: Optional[float] = None,
+    admixture: float | None = None,
     seed: int = 0,
 ) -> Genotypes:
     """Structured population under the Balding-Nichols model.

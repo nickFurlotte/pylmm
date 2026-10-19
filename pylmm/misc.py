@@ -6,7 +6,9 @@
 
 
 import sys
+
 import numpy as np
+
 from pylmm.lmm import LMM
 
 
@@ -35,7 +37,7 @@ def fitTwo(y, K1, K2, X0=None, wgrids=100):
         del K
 
     L = np.array(LLs)
-    i = np.where(L == L.max())[0]
+    i = np.where(L.max() == L)[0]
     if len(i) > 1:
         sys.stderr.write("WARNING: Found multiple maxes using first one\n")
 

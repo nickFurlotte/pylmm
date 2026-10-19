@@ -59,10 +59,12 @@ import subprocess
 import sys
 import time
 import traceback
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
+
+import numpy as np
 
 import sims  # noqa: F401  (pins BLAS threads before numpy loads)
-import numpy as np
 
 SIMS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SIMS_DIR)
@@ -73,7 +75,7 @@ MAX_JOBS = 6  # 8-core laptop (4 performance cores), 16 GB RAM
 # studies
 # ---------------------------------------------------------------------------
 
-_LOADED: Dict[str, Any] = {}
+_LOADED: dict[str, Any] = {}
 
 
 def load_study(ref: str):
@@ -103,7 +105,7 @@ def study_name(ref: str, mod=None) -> str:
     return getattr(mod, "NAME", None) or os.path.splitext(os.path.basename(ref))[0].split(".")[-1]
 
 
-def expand_grid(grid) -> List[dict]:
+def expand_grid(grid) -> list[dict]:
     """dict of lists -> cartesian product (in key order); list -> as is."""
     if isinstance(grid, dict):
         keys = list(grid)
@@ -112,7 +114,7 @@ def expand_grid(grid) -> List[dict]:
     return [dict(g) for g in grid]
 
 
-def study_grid(mod, quick: bool) -> List[dict]:
+def study_grid(mod, quick: bool) -> list[dict]:
     if hasattr(mod, "grid"):
         return expand_grid(mod.grid(quick))
     return expand_grid(mod.QUICK_GRID if quick else mod.GRID)
@@ -188,7 +190,7 @@ def raw_path(name: str, quick: bool) -> str:
     return os.path.join(study_dir(name), "raw", ("quick" if quick else "full") + ".jsonl")
 
 
-def read_rows(path: str) -> List[dict]:
+def read_rows(path: str) -> list[dict]:
     rows = []
     if not os.path.exists(path):
         return rows
@@ -220,7 +222,7 @@ def row_version(row: dict) -> int:
     return int(row.get("study_version", 1))
 
 
-def current_rows(ref: str, quick: bool = False, mod=None) -> List[dict]:
+def current_rows(ref: str, quick: bool = False, mod=None) -> list[dict]:
     """Rows of ``raw/<mode>.jsonl`` that belong to the study as it is now:
     cell_id in the current grid and row version == STUDY_VERSION (extra
     replicates from a ``--reps`` run are kept).  Rows of a cell that is no
@@ -273,7 +275,7 @@ def git_sha() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _execute(ref: str, tasks: List[tuple]) -> List[dict]:
+def _execute(ref: str, tasks: list[tuple]) -> list[dict]:
     """Run tasks [(cell_id, params, rep, seed), ...] in this process."""
     mod = load_study(ref)
     ver = study_version(mod)
@@ -325,7 +327,7 @@ def _worker_init():
     _s.pin_blas_threads()
 
 
-def plan(ref: str, quick: bool, reps: Optional[int] = None, mod=None) -> List[tuple]:
+def plan(ref: str, quick: bool, reps: int | None = None, mod=None) -> list[tuple]:
     """All (cell_id, params, rep, seed) tasks of the study, in grid order."""
     mod = mod or load_study(ref)
     name = study_name(ref, mod)
@@ -344,12 +346,12 @@ def run(
     ref: str,
     quick: bool = False,
     jobs: int = 1,
-    reps: Optional[int] = None,
+    reps: int | None = None,
     force: bool = False,
-    chunk: Optional[int] = None,
+    chunk: int | None = None,
     verbose: bool = True,
     job_cap: int = MAX_JOBS,
-    cells: Optional[Iterable[str]] = None,
+    cells: Iterable[str] | None = None,
 ) -> dict:
     """Run (or resume) a study.  Returns a small summary dict.
 
@@ -401,7 +403,7 @@ def run(
     )
 
     # chunks: consecutive reps of one cell, so a worker reuses cached data
-    by_cell: Dict[str, List[tuple]] = {}
+    by_cell: dict[str, list[tuple]] = {}
     for t in todo:
         by_cell.setdefault(t[0], []).append(t)
     chunks = []

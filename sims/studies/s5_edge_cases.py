@@ -479,7 +479,7 @@ def run_lib(P, impute):
             h = float(np.sum(hh))
             out["sigma_hat"] = float(np.sum(sigma))
             out["ll_hat"] = float(np.sum(ll))
-        except Exception as e:  # noqa: BLE001 -- recording is the point
+        except Exception as e:
             out["null_err"] = _err(e)
             out["crash"] = 1
             out["crash_err"] = "null fit: " + _err(e)
@@ -491,7 +491,7 @@ def run_lib(P, impute):
                 out["crash"] = 1
                 out["crash_err"] = "GWAS returned %d stats for %d SNPs" % (len(t), m)
                 t = np.full(m, np.nan)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             out["crash"] = 1
             out["crash_err"] = (
                 (out["crash_err"] + " | " if out["crash_err"] else "") + "GWAS: " + _err(e)
@@ -626,7 +626,7 @@ def run_cli(P, remove):
                     out["crash_err"] = "CLI wrote %d rows for %d SNPs" % (len(vals), m)
                 else:
                     t = np.array([float(v[3]) for v in vals])
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 out["crash"] = 1
                 out["crash_err"] = "reading CLI output: " + _err(e)
     out["h_hat"] = h
@@ -689,7 +689,7 @@ def oracle_compare(P, G, t, h_hat, remove_mode, cli_ml=False):
             res["max_dt"] = float(np.max(dts))
             if dts_ml:
                 res["max_dt_ml"] = float(np.max(dts_ml))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         res["or_err"] = _err(e)
     return res
 
@@ -730,7 +730,7 @@ def run_cell(params, seed):
     out = {}
     try:
         P = build(params, rng)
-    except Exception as e:  # noqa: BLE001 -- the builder itself is not under test
+    except Exception as e:
         raise RuntimeError("builder failed for %r: %s" % (params, _err(e)))
     out["ideal"] = P.ideal
     if path.startswith("cli") and not P.cli_ok:

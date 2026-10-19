@@ -7,10 +7,9 @@
 import sys
 import time
 import warnings
+
 import numpy as np
-from scipy import linalg
-from scipy import optimize
-from scipy import stats
+from scipy import linalg, optimize, stats
 
 # np.seterr('raise')
 

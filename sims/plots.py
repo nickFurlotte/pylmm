@@ -9,7 +9,7 @@ reference lines (y = x, nominal alpha) in neutral grey.
 from __future__ import annotations
 
 import os
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -59,10 +59,11 @@ def _save(fig, path):
     return path
 
 
-def qq(series: Dict[str, np.ndarray], path: str, title: str = "", max_points: int = 2000) -> str:
+def qq(series: dict[str, np.ndarray], path: str, title: str = "", max_points: int = 2000) -> str:
     """QQ plot of -log10 p for one or more labelled p-value vectors, with a
     pointwise 95% band under the uniform null."""
     from scipy import stats
+
     from sims.metrics import qq_data
 
     plt = _plt()
@@ -91,13 +92,13 @@ def lines(
     x: str,
     y: str,
     path: str,
-    hue: Optional[str] = None,
-    yerr: Optional[str] = None,
+    hue: str | None = None,
+    yerr: str | None = None,
     title: str = "",
-    ref: Optional[float] = None,
+    ref: float | None = None,
     identity: bool = False,
-    xlabel: Optional[str] = None,
-    ylabel: Optional[str] = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
     logy: bool = False,
 ) -> str:
     """Metric ``y`` against param ``x`` (one line per ``hue`` level), with

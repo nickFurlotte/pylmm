@@ -1,9 +1,9 @@
 """Null-model fits: LMM.fit() under REML/ML, missing Y, covariates."""
 
+import helpers as h
 import numpy as np
 import pytest
 
-import helpers as h
 from pylmm import lmm
 
 FITS = h.load_kv("null_fits.kv.txt")
@@ -24,7 +24,7 @@ def check_fit(L, prefix):
         got["beta_%d" % i] = b
     expected_keys = sorted(k[len(prefix) + 1 :] for k in FITS if k.startswith(prefix + "."))
     assert sorted(list(got) + ["N"]) == expected_keys
-    assert L.N == FITS[prefix + ".N"]
+    assert FITS[prefix + ".N"] == L.N
     for k in sorted(got):
         h.assert_close(
             got[k], FITS[prefix + "." + k], rtol=h.RTOL_FIT, atol=h.ATOL_FIT, what=prefix + "." + k

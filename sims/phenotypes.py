@@ -27,7 +27,7 @@ tiny negative round-off eigenvalues of rank-deficient kinships to 0.
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -58,7 +58,7 @@ def sample_polygenic(
 
 
 def _effect_variances(
-    n_causal: int, causal_var: Union[float, Sequence[float]], effects: str, rng: np.random.Generator
+    n_causal: int, causal_var: float | Sequence[float], effects: str, rng: np.random.Generator
 ) -> np.ndarray:
     if np.ndim(causal_var) == 1:
         v = np.asarray(causal_var, dtype=np.float64)
@@ -80,12 +80,12 @@ def simulate(
     kin,
     h2: float,
     rng: np.random.Generator,
-    G: Optional[np.ndarray] = None,
-    causal_idx: Optional[Sequence[int]] = None,
-    causal_var: Union[float, Sequence[float]] = 0.0,
+    G: np.ndarray | None = None,
+    causal_idx: Sequence[int] | None = None,
+    causal_var: float | Sequence[float] = 0.0,
     effects: str = "equal",
-    X0: Optional[np.ndarray] = None,
-    alpha: Optional[Sequence[float]] = None,
+    X0: np.ndarray | None = None,
+    alpha: Sequence[float] | None = None,
     n_covariates: int = 0,
     covariate_effect: float = 0.5,
     mu: float = 0.0,
@@ -167,7 +167,7 @@ def choose_causal(
     m: int,
     n_causal: int,
     rng: np.random.Generator,
-    G: Optional[np.ndarray] = None,
+    G: np.ndarray | None = None,
     min_maf: float = 0.0,
 ) -> np.ndarray:
     """Random sorted causal columns; with G, only polymorphic SNPs whose

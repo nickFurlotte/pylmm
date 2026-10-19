@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import helpers  # noqa: E402
+import helpers
 
 if helpers.REPO not in sys.path:
     sys.path.insert(0, helpers.REPO)
@@ -46,6 +46,7 @@ def hmdp():
 def bed_null():
     """(Y, K, Kva, Kve) for the README BED data (1219 individuals)."""
     from scipy import linalg
+
     from pylmm import input as pinput
 
     IN = pinput.plink(helpers.BED_BASE, type="b", phenoFile=helpers.FAKE_PHENOS)

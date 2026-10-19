@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-from typing import Optional
 
 import numpy as np
 from scipy import linalg
@@ -44,7 +43,7 @@ class Kinship:
         """
         return self.Kva.copy(), self.Kve
 
-    def subset(self, keep: np.ndarray) -> "Kinship":
+    def subset(self, keep: np.ndarray) -> Kinship:
         """Kinship for a subset of individuals (recomputes the eigh)."""
         return from_matrix(self.K[np.ix_(keep, keep)], **self.meta)
 
@@ -104,9 +103,9 @@ def clear_cache() -> None:
 
 def split_snps(
     m: int,
-    n_kinship: Optional[int],
-    n_test: Optional[int],
-    rng: Optional[np.random.Generator] = None,
+    n_kinship: int | None,
+    n_test: int | None,
+    rng: np.random.Generator | None = None,
     overlap: bool = False,
 ):
     """Split range(m) into (kinship_idx, test_idx).

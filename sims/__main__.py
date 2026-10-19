@@ -1,10 +1,10 @@
 """CLI: ``uv run --group sims python -m sims {run,report,list,plan} ...``."""
 
-import sims  # noqa: F401  (pins BLAS threads first)
-
 import argparse
 import os
 import sys
+
+import sims  # noqa: F401  (pins BLAS threads first)
 
 
 def _studies():

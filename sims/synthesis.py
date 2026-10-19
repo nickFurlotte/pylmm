@@ -44,7 +44,6 @@ supplied h.
 
 import contextlib
 import io
-import json
 import os
 import sys
 import time
@@ -251,7 +250,7 @@ def _pylmm_fit_or_none(y, kin, reml):
 
     try:
         return methods.pylmm_null(y, kin, REML=reml)
-    except Exception as ex:  # noqa: BLE001 - we only want to know whether it crashed
+    except Exception as ex:
         if "BracketError" in type(ex).__name__:
             return None
         raise
@@ -278,6 +277,7 @@ def _assoc_scan(L, G, h):
 
 def crash_bias_s1():
     import pandas as pd
+
     from sims.studies import s1_null_calibration as s1
 
     crashed = _crashed_tasks("s1_null_calibration")
@@ -356,6 +356,7 @@ def crash_bias_s1():
 
 def crash_bias_s2():
     import pandas as pd
+
     from sims.studies import s2_h2_recovery as s2
 
     crashed = _crashed_tasks("s2_h2_recovery")
@@ -454,7 +455,7 @@ def _refit_scan(L, y, K, G, h_cap=H_CAP):
             with _quiet():
                 L.fit(X=x)
             h = L.optH
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:
             if "BracketError" not in type(ex).__name__:
                 raise
             n_crash += 1
@@ -469,6 +470,7 @@ def crash_bias_s3():
     replicates added back.  12 of the 14 S3 crashes were in the per-SNP
     refit, so the refit power is the one they could bias."""
     import pandas as pd
+
     from sims.studies import s3_power as s3
 
     crashed = _crashed_tasks("s3_power")
@@ -664,6 +666,7 @@ def s2_lostmode():
     """Recompute the S2 "lost mode" flag on [0, 0.99] by replaying each
     replicate's pylmm profile (pylmm's LL at the stored seed's y)."""
     import pandas as pd
+
     from pylmm.lmm import LMM
     from sims.studies import s2_h2_recovery as s2
 
@@ -850,6 +853,7 @@ def s2_attribution():
 
 def s3_calibrated(check_reps=1):
     import pandas as pd
+
     from sims.studies import s3_power as s3
 
     rows = runner.current_rows("s3_power")
@@ -1292,10 +1296,7 @@ LEDGER = [
 STATUS = {
     "4": "fixed in Phase 5.1",
     "16": "fixed in Phase 5.1",
-    **{
-        i: "fixed in Phase 5.2"
-        for i in ("1", "6", "7", "10", "11", "12", "13", "14", "19", "20", "22", "23", "24")
-    },
+    **dict.fromkeys(("1", "6", "7", "10", "11", "12", "13", "14", "19", "20", "22", "23", "24"), "fixed in Phase 5.2"),
     "9": "fixed in Phase 5.2 for the ML test (--ML / REML=False use Q/n); fit()'s reported sigma unchanged",
     "15": "partly fixed in Phase 5.2 (GWAS always returns lists); fit/association shapes open",
     "21": "fixed in Phase 5.2 (nan/shape errors, asymmetry and non-PSD warnings, optional ids/K_ids "

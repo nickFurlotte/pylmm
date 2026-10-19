@@ -16,14 +16,13 @@ import os
 import sys
 import time
 import warnings
-from optparse import OptionParser, OptionGroup
+from optparse import OptionGroup, OptionParser
 
 import numpy as np
-
 from scipy import linalg
 
-from pylmm.lmm import LMM, snp_estimable, check_covariates, subset_testable
 from pylmm import input
+from pylmm.lmm import LMM, check_covariates, snp_estimable, subset_testable
 
 usage = """usage: %prog [options] --kfile kinshipFile --[tfile | bfile] plinkFileBase outfileBase
 
@@ -58,7 +57,7 @@ def readKinshipFile(fn, n):
         if fn[-3:] == ".gz":
             f = gzip.open(fn, "rt")
         else:
-            f = open(fn, "r")
+            f = open(fn)
     except OSError as e:
         raise ValueError("kinship file %s: cannot read (%s)" % (fn, e))
     K = np.zeros((n, n))

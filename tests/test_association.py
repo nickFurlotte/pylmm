@@ -1,15 +1,12 @@
 """Per-SNP association through lmm.GWAS and LMM.association."""
 
+import helpers as h
 import numpy as np
 import pytest
 
-import helpers as h
 from pylmm import lmm
 
-GWAS_COLS = (
-    "snp_index n_missing ts_reml_norefit ps_reml_norefit "
-    "ts_reml_refit ps_reml_refit ts_ml_norefit ps_ml_norefit"
-).split()
+GWAS_COLS = ["snp_index", "n_missing", "ts_reml_norefit", "ps_reml_norefit", "ts_reml_refit", "ps_reml_refit", "ts_ml_norefit", "ps_ml_norefit"]
 REFIT_NSNPS = 200  # refit is ~10 ms/SNP emulated; first 200 SNPs is enough
 # (scripts/example.py covers all 1000 with refit)
 

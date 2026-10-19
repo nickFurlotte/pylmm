@@ -11,6 +11,7 @@ def test_s1_quick_cell_and_report(tmp_path):
     pytest.importorskip("pandas")
     pytest.importorskip("matplotlib")
     import pandas as pd
+
     from sims.studies import s1_null_calibration as s1
 
     params = runner.study_grid(s1, quick=True)[0]  # unrelated, tiny

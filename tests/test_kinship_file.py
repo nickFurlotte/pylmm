@@ -6,10 +6,10 @@ import gzip
 import io
 import warnings
 
+import helpers as h
 import numpy as np
 import pytest
 
-import helpers as h
 from pylmm.cli import gwas as cli_gwas
 
 

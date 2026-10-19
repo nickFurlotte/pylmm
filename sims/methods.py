@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-from typing import Optional
 
 import numpy as np
 from scipy import stats
@@ -20,7 +19,7 @@ def _quiet():
     return contextlib.redirect_stderr(io.StringIO())
 
 
-def pylmm_null(y: np.ndarray, kin, X0: Optional[np.ndarray] = None, REML: bool = True) -> dict:
+def pylmm_null(y: np.ndarray, kin, X0: np.ndarray | None = None, REML: bool = True) -> dict:
     """Null-model fit with ``pylmm.lmm.LMM(...).fit(REML=REML)``.
 
     Returns {'h', 'sigma', 'll', 'beta'} (beta as an array).  Missing y are
@@ -46,7 +45,7 @@ def pylmm_gwas(
     y: np.ndarray,
     G: np.ndarray,
     kin,
-    X0: Optional[np.ndarray] = None,
+    X0: np.ndarray | None = None,
     REML: bool = True,
     refit: bool = False,
 ):
@@ -76,14 +75,14 @@ def pylmm_gwas(
     return np.asarray(ts, dtype=np.float64), np.asarray(ps, dtype=np.float64)
 
 
-def pylmm_association(L, x: np.ndarray, REML: bool = True, h: Optional[float] = None):
+def pylmm_association(L, x: np.ndarray, REML: bool = True, h: float | None = None):
     """``L.association`` for one SNP column x on a fitted pylmm LMM -> (t, p)."""
     x = np.asarray(x, dtype=np.float64).reshape(-1, 1)
     ts, ps = L.association(x, h=h, REML=REML)
     return float(ts), float(ps)
 
 
-def ols_gwas(y: np.ndarray, G: np.ndarray, X0: Optional[np.ndarray] = None):
+def ols_gwas(y: np.ndarray, G: np.ndarray, X0: np.ndarray | None = None):
     """Per-SNP OLS t-test of y ~ X0 + g_j -> (t, p) arrays, df = n - q - 1.
 
     Rows with missing y are dropped; for SNPs with missing calls those rows

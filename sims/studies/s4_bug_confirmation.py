@@ -330,7 +330,7 @@ def mlogp(p):
 def _counts(p, prefix):
     p = np.asarray(p, dtype=np.float64)
     p = p[~np.isnan(p)]
-    out = {prefix + "n": int(len(p))}
+    out = {prefix + "n": len(p)}
     for a in ALPHAS:
         out[prefix + "k_" + metrics.alpha_label(a)] = int((p <= a).sum())
     return out
@@ -686,8 +686,8 @@ def _bednull_setup(params):
         ev = np.clip(np.linalg.eigvalsh(Z @ Z.T / G.shape[1]), 0, None)
         info = {
             "rank_K": int((np.asarray(kin.Kva) > 1e-6).sum()),
-            "unique_indivs": int(len(np.unique(Gall, axis=0))),
-            "unique_test_patterns": int(len(np.unique(np.round(G.T, 6), axis=0))),
+            "unique_indivs": len(np.unique(Gall, axis=0)),
+            "unique_test_patterns": len(np.unique(np.round(G.T, 6), axis=0)),
             # effective number of independent tests (participation ratio of
             # the SNP correlation spectrum) -- n x n form of the same spectrum
             "meff": float(ev.sum() ** 2 / (ev**2).sum()),

@@ -22,7 +22,7 @@ deliberately misspecified phenotypes); they have no oracle.
 
 import numpy as np
 
-from sims import genotypes, kinship, methods, oracle, phenotypes
+from sims import kinship, methods, oracle, phenotypes
 
 NAME = "s2_h2_recovery"
 
@@ -99,7 +99,7 @@ def n_modes(L, prom=0.1):
     L = np.where(fin, L, L[fin].min() - 1.0)
     pad = L.min() - 1e3
     pk, _ = find_peaks(np.r_[pad, L, pad], prominence=prom)
-    return int(len(pk))
+    return len(pk)
 
 
 def pylmm_profile(lmm, reml):
