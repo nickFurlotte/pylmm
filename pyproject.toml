@@ -5,12 +5,22 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pylmm"
-version = "0.99"
-description = "pyLMM is a lightweight linear mixed model solver for use in GWAS."
+version = "1.0.0"
+description = "A modern, readable, validated mixed-model toolkit for statistical genetics, built to be used by humans and agents."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Nick Furlotte", email = "nick.furlotte@gmail.com" }]
+keywords = [
+    "GWAS",
+    "linear mixed model",
+    "LMM",
+    "heritability",
+    "kinship",
+    "statistical genetics",
+    "association mapping",
+    "PLINK",
+]
 requires-python = ">=3.11"
 # Lower bounds are the oldest releases with Python 3.11 wheels, and they are
 # tested: CI runs `uv run --python 3.11 --resolution lowest-direct pytest` on
@@ -21,13 +31,28 @@ dependencies = [
     "numpy>=1.23.2",
     "scipy>=1.9.2",
 ]
+# The license is given by the PEP 639 `license` expression above; PEP 639
+# deprecates "License ::" classifiers, so there is none here.
 classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Typing :: Typed",
 ]
 
 [project.urls]
 Homepage = "https://github.com/nickFurlotte/pylmm"
+Repository = "https://github.com/nickFurlotte/pylmm"
+Issues = "https://github.com/nickFurlotte/pylmm/issues"
+Changelog = "https://github.com/nickFurlotte/pylmm/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pylmm = "pylmm.cli:main"
@@ -54,9 +79,22 @@ notebooks = [
 packages = ["pylmm"]
 
 [tool.hatch.build.targets.sdist]
-# tests/ needs tests/golden and data/ (~215MB), and scripts/ only holds
-# the example script, so the sdist ships the package alone.
-exclude = ["/data", "/docker", "/docs", "/tests", "/scripts", "/.github"]
+# The package, its metadata and the sources that need no data: sims/ (code
+# only, not its result tables), skills/ and the notebook.  Not data/ (~215MB),
+# nor tests/, which needs tests/golden and data/.  An explicit list, because
+# hatchling walks the .claude/skills symlink before skills/ and then skips
+# skills/ as already seen.
+only-include = [
+    "pylmm",
+    "sims",
+    "skills",
+    "notebooks",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+]
+exclude = ["/sims/results"]
 
 [tool.mypy]
 # The whole package, including the command line (pylmm/cli/).  numpy ships its own stubs; scipy has none (the
