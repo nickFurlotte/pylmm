@@ -110,13 +110,16 @@ import os
 import sys
 import warnings
 from collections.abc import Callable
-from typing import IO, Any
+from typing import IO, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 # An (FID, IID) pair.
 IndivKey = tuple[str, str]
+
+# The genotype formats PlinkReader reads (its ``type`` argument).
+GENOTYPE_TYPES = ("b", "t", "emma")
 
 
 class PlinkReader:
@@ -141,6 +144,7 @@ class PlinkReader:
         is silently skipped if it does not exist.
     type : {"b", "t", "emma"}, default "b"
         Genotype format: PLINK binary, PLINK transposed text, or EMMA.
+        Anything else raises ValueError.
     norm_genotype : bool, default True
         If true, each SNP is standardised (mean-imputed, centred, unit
         variance; see `normalize_genotype`).  If false the raw values
@@ -155,11 +159,14 @@ class PlinkReader:
 
     Attributes
     ----------
-    indivs : list of (str, str)
-        ``(FID, IID)`` of each individual in genotype-column order (for EMMA
-        input, the integers ``0 .. n-1``).
+    indivs : list of (str, str), or list of int for EMMA
+        ``(FID, IID)`` of each individual in genotype-column order.  EMMA
+        input has no IDs, so it is the integers ``0 .. n-1`` (column
+        positions) instead.
     N : int
-        Number of individuals (not set for EMMA input).
+        Number of individuals in the genotype file (genotype columns).  It
+        stays the same when a FaSTLMM kinship drops individuals from
+        `indivs`.  (Since Phase 5.5 it is also set for EMMA input.)
     K : numpy.ndarray or None
         Kinship matrix, shape ``(n, n)``, or None if none was read.
     phenos : numpy.ndarray or None
@@ -177,8 +184,9 @@ class PlinkReader:
 
     fbase: str
     type: str
-    indivs: list[Any]  # TODO(5b): list[IndivKey] for "b"/"t" but list[int] for "emma"
-    N: int  # TODO(5b): not assigned for type="emma"
+    # (FID, IID) pairs for "b"/"t"; column positions 0..n-1 for "emma" (no IDs).
+    indivs: list[IndivKey] | list[int]
+    N: int
     K: NDArray[np.float64] | None
     phenos: NDArray[np.float64] | None
     k_file: str | None
@@ -206,6 +214,11 @@ class PlinkReader:
 
         self.fhandle = None
         self.snp_file_handle = None
+        if type not in GENOTYPE_TYPES:
+            raise ValueError(
+                "unknown genotype file type %r; use one of %s"
+                % (type, ", ".join(repr(t) for t in GENOTYPE_TYPES))
+            )
         self.fbase = fbase
         self.type = type
         if type != "emma":
@@ -215,6 +228,7 @@ class PlinkReader:
             f = open(fbase)
             self.indivs = list(range(len(f.readline().strip().split())))
             f.close()
+            self.N = len(self.indivs)
         self.k_file = k_file
         self.phenos = None
         self.norm_genotype = norm_genotype
@@ -257,8 +271,14 @@ class PlinkReader:
         Returns
         -------
         PlinkReader
-            ``self``, positioned before the first SNP.  (If `type` is not a
-            known format an error is written to stderr and None is returned.)
+            ``self``, positioned before the first SNP.
+
+        Raises
+        ------
+        ValueError
+            If `type` is not a known format.  (The constructor already
+            rejects one; this catches a later reassignment.  It used to
+            write to stderr and return None.)
         """
         if self.type == "b":
             return self._get_snp_iterator_bed()
@@ -267,8 +287,7 @@ class PlinkReader:
         elif self.type == "emma":
             return self._get_snp_iterator_emma()
         else:
-            sys.stderr.write("Please set type to either b or t\n")
-            return  # type: ignore[return-value]  # TODO(5b): returns None here
+            raise ValueError("unknown genotype file type %r" % (self.type,))
 
     def _get_snp_iterator_emma(self) -> PlinkReader:
         """Open the EMMA matrix; the number of SNPs is unknown (-1)."""
@@ -347,9 +366,15 @@ class PlinkReader:
         if self.have_read == self.num_snps:
             raise StopIteration
         self.have_read += 1
+        # Both are opened by get_snp_iterator, which sets have_read; calling
+        # next() without it fails on have_read above.
+        fh = self.fhandle
+        assert fh is not None, "call get_snp_iterator() first"
 
         if self.type == "b":
-            X = self.fhandle.read(self._bytes_to_read)
+            snp_names = self.snp_file_handle
+            assert snp_names is not None
+            X = fh.read(self._bytes_to_read)
             if len(X) != self._bytes_to_read:
                 raise ValueError(
                     "Truncated BED file %s.bed: expected %d bytes for SNP %d, got %d"
@@ -357,37 +382,39 @@ class PlinkReader:
                 )
             return self._format_binary_genotypes(
                 X, self.norm_genotype
-            ), self.snp_file_handle.readline().strip().split()[1]
+            ), snp_names.readline().strip().split()[1]
 
         elif self.type == "t":
-            X = self.fhandle.readline()
+            snp_names = self.snp_file_handle
+            assert snp_names is not None
+            X = fh.readline()
             xx = X.strip().split()
             chrm, rsid, pos1, pos2 = tuple(xx[:4])
             xx = xx[4:]
             G = self._get_genos_tped(xx, rsid)
             if self.norm_genotype:
                 G = self.normalize_genotype(G)
-            return G, self.snp_file_handle.readline().strip().split()[1]
+            return G, snp_names.readline().strip().split()[1]
 
         elif self.type == "emma":
-            X = self.fhandle.readline()
+            X = fh.readline()
             if X == "":
                 raise StopIteration
             xx = X.strip().split()
-            G = []
+            vals: list[float] = []
             for x in xx:
                 try:
-                    G.append(float(x))
+                    vals.append(float(x))
                 except Exception:  # noqa: PERF203 - per-value fallback to NaN
-                    G.append(np.nan)
-            G = np.array(G)
+                    vals.append(np.nan)
+            G = np.array(vals)
             if self.norm_genotype:
                 G = self.normalize_genotype(G)
             return G, "SNP_%d" % self.have_read
 
         else:
-            sys.stderr.write("Do not understand type %s\n" % (self.type))
-            # TODO(5b): falls through and returns None (unreachable: type is validated earlier)
+            # Unreachable unless `type` was reassigned after get_snp_iterator.
+            raise ValueError("unknown genotype file type %r" % (self.type,))
 
     # Allele codes of a 1/2-recoded TPED (PLINK --recode12 / --transpose):
     # 1 and 2 are the alleles, 0 is PLINK's default missing-genotype code.
@@ -447,7 +474,7 @@ class PlinkReader:
         B = np.frombuffer(X, dtype=np.uint8)
         codes = (B[:, None] >> self._BED_SHIFTS) & 3
         # only take the leading values because whatever is left should be null
-        G = self._BED_CODE_VALUES[codes.reshape(-1)[: self.N]]
+        G: NDArray[np.float64] = self._BED_CODE_VALUES[codes.reshape(-1)[: self.N]]
         if norm:
             G = self.normalize_genotype(G)
         return G
@@ -529,7 +556,7 @@ class PlinkReader:
             self.pheno_file = pheno_file = self.fbase + ".phenos"
         if not os.path.isfile(pheno_file):
             # sys.stderr.write("Could not find phenotype file: %s\n" % (pheno_file))
-            return
+            return None
         keys, P = self._read_table(pheno_file, lambda x: x == "NA" or x == "-9", "phenotype")
         self.phenos = self._align_rows(keys, P, pheno_file, "phenotype")
         return self.phenos
@@ -645,21 +672,22 @@ class PlinkReader:
                     % (what, fn, len(P), len(self.indivs))
                 )
             return np.array(P, dtype=np.float64)
-        D = {}
+        indivs = self._id_keys()
+        D: dict[IndivKey, int] = {}
         for i, k in enumerate(keys):
             if k in D:
                 raise ValueError("%s file %s lists individual %s %s twice" % (what, fn, k[0], k[1]))
             D[k] = i
-        idx = [D.get(k, -1) for k in self.indivs]
-        absent = [k for k, i in zip(self.indivs, idx) if i < 0]
-        if len(absent) == len(self.indivs):
+        idx = [D.get(k, -1) for k in indivs]
+        absent = [k for k, i in zip(indivs, idx) if i < 0]
+        if len(absent) == len(indivs):
             raise ValueError(
                 "none of the %d individuals of the genotype file appear in the %s file %s "
                 "(matched on the first two columns, FID and IID; e.g. %s %s)"
-                % (len(self.indivs), what, fn, self.indivs[0][0], self.indivs[0][1])
+                % (len(indivs), what, fn, indivs[0][0], indivs[0][1])
             )
         ncol = len(P[0])
-        out = np.full((len(self.indivs), ncol), np.nan)
+        out = np.full((len(indivs), ncol), np.nan)
         for r, i in enumerate(idx):
             if i >= 0:
                 out[r] = P[i]
@@ -669,7 +697,7 @@ class PlinkReader:
                 "(e.g. %s)"
                 % (
                     len(absent),
-                    len(self.indivs),
+                    len(indivs),
                     what,
                     fn,
                     ", ".join("%s %s" % k for k in absent[:5]),
@@ -677,6 +705,15 @@ class PlinkReader:
                 stacklevel=3,
             )
         return out
+
+    def _id_keys(self) -> list[IndivKey]:
+        """`indivs` as ``(FID, IID)`` pairs, for the "b"/"t" code paths.
+
+        Only a typing view: for EMMA input `indivs` holds ints, and the
+        callers either handle EMMA before (``_align_rows``) or, for a FaSTLMM
+        kinship with EMMA genotypes, match nothing, as before.
+        """
+        return cast("list[IndivKey]", self.indivs)
 
     def _read_fam(self, base: str, type: str = "b") -> list[IndivKey]:
         """Read ``(FID, IID)`` of each individual from ``.tfam`` ("t") or ``.fam``; sets ``N``."""
@@ -725,7 +762,7 @@ class PlinkReader:
         """
         if self.indivs is None or len(self.indivs) == 0:
             sys.stderr.write("Did not read any individuals so can't load kinship\n")
-            return
+            return None
 
         sys.stderr.write("Reading kinship matrix from %s\n" % (k_file))
 
@@ -734,32 +771,33 @@ class PlinkReader:
         if self.fastlmm_kinship:
             v = f.readline().strip().split("\t")[1:]
             keys = [tuple(y.split()) for y in v]
-            D = {}
+            D: dict[tuple[str, ...], int] = {}
             for i in range(len(keys)):
                 D[keys[i]] = i
 
         # read matrix
-        K = []
+        rows: list[list[float]] = []
         if self.fastlmm_kinship:
             for line in f:
-                K.append([float(x) for x in line.strip().split("\t")[1:]])
+                rows.append([float(x) for x in line.strip().split("\t")[1:]])
         else:
             for line in f:
-                K.append([float(x) for x in line.strip().split()])
+                rows.append([float(x) for x in line.strip().split()])
         f.close()
-        K = np.array(K)
+        K = np.array(rows)
 
         if self.fastlmm_kinship:
             # reorder to match self.indivs
+            indivs = self._id_keys()
             L = []
             kept = []
             X = []
-            for i in range(len(self.indivs)):
-                if self.indivs[i] not in D:
-                    X.append(self.indivs[i])
+            for i in range(len(indivs)):
+                if indivs[i] not in D:
+                    X.append(indivs[i])
                 else:
-                    kept.append(self.indivs[i])
-                    L.append(D[self.indivs[i]])
+                    kept.append(indivs[i])
+                    L.append(D[indivs[i]])
             K = K[L, :][:, L]
             self.indivs = kept
             self.indivs_removed = X

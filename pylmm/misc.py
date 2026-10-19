@@ -116,8 +116,8 @@ def fit_two(
 
         del K
 
-    L = np.array(ll_grid)
-    i = np.where(L.max() == L)[0]
+    ll = np.array(ll_grid)
+    i = np.where(ll.max() == ll)[0]
     if len(i) > 1:
         sys.stderr.write("WARNING: Found multiple maxes using first one\n")
 

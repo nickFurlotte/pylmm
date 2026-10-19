@@ -143,11 +143,11 @@ def calculate_kinship(W: ArrayLike, center: bool = False) -> FloatArray:
         W[:, i] = (W[:, i] - mn) / np.sqrt(vr)
 
     W = W[:, keep]
-    K = _matrix_mult(W, W.T) * 1.0 / float(m)
+    K: FloatArray = _matrix_mult(W, W.T) * 1.0 / float(m)
     if center:
         P = np.diag(np.repeat(1, n)) - 1 / float(n) * np.ones((n, n))
         S = np.trace(_matrix_mult(_matrix_mult(P, K), P))
-        k_centered = (n - 1) * K / S
+        k_centered: FloatArray = (n - 1) * K / S
         return k_centered
     return K
 
@@ -169,7 +169,8 @@ def _residual_on_span(x: FloatArray, X0: FloatArray) -> FloatArray:
     if X0.shape[1] == 0:
         return x
     Q, _ = linalg.qr(X0, mode="economic")
-    return x - _matrix_mult(Q, _matrix_mult(Q.T, x))
+    r: FloatArray = x - _matrix_mult(Q, _matrix_mult(Q.T, x))
+    return r
 
 
 def snp_estimable(
@@ -527,7 +528,7 @@ def gwas(
     # Remove missing values in Y and adjust associated parameters
     v = np.isnan(Y)
     if v.sum():
-        keep = ~v
+        keep: NDArray[np.bool_] = ~v
         keep = keep.reshape((-1,))
         Y = Y[keep]
         X = X[keep, :]
@@ -796,7 +797,8 @@ class LMM:
         """
 
         if X0 is None:
-            X0 = np.ones(len(Y)).reshape(len(Y), 1)
+            n_y = len(np.asarray(Y))
+            X0 = np.ones(n_y).reshape(n_y, 1)
         self.verbose = verbose
 
         if validate:
@@ -812,8 +814,9 @@ class LMM:
             check_ids(ids, kinship_ids)
         else:
             Y = np.asarray(Y, dtype=np.float64).reshape(-1)
+            X0 = np.asarray(X0, dtype=np.float64)  # no copy for the callers' float arrays
 
-        x = ~np.isnan(Y)
+        x: NDArray[np.bool_] = ~np.isnan(Y)
         x = x.reshape(
             -1,
         )
@@ -836,37 +839,39 @@ class LMM:
                 + (" (individuals with a phenotype)" if x.sum() < len(x) else ""),
             )
 
-        if kva is None or kve is None or len(kva) == 0 or len(kve) == 0:
+        # float64 arrays (no copy if they already are), or None to compute them
+        evals: FloatArray | None = None if kva is None else np.asarray(kva, dtype=np.float64)
+        evecs: FloatArray | None = None if kve is None else np.asarray(kve, dtype=np.float64)
+        if evals is None or evecs is None or len(evals) == 0 or len(evecs) == 0:
             if self.verbose:
                 sys.stderr.write(
                     "Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0], K.shape[1])
                 )
             begin = time.time()
-            kva, kve = linalg.eigh(K)
+            evals, evecs = linalg.eigh(K)
             end = time.time()
             if self.verbose:
                 sys.stderr.write("Total time: %0.3f\n" % (end - begin))
         elif validate:
-            kva, kve = np.asarray(kva, dtype=np.float64), np.asarray(kve, dtype=np.float64)
-            if kva.shape != (K.shape[0],) or kve.shape != K.shape:
+            if evals.shape != (K.shape[0],) or evecs.shape != K.shape:
                 raise ValueError(
                     "eigendecomposition has shapes %s and %s, expected (%d,) and %s"
-                    % (kva.shape, kve.shape, K.shape[0], K.shape)
+                    % (evals.shape, evecs.shape, K.shape[0], K.shape)
                 )
-            if not (np.isfinite(kva).all() and np.isfinite(kve).all()):
+            if not (np.isfinite(evals).all() and np.isfinite(evecs).all()):
                 raise ValueError("eigendecomposition (kva, kve) has nan/inf values")
 
         if validate:
-            self._warn_negative_eigenvalues(kva)
+            self._warn_negative_eigenvalues(evals)
 
         self.K = K
-        self.kve = kve
+        self.kve = evecs
         self.N = self.K.shape[0]
         self.Y = Y.reshape((self.N, 1))
         self.X0 = X0
 
         # A new array: the caller's kva is not clamped in place (bug 12).
-        self.kva = np.array(kva, dtype=np.float64)
+        self.kva = np.array(evals, dtype=np.float64)
         if sum(self.kva < 1e-6):
             if self.verbose:
                 sys.stderr.write("Cleaning %d eigen values\n" % (sum(self.kva < 0)))
@@ -994,7 +999,8 @@ class LMM:
         # for h > 1, h*kva + (1-h) can be negative and LL is nan (bug 4).
         if h < 0 or h > 1:
             return 1e6
-        return -self.log_likelihood(h, X, stack=False, reml=reml)[0]
+        ll: float = self.log_likelihood(h, X, stack=False, reml=reml)[0]
+        return -ll
 
     def log_likelihood(
         self, h: float, X: FloatArray | None = None, stack: bool = True, reml: bool = False
@@ -1307,7 +1313,12 @@ class LMM:
         return ts, ps
 
     def tstat(
-        self, beta: ArrayLike, var: ArrayLike, sigma: ArrayLike, q: int, log: bool = False
+        self,
+        beta: FloatArray,
+        var: float | FloatArray,
+        sigma: float | FloatArray,
+        q: int,
+        log: bool = False,
     ) -> tuple[Any, Any]:
         """t statistic and p-value of one coefficient.
 

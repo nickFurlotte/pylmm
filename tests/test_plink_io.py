@@ -58,3 +58,20 @@ def test_get_covariates_none_raises_value_error(tmp_path):
     r = PlinkReader(base, type="t", norm_genotype=False)
     with pytest.raises(ValueError, match="cov_file is None"):
         r.get_covariates(None)  # type: ignore[arg-type]
+
+
+def test_unknown_type_raises_at_construction(tmp_path):
+    """get_snp_iterator used to write to stderr and return None for an unknown type."""
+    base = _write_tped(tmp_path, ["1 1 1 2 2 2"])
+    with pytest.raises(ValueError, match="unknown genotype file type 'x'"):
+        PlinkReader(base, type="x")
+
+
+def test_emma_sets_n_and_integer_indivs(tmp_path):
+    fn = tmp_path / "geno.emma"
+    fn.write_text("0 1 2 NA\n1 1 0 2\n")
+    r = PlinkReader(str(fn), type="emma", norm_genotype=False)
+    assert r.N == 4
+    assert r.indivs == [0, 1, 2, 3]
+    g, name = next(r.get_snp_iterator())
+    assert name == "SNP_1" and np.isnan(g[3]) and g[:3].tolist() == [0.0, 1.0, 2.0]
