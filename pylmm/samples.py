@@ -75,6 +75,20 @@ SampleID = tuple[str, str]
 # How IDs are matched: on (FID, IID), or on the IID alone.
 MATCH_MODES = ("fid_iid", "iid")
 
+
+class InputError(ValueError):
+    """An input file is missing, malformed or inconsistent with the other inputs.
+
+    Raised by the file readers of `pylmm.samples` and `pylmm.plink_io` (also
+    while iterating over SNPs), with a message naming the file.  A
+    `ValueError` subclass, so ``except ValueError`` still catches it; the
+    ``pylmm`` command line reports it as a usage error (exit 2) instead of an
+    unexpected one.  Errors in the arguments of a call (an unknown ``match``
+    mode, for example) stay plain `ValueError`.  Also importable from
+    `pylmm.plink_io`.
+    """
+
+
 # How many example IDs a message lists.
 _N_EXAMPLES = 5
 
@@ -118,7 +132,7 @@ def _lookup(ids: Sequence[Any], match: str, source: str) -> dict[Hashable, int]:
         k = _key(sample, match)
         if k in out:
             what = "IID %s" % k if match == "iid" else "sample %s" % format_id(sample)
-            raise ValueError(
+            raise InputError(
                 "%s lists %s twice (rows %d and %d)%s"
                 % (
                     source,
@@ -345,7 +359,7 @@ def align_samples(
             )
 
     if ref_ids and not present.any():
-        raise ValueError(
+        raise InputError(
             "no sample is in all of %s (matched on %s), e.g. %s"
             % (
                 ", ".join(names),
@@ -393,10 +407,10 @@ def read_id_file(path: str) -> list[SampleID]:
             if not v:
                 continue
             if len(v) < 2:
-                raise ValueError("ID file %s, line %d: expected FID and IID" % (path, lineno))
+                raise InputError("ID file %s, line %d: expected FID and IID" % (path, lineno))
             ids.append((v[0], v[1]))
     if not ids:
-        raise ValueError("ID file %s lists no samples" % path)
+        raise InputError("ID file %s lists no samples" % path)
     return ids
 
 
@@ -493,29 +507,29 @@ def read_sample_table(
                 continue
             first = False
             if len(v) < 3:
-                raise ValueError(
+                raise InputError(
                     "%s file %s, line %d: expected FID IID and at least one value"
                     % (what, path, lineno)
                 )
             try:
                 rows.append([np.nan if missing(x) else float(x) for x in v[2:]])
             except ValueError:
-                raise ValueError(
+                raise InputError(
                     "%s file %s, line %d: a value is not a number (missing values are "
                     "NA%s)" % (what, path, lineno, " or -9" if what == "phenotype" else "")
                 ) from None
             ids.append((v[0], v[1]))
     widths = {len(r) for r in rows}
     if len(widths) > 1:
-        raise ValueError(
+        raise InputError(
             "%s file %s: rows have different numbers of values (%s)"
             % (what, path, ", ".join(str(w) for w in sorted(widths)))
         )
     if not rows:
-        raise ValueError("%s file %s has no data rows" % (what, path))
+        raise InputError("%s file %s has no data rows" % (what, path))
     ncol = len(rows[0])
     if header is not None and len(header) != ncol:
-        raise ValueError(
+        raise InputError(
             "%s file %s: the header names %d columns but the rows have %d values"
             % (what, path, len(header), ncol)
         )
@@ -535,26 +549,26 @@ def _column_indices(
     for c in columns:
         if isinstance(c, str):
             if header is None:
-                raise ValueError(
+                raise InputError(
                     "%s file %s has no FID IID header line, so column %r cannot be selected by "
                     "name; use a 0-based index" % (what, path, c)
                 )
             if c not in header:
-                raise ValueError(
+                raise InputError(
                     "%s file %s has no column %r; its columns are %s"
                     % (what, path, c, ", ".join(header))
                 )
             if header.count(c) > 1:
-                raise ValueError("%s file %s has two columns named %r" % (what, path, c))
+                raise InputError("%s file %s has two columns named %r" % (what, path, c))
             idx.append(header.index(c))
         else:
             i = int(c)
             if not 0 <= i < ncol:
-                raise ValueError(
+                raise InputError(
                     "%s file %s: column index %d is out of range (%d value columns, 0-based)"
                     % (what, path, i, ncol)
                 )
             idx.append(i)
     if len(set(idx)) != len(idx):
-        raise ValueError("%s file %s: a column is selected twice (%s)" % (what, path, columns))
+        raise InputError("%s file %s: a column is selected twice (%s)" % (what, path, columns))
     return idx

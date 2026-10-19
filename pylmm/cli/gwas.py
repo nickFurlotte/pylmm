@@ -879,3 +879,9 @@ def run(args: argparse.Namespace) -> None:
     with out:
         n = scan(inputs, L, args, out)
     log.info("Wrote the results for %d SNPs to %s", n, args.out)
+
+
+if __name__ == "__main__":  # the removed pre-5b.2 invocation; see removed_module_main
+    from pylmm.cli._common import removed_module_main
+
+    raise SystemExit(removed_module_main("gwas"))

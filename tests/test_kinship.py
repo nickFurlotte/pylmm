@@ -104,6 +104,7 @@ def test_cli_kinship_emma(tmp_path):
 
 
 def test_cli_kinship_emma_removes_stale_id_file(tmp_path):
+    """(Also: without --emma-num-snps the SNPs are counted.)"""
     emma = h.write_emma_subset(tmp_path)
     out = str(tmp_path / "kin.txt")
     stale = out + ".id"
@@ -114,8 +115,6 @@ def test_cli_kinship_emma_removes_stale_id_file(tmp_path):
             "kinship",
             "--emma-geno",
             emma,
-            "--emma-num-snps",
-            h.HMDP_NSNPS,
             "--block-size",
             300,
             "-o",

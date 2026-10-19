@@ -51,6 +51,20 @@ def positive_int(text: str) -> int:
     return value
 
 
+def removed_module_main(command: str) -> int:
+    """The tombstone of ``python -m pylmm.cli.<command>``, the pre-5b.2 invocation.
+
+    Writes one ``pylmm: error:`` line pointing at ``pylmm <command>`` to
+    stderr and returns `EXIT_USAGE`.  (Not an alias: the old flags are gone
+    too, so running the new command under the old name would only fail later.)
+    """
+    sys.stderr.write(
+        "pylmm: error: python -m pylmm.cli.%s was removed; use `pylmm %s` / "
+        "`python -m pylmm %s` (see docs/migration/cli-map.csv)\n" % (command, command, command)
+    )
+    return EXIT_USAGE
+
+
 class _ConsoleFormatter(logging.Formatter):
     """``pylmm: <level>: <message>``, the level in lower case."""
 

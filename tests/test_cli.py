@@ -175,7 +175,6 @@ def test_help_has_examples(command):
         ),
         (["kinship", "-o", "o"], "one of the arguments --bfile --tfile --emma-geno"),
         (["kinship", "--bfile", "b"], "required: -o/--out"),
-        (["kinship", "--emma-geno", "g", "-o", "o"], "--emma-geno needs --emma-num-snps"),
         (["kinship", "--bfile", "b", "--emma-num-snps", "3", "-o", "o"], "only to --emma-geno"),
         (["kinship", "--bfile", "b", "--block-size", "0", "-o", "o"], "not positive"),
     ],
@@ -247,6 +246,130 @@ def test_unexpected_error_exit_1(emma, monkeypatch):
     assert "--debug" in err and "Traceback" not in err
     rc, _, err = run([*emma["argv"], "--debug"])
     assert rc == 1 and "Traceback" in err and "kaboom" in err
+
+
+@pytest.mark.parametrize("command", ["gwas", "kinship"])
+def test_python_m_old_module_is_a_tombstone(command, tmp_path):
+    """`python -m pylmm.cli.gwas` (the pre-5b.2 invocation) is not an alias:
+    one error line pointing at `pylmm <command>`, exit 2 (it used to do
+    nothing and exit 0)."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = h.REPO + os.pathsep + env.get("PYTHONPATH", "")
+    p = subprocess.run(
+        [sys.executable, "-m", "pylmm.cli." + command, "--bfile", "x", "-o", "y"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=h.CLI_TIMEOUT,
+        check=False,
+    )
+    assert p.returncode == 2 and p.stdout == ""
+    assert p.stderr == (
+        "pylmm: error: python -m pylmm.cli.%s was removed; use `pylmm %s` / "
+        "`python -m pylmm %s` (see docs/migration/cli-map.csv)\n" % (command, command, command)
+    )
+    assert not os.path.exists(tmp_path / "y")
+
+
+def _write_tped(d, n=N, m=6, bad_allele_at=None):
+    """A 1/2-recoded TPED/TFAM/phenotype set; ``bad_allele_at`` puts an "A" in that SNP."""
+    rng = np.random.default_rng(5)
+    base = str(d / "t")
+    with open(base + ".tfam", "w") as f, open(base + ".phenos", "w") as ph:
+        for i in range(n):
+            f.write("F%d I%d 0 0 1 -9\n" % (i, i))
+            ph.write("F%d I%d %.6f\n" % (i, i, rng.standard_normal()))
+    with open(base + ".tped", "w") as f, open(base + ".map", "w") as mp:
+        for j in range(m):
+            al = []
+            for g in rng.integers(0, 3, n):
+                al += {0: ["1", "1"], 1: ["1", "2"], 2: ["2", "2"]}[int(g)]
+            if j == bad_allele_at:
+                al[3] = "A"
+            f.write("1 rs%d 0 %d %s\n" % (j, j + 1, " ".join(al)))
+            mp.write("1 rs%d 0 %d\n" % (j, j + 1))
+    return base
+
+
+@pytest.mark.parametrize("command", ["gwas", "kinship"])
+def test_input_error_while_reading_snps_exit_2(command, tmp_path):
+    """A malformed SNP found mid-scan (after the up-front checks) is an input
+    error, exit 2, not an unexpected error (exit 1)."""
+    good = _write_tped(tmp_path)
+    kin = str(tmp_path / "k.txt")
+    assert run(["kinship", "--tfile", good, "-o", kin])[0] == 0
+    bad = _write_tped(tmp_path, bad_allele_at=4)
+    out = str(tmp_path / "o")
+    argv = ["kinship", "--tfile", bad, "-o", out]
+    if command == "gwas":
+        argv = ["gwas", "--tfile", bad, "--kinship", kin, "-o", out]
+    rc, _, err = run(argv)
+    assert rc == 2, err
+    assert "pylmm: error: TPED file %s.tped, SNP rs4: allele code 'A'" % bad in err
+    assert "unexpected" not in err and "Traceback" not in err
+
+
+def test_truncated_tped_exit_2(tmp_path):
+    base = _write_tped(tmp_path)
+    with open(base + ".map", "a") as f:  # one SNP more in the .map than in the .tped
+        f.write("1 rs99 0 99\n")
+    rc, _, err = run(["kinship", "--tfile", base, "-o", str(tmp_path / "k")])
+    assert rc == 2 and "fewer lines than the .map" in err and "unexpected" not in err
+
+
+def test_input_error_is_a_value_error():
+    from pylmm import plink_io, samples
+
+    assert plink_io.InputError is samples.InputError
+    assert issubclass(samples.InputError, ValueError)
+
+
+def _emma_snps(d, m=7, blank_line=False):
+    rng = np.random.default_rng(6)
+    fn = str(d / "g.emma")
+    G = rng.binomial(2, 0.4, size=(m, N)) / 2.0
+    with open(fn, "w") as f:
+        for j, row in enumerate(G):
+            f.write(" ".join("%g" % v for v in row) + "\n")
+            if blank_line and j == 2:
+                f.write("\n")
+    return fn
+
+
+def test_kinship_emma_num_snps_is_inferred(tmp_path):
+    """--emma-num-snps is optional: the SNPs are counted (blank lines
+    skipped); giving the right count changes nothing."""
+    g = _emma_snps(tmp_path)
+    a, b, c = (str(tmp_path / x) for x in ("a", "b", "c"))
+    assert run(["kinship", "--emma-geno", g, "-o", a])[0] == 0
+    assert run(["kinship", "--emma-geno", g, "--emma-num-snps", "7", "-o", b])[0] == 0
+    with open(a) as fa, open(b) as fb:
+        assert fa.read() == fb.read()
+    (tmp_path / "blank").mkdir()
+    blank = _emma_snps(tmp_path / "blank", blank_line=True)
+    assert run(["kinship", "--emma-geno", blank, "--emma-num-snps", "7", "-o", c])[0] == 0
+    np.testing.assert_array_equal(np.loadtxt(c), np.loadtxt(a))
+
+
+@pytest.mark.parametrize("m", ["6", "8", "100"])
+def test_kinship_wrong_emma_num_snps_exit_2(m, tmp_path):
+    """A wrong count used to compute K from the first M SNPs (too small) or
+    crash with StopIteration (too large)."""
+    g = _emma_snps(tmp_path)
+    out = str(tmp_path / "k")
+    rc, _, err = run(["kinship", "--emma-geno", g, "--emma-num-snps", m, "-o", out])
+    assert rc == 2
+    assert "pylmm: error: --emma-num-snps %s: the --emma-geno file %s has 7 SNPs" % (m, g) in err
+    assert not os.path.exists(out)
+
+
+def test_emma_row_of_the_wrong_length_exit_2(tmp_path):
+    g = _emma_snps(tmp_path)
+    with open(g, "a") as f:
+        f.write("0 1 0\n")
+    rc, _, err = run(["kinship", "--emma-geno", g, "-o", str(tmp_path / "k")])
+    assert rc == 2 and "EMMA genotype file %s, line 8: 3 values, expected %d" % (g, N) in err
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,6 @@ import sys
 from collections.abc import Sequence
 
 from pylmm import __version__
-from pylmm.cli import gwas, kinship
 from pylmm.cli._common import (
     EXIT_OK,
     EXIT_RUNTIME_ERROR,
@@ -34,6 +33,7 @@ from pylmm.cli._common import (
     configured_logging,
     log,
 )
+from pylmm.samples import InputError
 
 __all__ = ["build_parser", "main"]
 
@@ -63,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    # Imported here, not at the top: `python -m pylmm.cli.gwas` (the removed
+    # invocation, a tombstone) would otherwise find the module already imported
+    # by this package and print a runpy RuntimeWarning first.
+    from pylmm.cli import gwas, kinship
+
     parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
     commands = parser.add_subparsers(dest="command", metavar="COMMAND", title="commands")
     commands.required = True
@@ -113,7 +118,10 @@ def _run(args: argparse.Namespace) -> int:
     log.debug("arguments: %s", vars(args))
     try:
         args.run(args)
-    except UsageError as e:
+    except (UsageError, InputError) as e:
+        # InputError: a malformed input file, also one found while reading the
+        # SNPs (a bad TPED allele code, a truncated BED file), after the
+        # up-front checks.
         log.error("%s", e, exc_info=args.debug)
         return EXIT_USAGE
     except OSError as e:  # a missing or unreadable input file, an unwritable output

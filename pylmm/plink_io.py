@@ -86,7 +86,7 @@ IID alone.  Phenotype and covariate rows are matched to ``indivs`` by ID,
 whatever order the file lists them in: extra individuals in the file are
 ignored, individuals missing from the file get ``nan`` rows (with a warning
 giving the count), and duplicate IDs or a file with no matching individual
-raise ``ValueError``.  EMMA input has no IDs, so rows are matched by position
+raise `InputError` (a ``ValueError``).  EMMA input has no IDs, so rows are matched by position
 and the row count must equal the number of individuals.
 
 A kinship matrix with IDs (FaSTLMM labels or a ``.id`` sidecar) is reordered
@@ -136,17 +136,18 @@ True
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import IO, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from pylmm import samples
-from pylmm.samples import SampleID
+from pylmm.samples import InputError, SampleID
 
 log = logging.getLogger(__name__)
 
@@ -156,6 +157,17 @@ GENOTYPE_TYPES = ("b", "t", "emma")
 # The first three bytes of a SNP-major PLINK 1 BED file.
 _BED_MAGIC = b"\x6c\x1b"
 _BED_SNP_MAJOR = b"\x01"
+
+
+@contextlib.contextmanager
+def _number_errors(what: str) -> Iterator[None]:
+    """Turn the plain ValueError of a ``float()`` of a non-number into an `InputError`."""
+    try:
+        yield
+    except InputError:
+        raise
+    except ValueError as e:
+        raise InputError("%s: %s" % (what, e)) from e
 
 
 class PlinkReader:
@@ -350,12 +362,12 @@ class PlinkReader:
         with open(fn, "rb") as f:
             head = f.read(3)
         if head[:2] != _BED_MAGIC:
-            raise ValueError(
+            raise InputError(
                 "%s is not a PLINK BED file (its first bytes are %s, expected 6c 1b)"
                 % (fn, head[:2].hex() or "empty")
             )
         if head[2:3] != _BED_SNP_MAJOR:
-            raise ValueError(
+            raise InputError(
                 "%s is not in SNP-major order (third byte %s, expected 01); pylmm reads "
                 "SNP-major BED files only (rewrite it with PLINK: plink --bfile X --make-bed "
                 "--out Y)" % (fn, head[2:3].hex() or "missing")
@@ -457,11 +469,13 @@ class PlinkReader:
         ------
         StopIteration
             After the last SNP (the files are then closed).
+        InputError
+            (A ``ValueError``.)  If the BED file is truncated, a TPED line
+            does not have 4 + 2n fields or a TPED allele code is not 0, 1
+            or 2 (the message names the SNP and gives the PLINK recode
+            command), or an EMMA row does not have n values.
         ValueError
-            If the BED file is truncated, (``type="t"``) a TPED allele
-            code is not 0, 1 or 2 (see the module docstring; the message
-            names the SNP and gives the PLINK recode command), or
-            `iter_snps` was not called first.
+            If `iter_snps` was not called first.
         """
         if self._exhausted:
             raise StopIteration
@@ -477,7 +491,7 @@ class PlinkReader:
             assert snp_names is not None
             X = fh.read(self._bytes_to_read)
             if len(X) != self._bytes_to_read:
-                raise ValueError(
+                raise InputError(
                     "Truncated BED file %s.bed: expected %d bytes for SNP %d, got %d"
                     % (self.fbase, self._bytes_to_read, self.have_read, len(X))
                 )
@@ -490,6 +504,18 @@ class PlinkReader:
             assert snp_names is not None
             X = fh.readline()
             xx = X.strip().split()
+            if len(xx) != 4 + 2 * self.N:
+                raise InputError(
+                    "TPED file %s.tped, line %d: expected 4 + 2 x %d fields (CHR SNP CM BP, "
+                    "then two alleles per individual of the .tfam), found %d%s"
+                    % (
+                        self.fbase,
+                        self.have_read,
+                        self.N,
+                        len(xx),
+                        " (the file has fewer lines than the .map/.bim)" if not X else "",
+                    )
+                )
             chrm, rsid, pos1, pos2 = tuple(xx[:4])
             xx = xx[4:]
             G = self._subset_genotypes(self._get_genos_tped(xx, rsid))
@@ -499,6 +525,8 @@ class PlinkReader:
 
         elif self.type == "emma":
             X = fh.readline()
+            while X and not X.strip():  # skip blank lines (an empty SNP used to crash)
+                X = fh.readline()
             if X == "":
                 raise self._stop()
             xx = X.strip().split()
@@ -508,6 +536,12 @@ class PlinkReader:
                     vals.append(float(x))
                 except Exception:  # noqa: PERF203 - per-value fallback to NaN
                     vals.append(np.nan)
+            if len(vals) != self.N:
+                raise InputError(
+                    "EMMA genotype file %s, line %d: %d values, expected %d (one per "
+                    "individual, as on its first line)"
+                    % (self.fbase, self.have_read, len(vals), self.N)
+                )
             G = self._subset_genotypes(np.array(vals))
             if self.norm_genotype:
                 G = self.normalize_genotype(G)
@@ -537,7 +571,7 @@ class PlinkReader:
 
         Raises
         ------
-        ValueError
+        InputError
             If an allele code is not ``0``, ``1`` or ``2`` (e.g. a nucleotide
             letter: the alleles must be recoded to 1/2 first, with PLINK
             1.9 ``plink --bfile X --recode 12 transpose --out Y``), naming the SNP (`snp`) and the code.  Before this
@@ -546,7 +580,7 @@ class PlinkReader:
         """
         bad = set(X) - self._TPED_ALLELE_CODES
         if bad:
-            raise ValueError(
+            raise InputError(
                 "TPED file %s.tped, SNP %s: allele code %r is not 0, 1 or 2; pylmm reads "
                 "1/2-recoded TPED files only (0 = missing; recode with PLINK 1.9: "
                 "plink --bfile X --recode 12 transpose --out Y)" % (self.fbase, snp, sorted(bad)[0])
@@ -777,7 +811,7 @@ class PlinkReader:
         if cov_file is None:
             raise ValueError("read_covariates needs the path of a covariate file; cov_file is None")
         if not os.path.isfile(cov_file):
-            raise ValueError("Could not find covariate file: %s" % (cov_file))
+            raise InputError("Could not find covariate file: %s" % (cov_file))
         table = samples.read_sample_table(
             cov_file, what="covariate", is_missing=lambda x: x == "NA", columns=columns
         )
@@ -852,7 +886,7 @@ class PlinkReader:
                 try:
                     P.append([np.nan if x == "NA" else float(x) for x in v])
                 except ValueError:
-                    raise ValueError(
+                    raise InputError(
                         "EMMA covariate file %s: a value is not a number (missing is NA)"
                         % emma_file
                     ) from None
@@ -863,7 +897,7 @@ class PlinkReader:
         n = len(self.indivs)
         bad = [i for i, r in enumerate(rows) if len(r) != n]
         if bad or not rows:
-            raise ValueError(
+            raise InputError(
                 "EMMA %s file %s: expected rows of %d values (one per individual), %s"
                 % (
                     what,
@@ -884,7 +918,7 @@ class PlinkReader:
         individual matches."""
         if self.type == "emma":
             if len(P) != len(self.indivs):
-                raise ValueError(
+                raise InputError(
                     "%s file %s has %d rows but the EMMA genotypes have %d individuals; "
                     "with EMMA input the rows are matched by position"
                     % (what, fn, len(P), len(self.indivs))
@@ -900,7 +934,7 @@ class PlinkReader:
         )
         found = idx >= 0
         if not found.any():
-            raise ValueError(
+            raise InputError(
                 "none of the %d individuals of the genotype file appear in the %s file %s "
                 "(matched on %s; e.g. %s %s)"
                 % (
@@ -941,8 +975,13 @@ class PlinkReader:
 
         keys = []
         with open(fam_file) as f:
-            for line in f:
+            for lineno, line in enumerate(f, 1):
                 v = line.strip().split()
+                if len(v) < 2:
+                    raise InputError(
+                        "%s, line %d: expected FID IID ... (found %d fields)"
+                        % (fam_file, lineno, len(v))
+                    )
                 keys.append((v[0].strip(), v[1].strip()))
 
         self.N = len(keys)
@@ -999,14 +1038,14 @@ class PlinkReader:
 
         kin_ids: list[SampleID] | None = None
         rows: list[list[float]] = []
-        with open(k_file) as f:
+        with open(k_file) as f, _number_errors("kinship file %s" % k_file):
             if self.fastlmm_kinship:
                 header = f.readline().strip().split("\t")[1:]
                 kin_ids = []
                 for label in header:
                     v = label.split()
                     if len(v) != 2:
-                        raise ValueError(
+                        raise InputError(
                             "FaSTLMM kinship %s: header label %r is not 'FID IID'" % (k_file, label)
                         )
                     kin_ids.append((v[0], v[1]))
@@ -1030,7 +1069,7 @@ class PlinkReader:
         if kin_ids is None:
             n = len(self.indivs)
             if K.shape != (n, n):
-                raise ValueError(
+                raise InputError(
                     "kinship file %s is a %s matrix but there are %d individuals; without an ID "
                     "file %s its rows must be the individuals of the genotype file, in order"
                     % (
@@ -1044,12 +1083,12 @@ class PlinkReader:
             return K
 
         if self.type == "emma":
-            raise ValueError(
+            raise InputError(
                 "kinship %s has sample IDs but EMMA genotypes have none, so they cannot be "
                 "matched" % k_file
             )
         if K.ndim != 2 or K.shape != (len(kin_ids), len(kin_ids)):
-            raise ValueError(
+            raise InputError(
                 "kinship file %s is a %s matrix but names %d individuals"
                 % (k_file, "x".join(str(d) for d in K.shape), len(kin_ids))
             )

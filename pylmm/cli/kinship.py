@@ -42,7 +42,7 @@ _EPILOG = """\
 examples:
   pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
   pylmm kinship --bfile study -o study.kin --eigen-npz study.eig.npz
-  pylmm kinship --emma-geno snps.emma --emma-num-snps 1000 -o K.txt"""
+  pylmm kinship --emma-geno snps.emma -o K.txt"""
 
 
 def add_parser(commands: Any) -> argparse.ArgumentParser:
@@ -78,14 +78,14 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     source.add_argument(
         "--emma-geno",
         metavar="FILE",
-        help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs "
-        "(needs --emma-num-snps)",
+        help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
     )
     geno.add_argument(
         "--emma-num-snps",
         metavar="M",
         type=positive_int,
-        help="the number of SNPs (rows) of the --emma-geno file",
+        help="optional check: the number of SNPs (non-blank rows) of the --emma-geno file; "
+        "it is counted from the file, and a different M is an error",
     )
     geno.add_argument(
         "--block-size",
@@ -129,8 +129,6 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     args : argparse.Namespace
         The parsed options.
     """
-    if args.emma_geno and args.emma_num_snps is None:
-        parser.error("--emma-geno needs --emma-num-snps (the number of SNPs in the file)")
     if args.emma_num_snps is not None and not args.emma_geno:
         parser.error("--emma-num-snps applies only to --emma-geno")
 
@@ -153,6 +151,12 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
         return plink_io.PlinkReader(base, type=kind)
     except ValueError as e:
         raise UsageError(str(e)) from e
+
+
+def count_emma_snps(fn: str) -> int:
+    """The number of SNPs of an EMMA genotype file: its non-blank lines."""
+    with open(fn) as f:
+        return sum(1 for line in f if line.strip())
 
 
 def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray:
@@ -262,11 +266,25 @@ def run(args: argparse.Namespace) -> None:
     reader = open_genotypes(args)
     reader.iter_snps()
     if reader.type == "emma":
-        # Counting the SNPs of an EMMA file is expensive, so it is given.
-        reader.num_snps = args.emma_num_snps
+        # The EMMA reader does not know its number of SNPs; count them (one
+        # cheap pass).  A wrong --emma-num-snps used to compute K from the
+        # first M SNPs, or to crash with StopIteration.
+        reader.num_snps = count_emma_snps(args.emma_geno)
+        if args.emma_num_snps is not None and args.emma_num_snps != reader.num_snps:
+            raise UsageError(
+                "--emma-num-snps %d: the --emma-geno file %s has %d SNPs (non-blank lines); "
+                "fix the number or leave the option out"
+                % (args.emma_num_snps, args.emma_geno, reader.num_snps)
+            )
     K = compute_kinship(reader, args.block_size)
     try:
         write_kinship(K, reader, args.out)
         write_eigen(K, args.out, args.eigen_text, args.eigen_npz)
     except OSError as e:
         raise UsageError("cannot write the output: %s" % e) from e
+
+
+if __name__ == "__main__":  # the removed pre-5b.2 invocation; see removed_module_main
+    from pylmm.cli._common import removed_module_main
+
+    raise SystemExit(removed_module_main("kinship"))
