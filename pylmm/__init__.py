@@ -92,7 +92,7 @@ Where to read more
   optionally followed by digits, is a math symbol: K, X, Y, X0, K2).
 * ``CHANGELOG.md``: what changed, release by release.
 * ``docs/migration/name-map.csv``: old name to new name for every renamed
-  API name (Phase 5.4 and 5b).
+  API name (the pre-1.0 names).
 """
 
 from __future__ import annotations
@@ -107,8 +107,8 @@ def _source_tree_version(pyproject: Path) -> str:
 
     Used when pylmm is imported from a source checkout that is not installed
     (e.g. ``PYTHONPATH=/path/to/pylmm``), so there is no distribution
-    metadata.  A small line parser, not a TOML parser: ``tomllib`` needs
-    Python 3.11, and the version is a plain ``version = "X"`` line.  A
+    metadata.  A small line parser, not a TOML parser, keeps the import cheap;
+    the version is a plain ``version = "X"`` line.  A
     single-quoted version (``version = 'X'``) or a dynamic one (``dynamic =
     ["version"]``) is not recognised and returns "unknown".
     """

@@ -43,7 +43,7 @@ Conventions (see `LMM` and ``docs/conventions.md`` for details):
   ``X0 = np.column_stack([np.ones(n), cov])``.
 * The h search runs on a grid (for the default ``ngrids=100``, 0, 0.01, ...,
   0.99) followed by a bounded refinement, so ``h = 1`` is never returned
-  (known limitation, deferred to Phase 6.3).
+  (known limitation, not yet fixed; see *Known caveats* in ``AGENTS.md``).
 * Eigenvalues of ``K`` below 1e-6 are raised to 1e-6 (the caller's arrays are
   not modified).
 * Names that are a single capital letter (``Y``, ``X``, ``X0``, ``K``) are
@@ -424,7 +424,7 @@ def _check_design_size(n: int, q: int, what: str = "model") -> None:
 def _check_eigen_args(kva: ArrayLike | None, kve: ArrayLike | None) -> None:
     """Raise unless ``kva`` and ``kve`` are both None or both non-empty.
 
-    Before Phase 5b an empty sequence (the old mutable default ``[]``) also
+    Before 1.0.0 an empty sequence (the old mutable default ``[]``) also
     meant "compute the eigendecomposition"; None is now the only way to say so.
     """
     for name, v in (("kva", kva), ("kve", kve)):
@@ -823,7 +823,8 @@ class LMM:
     * ``sigma2 = Q / (N - p)`` everywhere, including `fit` with
       ``reml=False``, EXCEPT the ML Wald test of `association` (and
       `gwas`), which uses ``Q / N``.
-    * `fit` searches ``h`` on [0, 0.99] (bugs 2 and 3, deferred to Phase 6.3):
+    * `fit` searches ``h`` on [0, 0.99] (known, not yet fixed; see *Known
+      caveats* in ``AGENTS.md``):
       a true ``h`` of 0.99 or more is reported as 0.99, and the grid point
       0.98 is not refined.
 
@@ -1111,7 +1112,7 @@ class LMM:
         reml : bool, default True
             REML (the default; adds the REML terms, an adjustment for the
             estimated ``beta``) or, with False, the ML log-likelihood.  (It
-            defaulted to ML before Phase 5b.)
+            defaulted to ML before 1.0.0.)
 
         Returns
         -------
@@ -1272,12 +1273,12 @@ class LMM:
 
         Notes
         -----
-        ``h`` never reaches 1: the grid ends at 0.99 (bug 3, deferred to
-        Phase 6.3), so a very heritable trait is reported as 0.99.  A peak at
-        grid index 98 (h = 0.98) is not detected as an interior maximum (bug
-        2), so ``h`` snaps to 0.99 there.  ML is unbounded above for a
-        centred GRM with more SNPs than individuals and can sit at 0.99; REML
-        is preferred.  With several grid peaks the first is returned (a note
+        ``h`` never reaches 1: the grid ends at 0.99 (known, not yet
+        fixed), so a very heritable trait is reported as 0.99.  A peak at
+        grid index 98 (h = 0.98) is not detected as an interior maximum,
+        so ``h`` snaps to 0.99 there.  ML is unbounded above for a centred
+        GRM with more SNPs than individuals and can sit at 0.99; REML is
+        preferred.  With several grid peaks the first is returned (a note
         goes to stderr if ``verbose``).
 
         Examples
