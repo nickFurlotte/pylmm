@@ -28,7 +28,7 @@ from numpy.typing import NDArray
 from scipy import linalg
 
 from pylmm import plink_io, samples
-from pylmm.cli._common import UsageError, add_logging_options, log
+from pylmm.cli._common import UsageError, add_logging_options, log, positive_int
 
 FloatArray = NDArray[np.float64]
 
@@ -84,13 +84,13 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     geno.add_argument(
         "--emma-num-snps",
         metavar="M",
-        type=_positive_int,
+        type=positive_int,
         help="the number of SNPs (rows) of the --emma-geno file",
     )
     geno.add_argument(
         "--block-size",
         metavar="N",
-        type=_positive_int,
+        type=positive_int,
         default=1000,
         help="the number of SNPs held in memory at once (default: 1000)",
     )
@@ -117,17 +117,6 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     )
     add_logging_options(p)
     return p
-
-
-def _positive_int(text: str) -> int:
-    """argparse type: an integer >= 1."""
-    try:
-        value = int(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError("%r is not an integer" % text) from None
-    if value < 1:
-        raise argparse.ArgumentTypeError("%d is not positive" % value)
-    return value
 
 
 def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

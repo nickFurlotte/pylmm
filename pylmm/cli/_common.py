@@ -40,6 +40,17 @@ class UsageError(Exception):
     """
 
 
+def positive_int(text: str) -> int:
+    """argparse type: an integer >= 1."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("%r is not an integer" % text) from None
+    if value < 1:
+        raise argparse.ArgumentTypeError("%d is not positive (the minimum is 1)" % value)
+    return value
+
+
 class _ConsoleFormatter(logging.Formatter):
     """``pylmm: <level>: <message>``, the level in lower case."""
 

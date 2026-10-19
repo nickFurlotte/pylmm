@@ -307,9 +307,9 @@ def test_covariate_collinear_only_after_dropping_missing_y(prob):
         LMM(y, K, X0=np.column_stack([np.ones(n), b]))
 
 
-def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
+def test_cli_covariate_file_with_intercept_points_at_no_intercept(tmp_path):
     """A covariate column of ones next to the intercept the CLI adds: the
-    usage error names the columns and --no-mean."""
+    usage error names the columns and --no-intercept."""
     rng = np.random.default_rng(3)
     n = 30
     G = rng.binomial(2, 0.4, (n, 3)).astype(float)
@@ -336,7 +336,7 @@ def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
             ]
         )
     assert rc == 2
-    assert "columns 0 and 1 are identical" in err.getvalue() and "--no-mean" in err.getvalue()
+    assert "columns 0 and 1 are identical" in err.getvalue() and "--no-intercept" in err.getvalue()
     out = str(tmp_path / "o")
     _run(
         [
@@ -348,7 +348,7 @@ def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
             kf,
             "--emma-covar",
             cov,
-            "--no-mean",
+            "--no-intercept",
             "-o",
             out,
         ]

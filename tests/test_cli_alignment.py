@@ -157,7 +157,7 @@ def test_kinship_ids_must_match_the_matrix(toy):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5b.2: --id-match, --pheno-name / --pheno-index, --covar-name
+# Phase 5b.2: --id-match, --pheno-name / --pheno-col, --covar-name
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ def _write_table(fn, header, cols):
     return fn
 
 
-def test_pheno_name_and_index_select_the_column(toy):
+def test_pheno_name_and_col_select_the_column(toy):
     (_, a), _ = _gwas(toy, toy["kin"], "a.out")
     y = np.loadtxt(toy["base"] + ".phenos", usecols=2)
     noise = np.random.default_rng(1).standard_normal(N)
@@ -198,21 +198,26 @@ def test_pheno_name_and_index_select_the_column(toy):
     # which can change the BLAS summation order (seen with numpy 1.22).
     (_, b), _ = _gwas(toy, toy["kin"], "b.out", extra=["--pheno", named, "--pheno-name", "y"])
     np.testing.assert_allclose(b, a, rtol=1e-12, atol=1e-14)
-    (_, c), _ = _gwas(toy, toy["kin"], "c.out", extra=["--pheno", named, "--pheno-index", "1"])
+    (_, c), _ = _gwas(toy, toy["kin"], "c.out", extra=["--pheno", named, "--pheno-col", "2"])
     np.testing.assert_array_equal(c, b)
     (_, d), _ = _gwas(toy, toy["kin"], "d.out", extra=["--pheno", named])  # first column
     assert not np.array_equal(d, a)
+    (_, e), _ = _gwas(toy, toy["kin"], "e.out", extra=["--pheno", named, "--pheno-col", "1"])
+    np.testing.assert_array_equal(e, d)  # 1-based: column 1 is the first, the default
 
     base = ["gwas", "--bfile", toy["base"], "--kinship", toy["kin"], "-o", str(toy["dir"] / "x")]
     err = _err([*base, "--pheno", named, "--pheno-name", "bmi"], rc=2)
     assert "--pheno-name bmi: no such column" in err and "noise, y" in err
     plain = _write_table(str(toy["dir"] / "plain.ph"), None, [y])
     assert "has no FID IID name" in _err([*base, "--pheno", plain, "--pheno-name", "y"], rc=2)
-    assert "--pheno-index 1: the phenotype file has 1" in _err(
-        [*base, "--pheno", plain, "--pheno-index", "1"], rc=2
+    assert "--pheno-col 2: the phenotype file has 1 phenotype column(s) (1-based" in _err(
+        [*base, "--pheno", plain, "--pheno-col", "2"], rc=2
     )
-    # one of --pheno-name and --pheno-index (also when the index is the default 0)
-    _err([*base, "--pheno", named, "--pheno-name", "y", "--pheno-index", "0"], rc=2)
+    assert "--pheno-col 3: the phenotype file has 2" in _err(
+        [*base, "--pheno", named, "--pheno-col", "3"], rc=2
+    )
+    # one of --pheno-name and --pheno-col (also when the column is the default 1)
+    _err([*base, "--pheno", named, "--pheno-name", "y", "--pheno-col", "1"], rc=2)
 
 
 def test_covar_name_selects_columns(toy):

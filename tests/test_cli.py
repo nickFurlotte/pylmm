@@ -151,8 +151,12 @@ def test_help_has_examples(command):
         ),
         (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "-v", "-q"], "not allowed"),
         (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--id-match", "fid"], "choose"),
-        (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--pheno-index", "-1"], "negative"),
-        (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--pheno-index", "x"], "integer"),
+        (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--pheno-col", "0"], "not positive"),
+        (
+            ["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--pheno-col", "-1"],
+            "not positive",
+        ),
+        (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--pheno-col", "x"], "integer"),
         (
             [
                 "gwas",
@@ -192,6 +196,8 @@ def test_usage_errors_exit_2(argv, message):
         ["--REML"],
         ["--ML"],
         ["--noMean"],
+        ["--no-mean"],
+        ["--pheno-index", "0"],
         ["--removeMissingGenotypes"],
         ["-p", "0"],
     ],

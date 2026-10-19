@@ -31,7 +31,7 @@ from numpy.typing import NDArray
 from scipy import linalg
 
 from pylmm import plink_io, samples
-from pylmm.cli._common import UsageError, add_logging_options, log
+from pylmm.cli._common import UsageError, add_logging_options, log, positive_int
 from pylmm.lmm import LMM, check_covariates, snp_estimable, subset_testable
 
 FloatArray = NDArray[np.float64]
@@ -130,11 +130,11 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         help="the phenotype column to test, by its name in the --pheno header",
     )
     pheno_col.add_argument(
-        "--pheno-index",
+        "--pheno-col",
         metavar="N",
-        type=_non_negative_int,
-        help="the phenotype column to test, by 0-based index among the value columns "
-        "(default: 0, the first)",
+        type=positive_int,
+        help="the phenotype column to test, by its number among the value columns after "
+        "FID IID; 1-based, like plink2 --pheno-col-nums (default: 1, the first)",
     )
 
     covar = p.add_argument_group("covariates")
@@ -143,7 +143,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--covar",
         metavar="FILE",
         help="PLINK-style covariate file: FID IID value ..., with an optional header; NA is "
-        "missing.  An intercept is added unless --no-mean",
+        "missing.  An intercept is added unless --no-intercept",
     )
     covar_file.add_argument(
         "--emma-covar",
@@ -157,7 +157,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         help="use only these --covar columns, by their header names (space- or comma-separated)",
     )
     covar.add_argument(
-        "--no-mean",
+        "--no-intercept",
         action="store_true",
         help="do not add an intercept column to the covariates (use when the covariate file "
         "has its own)",
@@ -227,17 +227,6 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     )
     add_logging_options(p)
     return p
-
-
-def _non_negative_int(text: str) -> int:
-    """argparse type: an integer >= 0."""
-    try:
-        value = int(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError("%r is not an integer" % text) from None
-    if value < 0:
-        raise argparse.ArgumentTypeError("%d is negative" % value)
-    return value
 
 
 def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -512,7 +501,7 @@ class GwasInputs:
     Y : numpy.ndarray
         The phenotype of the tested individuals, ``(n,)``.
     X0 : numpy.ndarray
-        Covariates (with the intercept, unless ``--no-mean``), ``(n, q)``.
+        Covariates (with the intercept, unless ``--no-intercept``), ``(n, q)``.
     K : numpy.ndarray
         The kinship of the tested individuals, ``(n, n)``.
     keep : numpy.ndarray
@@ -602,7 +591,7 @@ def _pheno_column(args: argparse.Namespace, reader: plink_io.PlinkReader) -> int
         if names is None:
             raise UsageError(
                 "--pheno-name %s: the phenotype file has no FID IID name ... header; "
-                "use --pheno-index" % args.pheno_name
+                "use --pheno-col" % args.pheno_name
             )
         if args.pheno_name not in names:
             raise UsageError(
@@ -611,22 +600,22 @@ def _pheno_column(args: argparse.Namespace, reader: plink_io.PlinkReader) -> int
             )
         return names.index(args.pheno_name)
     # The default (None) is the first column.  (argparse's default of a
-    # mutually exclusive option must be None, or an explicit `--pheno-index 0`
-    # would not conflict with --pheno-name.)
-    index: int = args.pheno_index or 0
-    if index >= n_cols:
+    # mutually exclusive option must be None, or an explicit `--pheno-col 1`
+    # would not conflict with --pheno-name.)  --pheno-col is 1-based.
+    col: int = 1 if args.pheno_col is None else args.pheno_col
+    if col > n_cols:
         raise UsageError(
-            "--pheno-index %d: the phenotype file has %d phenotype column(s) (0-based index)"
-            % (index, n_cols)
+            "--pheno-col %d: the phenotype file has %d phenotype column(s) (1-based, like "
+            "plink2 --pheno-col-nums)" % (col, n_cols)
         )
-    return index
+    return col - 1
 
 
-def _design_matrix(n: int, P: FloatArray | None, no_mean: bool) -> FloatArray:
-    """The covariate matrix X0: an intercept, then the covariates ``P`` (unless ``no_mean``)."""
+def _design_matrix(n: int, P: FloatArray | None, no_intercept: bool) -> FloatArray:
+    """The covariate matrix X0: an intercept (unless ``no_intercept``), then the covariates ``P``."""
     if P is None:
         return np.ones((n, 1))
-    if no_mean:
+    if no_intercept:
         return P
     return np.hstack([np.ones((n, 1)), P])
 
@@ -714,13 +703,13 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
     column = _pheno_column(args, reader)
     assert reader.phenos is not None
     n_all = reader.phenos.shape[0]
-    X0 = _design_matrix(n_all, P, args.no_mean)
+    X0 = _design_matrix(n_all, P, args.no_intercept)
 
     Y, X0, K, keep = _drop_incomplete(reader.phenos[:, column], X0, K)
     name = "the covariates" + (
         ""
-        if args.no_mean or (P is None)
-        else " (column 0 is the intercept pylmm gwas adds; use --no-mean if your file has its own)"
+        if args.no_intercept or (P is None)
+        else " (column 0 is the intercept pylmm gwas adds; use --no-intercept if your file has its own)"
     )
     _usage(check_covariates, X0, what=name)
 

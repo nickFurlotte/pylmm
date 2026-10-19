@@ -113,8 +113,8 @@ generator's `run_cli`) refuse any input file that starts with `#`.
   kinship from a bad one; the per-SNP goldens do. With `--refit` nothing is
   logged.
 - Not covered by the goldens (the regression tests in `tests/sims/` and
-  `test_cli_alignment.py` cover most of them): `--eigen`, `--no-mean`,
-  `--pheno-index` > 0, `--covar` with missing values, the fastLMM-style
+  `test_cli_alignment.py` cover most of them): `--eigen`, `--no-intercept`,
+  `--pheno-col` > 1, `--covar` with missing values, the fastLMM-style
   kinship reader in `plink_io.PlinkReader.read_kinship` (unreachable from the CLIs),
   `pylmm kinship --tfile`, and `.kin` auto-discovery next to the genotype
   files.
