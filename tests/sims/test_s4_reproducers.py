@@ -179,7 +179,7 @@ def test_bug1_cli_refit_follows_reml_choice(bed_toy):
     G = _imputed(bed_toy["G"])
     for flags, reml in (([], True), (["--ML"], False)):
         out = str(d / ("refit%d.out" % reml))
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--refit"] + flags + [out])
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--refit", *flags, out])
         t = read_out(out)[:, 2]
         for j in range(6):
             w = oracle.wald(
@@ -197,7 +197,7 @@ def test_bug1_cli_ml_flag(bed_toy):
     outs = {}
     for tag, flags in (("default", []), ("reml", ["--REML"]), ("ml", ["--ML"])):
         outs[tag] = str(d / (tag + ".out"))
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"]] + flags + [outs[tag]])
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], *flags, outs[tag]])
     np.testing.assert_array_equal(read_out(outs["default"]), read_out(outs["reml"]))
     t_ml = read_out(outs["ml"])[:, 2]
     for j in range(bed_toy["m"]):
@@ -222,11 +222,17 @@ def test_bug1_remove_missing_follows_reml_choice(bed_toy):
     for flags, lib in (([], lib_reml), (["--ML"], lib_ml)):
         a, b = str(d / "rm.out"), str(d / "imp.out")
         run_gwas(
-            ["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--removeMissingGenotypes"]
-            + flags
-            + [a]
+            [
+                "--bfile",
+                bed_toy["base"],
+                "--kfile",
+                bed_toy["kin"],
+                "--removeMissingGenotypes",
+                *flags,
+                a,
+            ]
         )
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"]] + flags + [b])
+        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], *flags, b])
         ta, tb = read_out(a)[:, 2], read_out(b)[:, 2]
         complete = np.delete(np.arange(bed_toy["m"]), 2)
         np.testing.assert_allclose(ta[complete], tb[complete], rtol=1e-8)
@@ -736,7 +742,7 @@ def test_bug11_cli_gwas_all_missing_snp(tmp_path, flags):
     write_bed(base, G)
     write_phenos(base + ".phenos", rng.standard_normal(24))
     np.savetxt(str(tmp_path / "k"), calculateKinship(G[:, [0, 1, 2, 4, 5]].copy()))
-    run_gwas(["--bfile", base, "--kfile", str(tmp_path / "k")] + flags + [str(tmp_path / "o")])
+    run_gwas(["--bfile", base, "--kfile", str(tmp_path / "k"), *flags, str(tmp_path / "o")])
     r = read_out(str(tmp_path / "o"))
     assert r.shape == (6, 4)
     assert np.isnan(r[3]).all() and np.isfinite(np.delete(r, 3, axis=0)).all()

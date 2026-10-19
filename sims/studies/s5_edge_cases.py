@@ -546,7 +546,7 @@ def run_cli(P, remove):
         elif var == "pheno_missing_indiv":
             rows = rows[:-1]
         elif var == "pheno_extra_indiv":
-            rows = rows + ["fX iX 1.0"]
+            rows = [*rows, "fX iX 1.0"]
         with open(pre + ".phenos", "w") as f:
             f.write("\n".join(rows) + "\n")
         # kinship file
@@ -607,10 +607,8 @@ def run_cli(P, remove):
         out["warn_first"] = warns[0].strip()[:120] if warns else ""
         for ln in lines:
             if "heritability=" in ln:
-                try:
+                with contextlib.suppress(ValueError):
                     h = float(ln.split("heritability=")[1].split(",")[0])
-                except ValueError:
-                    pass
         if rc != 0:
             out["crash"] = 1
             out["clean_error"] = int(rc == 2 and "error:" in err)
@@ -731,7 +729,7 @@ def run_cell(params, seed):
     try:
         P = build(params, rng)
     except Exception as e:
-        raise RuntimeError("builder failed for %r: %s" % (params, _err(e)))
+        raise RuntimeError("builder failed for %r: %s" % (params, _err(e))) from e
     out["ideal"] = P.ideal
     if path.startswith("cli") and not P.cli_ok:
         out.update(skipped=1, outcome="n/a", severity="none")
@@ -775,10 +773,8 @@ def run_cell(params, seed):
             abs(out["dh_ref"]) > 0.1 or (np.isfinite(out["t_corr_ref"]) and out["t_corr_ref"] < 0.9)
         )
     if P.K.shape == (len(P.y), len(P.y)) and np.all(np.isfinite(P.K)):
-        try:
+        with contextlib.suppress(np.linalg.LinAlgError):
             out["min_eig_K"] = float(np.linalg.eigvalsh(0.5 * (P.K + P.K.T))[0])
-        except np.linalg.LinAlgError:
-            pass
     if not out["crash"] and P.ideal != "error_or_nan":
         oc = oracle_compare(
             P, G, t, out.get("h_hat", np.nan), remove, cli_ml=(path == "cli_remove")

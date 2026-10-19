@@ -557,7 +557,7 @@ def run_hgrid(params, rng):
         try:
             with np.errstate(all="ignore"):
                 L.fit(X=G[:, j].reshape(-1, 1))
-        except Exception:
+        except Exception:  # noqa: PERF203 - count per-SNP crashes
             crashes += 1
     out["refit_crash_frac"] = crashes / 20.0
     return out
@@ -580,7 +580,7 @@ def _kinship_setup(params):
         rng = np.random.default_rng(12345)
         K_true = None
         if params["pop"] == "unrelated":
-            n_mono = int(round(mk * params["mono"] / (1 - params["mono"])))
+            n_mono = round(mk * params["mono"] / (1 - params["mono"]))
             Gk = np.hstack([Gk, np.zeros((Gk.shape[0], n_mono))])
             K_true = calculateKinship(Gk[:, :mk].copy()) * 1.0  # complete, all polymorphic
             Gk = genotypes.with_missing(Gk, params["miss"], rng)
@@ -727,7 +727,7 @@ def run_bednull(params, rng):
     )
     sets = (("orc_", p_o), ("true_", p_t), ("ols_", p_ols))
     if not nf["crashed"]:
-        sets = (("lmm_", p_l),) + sets
+        sets = (("lmm_", p_l), *sets)
         out["max_abs_dlogp_lmm_orc"] = float(np.nanmax(np.abs(mlogp(p_l) - mlogp(p_o))))
     for tag, p in sets:
         out.update(_null_summary(p[null], tag))

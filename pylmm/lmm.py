@@ -394,7 +394,7 @@ class LMM:
         x = x.reshape(
             -1,
         )
-        if not x.sum() == len(Y):
+        if x.sum() != len(Y):
             if self.verbose:
                 sys.stderr.write("Removing %d missing values from Y\n" % ((~x).sum()))
             Y = Y[x]

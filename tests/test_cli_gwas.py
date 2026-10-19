@@ -62,7 +62,7 @@ def test_cli_bed_readme_command(tmp_path):
     """README command on the first 1000 SNPs (missing genotypes imputed)."""
     base = h.write_bed_subset(tmp_path, h.BED_GWAS_NSNPS)
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", bed_args(base) + [out], cwd=tmp_path)
+    log = h.run_script("pylmmGWAS.py", [*bed_args(base), out], cwd=tmp_path)
     check_out(out, "gwas_cli_bed_snps1000.out", df=BED_N - 2)
     check_null_fit(log, "bed_snps1000", api="bed_reml")
 
@@ -73,7 +73,7 @@ def bed50(tmp_path_factory):
 
 
 @pytest.mark.parametrize(
-    "flags,tag,df",
+    ("flags", "tag", "df"),
     [
         (["--REML"], "reml", BED_N - 2),
         (["--refit"], "refit", BED_N - 2),
@@ -93,7 +93,7 @@ def test_cli_bed_variants(tmp_path, bed50, flags, tag, df):
 def test_cli_bed_covfile(tmp_path, bed50):
     """--covfile (input.getCovariates), rows in reverse order: X0 = [1, c1, c2]."""
     out = str(tmp_path / "out")
-    args = bed_args(bed50) + ["--covfile", h.write_covfile(tmp_path), out]
+    args = [*bed_args(bed50), "--covfile", h.write_covfile(tmp_path), out]
     log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
     check_out(out, "gwas_cli_bed_snps50_covfile.out", df=BED_N - 4)
     check_null_fit(log, "bed_snps50_covfile")
@@ -103,7 +103,7 @@ def test_cli_bed_missing_phenotypes(tmp_path, bed50):
     """'NA' and '-9' phenotypes (input.getPhenos), rows in reverse order;
     the CLI drops those individuals from Y, X0 and K."""
     out = str(tmp_path / "out")
-    args = bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)) + [out]
+    args = [*bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)), out]
     log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
     nmiss = len(h.BED_MISSING_PHENO_NA) + len(h.BED_MISSING_PHENO_M9)
     assert "warning: %d of " % nmiss in log and "have a missing phenotype and are dropped" in log
@@ -137,7 +137,7 @@ def test_cli_emma(tmp_path, cov):
     if cov:
         args += ["--emmaCOV", h.write_emma_cov(tmp_path)]
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", args + [out], cwd=tmp_path)
+    log = h.run_script("pylmmGWAS.py", [*args, out], cwd=tmp_path)
     name = "gwas_cli_emma_hmdp_snps1000%s" % ("_cov" if cov else "")
     got = check_out(out, name + ".out", df=HMDP_N - (3 if cov else 2))
     check_null_fit(log, name[len("gwas_cli_") :], api=None if cov else "hmdp_reml")
@@ -153,7 +153,7 @@ def test_cli_emma_gzip_kfile(tmp_path):
     """The .gz branch of the --kfile reader; same K as test_cli_emma."""
     emma = h.write_emma_subset(tmp_path, h.HMDP_GZ_NSNPS)
     out = str(tmp_path / "out")
-    args = emma_args(emma, h.write_headerless_kinship(tmp_path, gz=True)) + [out]
+    args = [*emma_args(emma, h.write_headerless_kinship(tmp_path, gz=True)), out]
     log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
     check_out(out, "gwas_cli_emma_hmdp_snps1000.out", df=HMDP_N - 2, nrows=h.HMDP_GZ_NSNPS)
     check_null_fit(log, "emma_hmdp_snps1000", api="hmdp_reml")
@@ -163,9 +163,12 @@ def test_cli_emma_missing_phenotypes(tmp_path):
     """'NA' entries in --emmaPHENO."""
     emma = h.write_emma_subset(tmp_path, h.HMDP_GZ_NSNPS)
     out = str(tmp_path / "out")
-    args = emma_args(
-        emma, h.write_headerless_kinship(tmp_path), pheno=h.write_emma_missing_pheno(tmp_path)
-    ) + [out]
+    args = [
+        *emma_args(
+            emma, h.write_headerless_kinship(tmp_path), pheno=h.write_emma_missing_pheno(tmp_path)
+        ),
+        out,
+    ]
     log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
     nmiss = len(h.HMDP_MISSING_Y)
     assert "warning: %d of " % nmiss in log and "have a missing phenotype and are dropped" in log
@@ -178,7 +181,7 @@ def test_cli_bed_full_readme_command(tmp_path):
     """Full README GWAS (98,740 SNPs, ~2 min emulated); first 1000 rows must
     match the 1000-SNP golden."""
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", bed_args(h.BED_BASE) + [out], cwd=tmp_path)
+    log = h.run_script("pylmmGWAS.py", [*bed_args(h.BED_BASE), out], cwd=tmp_path)
     ids, got = h.load_gwas_out(out)
     assert len(ids) == 98740
     gids, exp = h.load_gwas_out(h.golden_path("gwas_cli_bed_snps1000.out"))

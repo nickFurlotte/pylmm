@@ -43,7 +43,7 @@ def assert_eigenvalues_close(actual, expected, what):
 
 
 @pytest.mark.parametrize(
-    "center,name",
+    ("center", "name"),
     [
         (False, "kinship_hmdp_snps1000.txt"),
         (True, "kinship_hmdp_snps1000_centered.txt"),

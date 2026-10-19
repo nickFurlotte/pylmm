@@ -59,7 +59,7 @@ def readKinshipFile(fn, n):
         else:
             f = open(fn)
     except OSError as e:
-        raise ValueError("kinship file %s: cannot read (%s)" % (fn, e))
+        raise ValueError("kinship file %s: cannot read (%s)" % (fn, e)) from e
     K = np.zeros((n, n))
     nrows = 0
     nvalues = 0
@@ -78,7 +78,7 @@ def readKinshipFile(fn, n):
                         "kinship file %s, line %d: %r is not a number (expected %d rows of %d "
                         "whitespace-separated numbers, with no header or comment lines)"
                         % (fn, lineno, bad[:40], n, n)
-                    )
+                    ) from None
                 if nrows < n and len(row) == n:
                     K[nrows] = row
                 nrows += 1
@@ -86,8 +86,8 @@ def readKinshipFile(fn, n):
                 lengths.add(len(row))
     except (OSError, UnicodeDecodeError) as e:
         # missing file, bad gzip, binary content: a usage-style error, not a traceback
-        raise ValueError("kinship file %s: cannot read (%s: %s)" % (fn, type(e).__name__, e))
-    if nrows != n or lengths != set([n]):
+        raise ValueError("kinship file %s: cannot read (%s: %s)" % (fn, type(e).__name__, e)) from e
+    if nrows != n or lengths != {n}:
         lengths = sorted(lengths)
         raise ValueError(
             "kinship file %s: expected a %d x %d matrix (%d values, one row and column per "
@@ -517,7 +517,7 @@ def readEigenFile(fn, K):
         raise ValueError(
             "cannot read the --eigen decomposition %s: %s (expected a .npz file or %s.kva and %s.kve)"
             % (fn, e, fn, fn)
-        )
+        ) from e
     Kva, Kve = np.asarray(Kva, dtype=np.float64), np.asarray(Kve, dtype=np.float64)
     if Kva.shape != (n,) or Kve.shape != (n, n):
         raise ValueError(

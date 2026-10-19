@@ -111,7 +111,7 @@ def test_cells_option_runs_only_those_cells(fake):
     assert {r["cell_id"] for r in _rows()} == {a2}
     s = runner.run(fake, verbose=False)  # the rest, then nothing
     assert (s["ran"], s["skipped"]) == (3, 3) and set(ids) == {r["cell_id"] for r in _rows()}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unknown cell ids"):
         runner.run(fake, cells=["nope"], verbose=False)
 
 

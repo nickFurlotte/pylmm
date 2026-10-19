@@ -157,7 +157,7 @@ def main(argv=None):
             K = K + K_j
 
     if nAllMissing:
-        warnings.warn("skipped %d SNPs with no called genotype" % nAllMissing)
+        warnings.warn("skipped %d SNPs with no called genotype" % nAllMissing, stacklevel=2)
     if K is None:
         parser.error("No SNP with a non-constant genotype was read; cannot compute a kinship.")
     K = K / float(IN.numSNPs)

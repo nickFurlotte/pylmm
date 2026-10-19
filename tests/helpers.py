@@ -406,7 +406,7 @@ def run_script(script, args, cwd, timeout=CLI_TIMEOUT):
     check_no_comment_header(args)
     env = dict(os.environ)
     env["PYTHONPATH"] = REPO + os.pathsep + env.get("PYTHONPATH", "")
-    cmd = [sys.executable, os.path.join(SCRIPTS, script)] + args
+    cmd = [sys.executable, os.path.join(SCRIPTS, script), *args]
     p = subprocess.Popen(
         cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )

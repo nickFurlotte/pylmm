@@ -143,7 +143,7 @@ def crash_accounting():
         done = {(r["cell_id"], r["rep"]) for r in runner.current_rows(name)}
         errs = {(e["cell_id"], e["rep"]): e for e in _errors(name)}
         per = {}
-        for cid, params, rep, seed in tasks:
+        for cid, params, rep, _seed in tasks:
             d = per.setdefault(
                 cid,
                 {
@@ -202,7 +202,12 @@ def crash_accounting():
         # by h2 (and n for the studies where n varies)
         df = pd.DataFrame(
             [
-                dict(h2=d["params"]["h2"], n=d["params"].get("n"), e=d["expected"], c=d["crashed"])
+                {
+                    "h2": d["params"]["h2"],
+                    "n": d["params"].get("n"),
+                    "e": d["expected"],
+                    "c": d["crashed"],
+                }
                 for d in per.values()
             ]
         )
@@ -403,14 +408,14 @@ def crash_bias_s2():
         if p.get("kind") != "main":
             continue
         done.append(
-            dict(
-                src=p["src"],
-                n=p["n"],
-                mk=p["mk"],
-                h2=p["h2"],
-                h=r["metrics"]["r_h_pylmm"],
-                hT=r["metrics"].get("r_h_T", np.nan),
-            )
+            {
+                "src": p["src"],
+                "n": p["n"],
+                "mk": p["mk"],
+                "h2": p["h2"],
+                "h": r["metrics"]["r_h_pylmm"],
+                "hT": r["metrics"].get("r_h_T", np.nan),
+            }
         )
     done = pd.DataFrame(done)
     out = []
@@ -681,7 +686,7 @@ def s2_lostmode():
             L = LMM(np.asarray(y, float), np.asarray(kin.K), Kva, Kve)
         for pre, reml in (("r_", True), ("m_", False)):
 
-            def ll(h):
+            def ll(h, reml=reml, L=L):  # bind loop variables
                 return float(np.sum(L.LL(h, L.X0t, stack=False, REML=reml)[0]))
 
             with np.errstate(all="ignore"):
@@ -725,7 +730,7 @@ def s2_lostmode():
     _write(d, "s2_lostmode_reps.csv")
     out = []
     main = d[d.kind == "main"].copy()
-    main["ktype"] = [_ktype(dict(src=a, mk=b)) for a, b in zip(main.src, main.mk)]
+    main["ktype"] = [_ktype({"src": a, "mk": b}) for a, b in zip(main.src, main.mk)]
     main["band"] = main.h2.map(_band)
     for (kt, band, meth), g in main.groupby(["ktype", "band", "method"]):
         out.append(
@@ -940,7 +945,7 @@ def s3_calibrated(check_reps=1):
         )
     _log("S3 replay verified on %d replicates" % checked)
     chk = []
-    for cid, rs in by_cell.items():
+    for rs in by_cell.values():
         p = rs[0]["params"]
         ms = [r["metrics"] for r in rs]
         c = {
@@ -1296,7 +1301,10 @@ LEDGER = [
 STATUS = {
     "4": "fixed in Phase 5.1",
     "16": "fixed in Phase 5.1",
-    **dict.fromkeys(("1", "6", "7", "10", "11", "12", "13", "14", "19", "20", "22", "23", "24"), "fixed in Phase 5.2"),
+    **dict.fromkeys(
+        ("1", "6", "7", "10", "11", "12", "13", "14", "19", "20", "22", "23", "24"),
+        "fixed in Phase 5.2",
+    ),
     "9": "fixed in Phase 5.2 for the ML test (--ML / REML=False use Q/n); fit()'s reported sigma unchanged",
     "15": "partly fixed in Phase 5.2 (GWAS always returns lists); fit/association shapes open",
     "21": "fixed in Phase 5.2 (nan/shape errors, asymmetry and non-PSD warnings, optional ids/K_ids "

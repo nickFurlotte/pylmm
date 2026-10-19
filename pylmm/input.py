@@ -27,7 +27,7 @@ class plink:
         self.snpFileHandle = None
         self.fbase = fbase
         self.type = type
-        if not type == "emma":
+        if type != "emma":
             self.indivs = self.getIndivs(self.fbase, type)
         else:
             # Just read a line from the SNP file and see how many individuals we have
@@ -91,7 +91,7 @@ class plink:
             file = self.fbase + ".map"
         i = 0
         f = open(file)
-        for line in f:
+        for _ in f:
             i += 1
         f.close()
         self.numSNPs = i
@@ -108,7 +108,7 @@ class plink:
         file = self.fbase + ".bim"
         i = 0
         f = open(file)
-        for line in f:
+        for _ in f:
             i += 1
         f.close()
         self.numSNPs = i
@@ -120,9 +120,9 @@ class plink:
         file = self.fbase + ".bed"
         self.fhandle = open(file, "rb")
 
-        magicNumber = self.fhandle.read(2)
+        self.fhandle.read(2)  # magic number
         order = self.fhandle.read(1)
-        if not order == b"\x01":
+        if order != b"\x01":
             sys.stderr.write("This is not in SNP major order - you did not handle this case\n")
             raise StopIteration
 
@@ -166,7 +166,7 @@ class plink:
             for x in XX:
                 try:
                     G.append(float(x))
-                except:
+                except Exception:  # noqa: PERF203 - per-value fallback to NaN
                     G.append(np.nan)
             G = np.array(G)
             if self.normGenotype:
@@ -270,7 +270,7 @@ class plink:
                 for x in v:
                     try:
                         p.append(float(x))
-                    except ValueError:
+                    except ValueError:  # noqa: PERF203 - per-value fallback to NaN
                         p.append(np.nan)
                 P.append(p)
         return self._emmaColumns(P, emmaFile, "phenotype")
@@ -320,9 +320,9 @@ class plink:
                     raise ValueError(
                         "%s file %s, line %d: a value is not a number (missing values are "
                         "NA%s)" % (what, fn, lineno, " or -9" if what == "phenotype" else "")
-                    )
+                    ) from None
                 keys.append((v[0], v[1]))
-        widths = set(len(p) for p in P)
+        widths = {len(p) for p in P}
         if len(widths) > 1:
             raise ValueError(
                 "%s file %s: rows have different numbers of values (%s)"
@@ -384,7 +384,6 @@ class plink:
             famFile = "%s.fam" % base
 
         keys = []
-        i = 0
         f = open(famFile)
         for line in f:
             v = line.strip().split()
@@ -392,7 +391,6 @@ class plink:
             indivId = v[1]
             k = (famId.strip(), indivId.strip())
             keys.append(k)
-            i += 1
         f.close()
 
         self.N = len(keys)
@@ -465,7 +463,7 @@ class plink:
                 except ValueError:
                     raise ValueError(
                         "EMMA covariate file %s: a value is not a number (missing is NA)" % emmaFile
-                    )
+                    ) from None
         return self._emmaColumns(P, emmaFile, "covariate")
 
     def getCovariates(self, covFile=None):

@@ -86,7 +86,7 @@ def test_get_is_cached_and_readonly():
     spec = {"source": "unrelated", "n": 20, "m": 10, "seed": 9}
     a = genotypes.get(spec)
     assert genotypes.get(dict(spec)) is a
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="read-only"):
         a.G[0, 0] = 1.0
     b = a.copy()
     b.G[0, 0] = 5.0  # copies are writable

@@ -288,7 +288,7 @@ def test_ml_unbounded_with_centred_grm_and_intercept():
 # pylmm-convention switches: with all of them on, the oracle reproduces pylmm
 # ---------------------------------------------------------------------------
 
-PYLMM = dict(eig_clamp=1e-6, h_grid="pylmm")
+PYLMM = {"eig_clamp": 1e-6, "h_grid": "pylmm"}
 
 
 def _rank_deficient_problem(seed=0, n=150, m=60, h2=0.5):
@@ -450,7 +450,7 @@ def test_sigma_conventions():
     # textbook ML uses Q/n, pylmm Q/(n-q): t differs by sqrt(n/(n-q))
     np.testing.assert_allclose(wt.t / wp.t, np.sqrt(n / (n - p - 1)), rtol=1e-10)
     assert wt.df == wp.df == n - p - 1
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="sigma_convention"):
         oracle.wald(y, kin.K, x, sigma_convention="other")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="h_grid"):
         oracle.fit(y, kin.K, h_grid="coarse")

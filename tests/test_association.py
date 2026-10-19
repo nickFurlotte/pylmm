@@ -6,7 +6,16 @@ import pytest
 
 from pylmm import lmm
 
-GWAS_COLS = ["snp_index", "n_missing", "ts_reml_norefit", "ps_reml_norefit", "ts_reml_refit", "ps_reml_refit", "ts_ml_norefit", "ps_ml_norefit"]
+GWAS_COLS = [
+    "snp_index",
+    "n_missing",
+    "ts_reml_norefit",
+    "ps_reml_norefit",
+    "ts_reml_refit",
+    "ps_reml_refit",
+    "ts_ml_norefit",
+    "ps_ml_norefit",
+]
 REFIT_NSNPS = 200  # refit is ~10 ms/SNP emulated; first 200 SNPs is enough
 # (scripts/example.py covers all 1000 with refit)
 
@@ -14,7 +23,7 @@ REFIT_NSNPS = 200  # refit is ~10 ms/SNP emulated; first 200 SNPs is enough
 @pytest.fixture(scope="module")
 def gwas_golden():
     g = h.load_golden_txt("assoc_hmdp_GWAS.txt")
-    return dict((c, g[:, i]) for i, c in enumerate(GWAS_COLS))
+    return {c: g[:, i] for i, c in enumerate(GWAS_COLS)}
 
 
 # Note: the golden ts/ps_ml_norefit columns equal the REML columns exactly:
@@ -23,7 +32,7 @@ def gwas_golden():
 # Phase 5.2 GWAS(REML=False) is a real ML scan, so it is checked against the
 # oracle in test_gwas_hmdp_ml below, not against those columns.
 @pytest.mark.parametrize(
-    "reml,refit,tag,nsnps",
+    ("reml", "refit", "tag", "nsnps"),
     [
         (True, False, "reml_norefit", None),
         (True, True, "reml_refit", REFIT_NSNPS),

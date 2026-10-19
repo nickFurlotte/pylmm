@@ -53,17 +53,17 @@ def test_hmdp_kinship_reads_identically_to_np_loadtxt(tmp_path):
 )
 def test_header_rejected(tmp_path, text):
     fn = write(tmp_path, text)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError) as e:  # noqa: PT011 - message asserted below
         cli_gwas.readKinshipFile(fn, 2)
     msg = str(e.value)
     assert fn in msg and "line 1" in msg and "not a number" in msg and "2 rows of 2" in msg
 
 
-@pytest.mark.parametrize("m,n", [(3, 4), (4, 3), (95, 100), (105, 100)])
+@pytest.mark.parametrize(("m", "n"), [(3, 4), (4, 3), (95, 100), (105, 100)])
 def test_wrong_size_rejected(tmp_path, m, n):
     fn = str(tmp_path / "k.txt")
     np.savetxt(fn, np.eye(m))
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError) as e:  # noqa: PT011 - message asserted below
         cli_gwas.readKinshipFile(fn, n)
     msg = str(e.value)
     assert fn in msg
@@ -127,7 +127,7 @@ def test_cli_wrong_size_kfile_is_a_usage_error(tmp_path):
 
 def test_missing_file_rejected(tmp_path):
     fn = str(tmp_path / "nope.txt")
-    with pytest.raises(ValueError, match="nope.txt"):
+    with pytest.raises(ValueError, match=r"nope\.txt"):
         cli_gwas.readKinshipFile(fn, 3)
 
 
@@ -135,11 +135,11 @@ def test_binary_file_rejected(tmp_path):
     fn = str(tmp_path / "k.bin")
     with open(fn, "wb") as f:
         f.write(bytes(range(128, 256)) * 4)
-    with pytest.raises(ValueError, match="k.bin"):
+    with pytest.raises(ValueError, match=r"k\.bin"):
         cli_gwas.readKinshipFile(fn, 3)
 
 
 def test_plain_file_named_gz_rejected(tmp_path):
     fn = write(tmp_path, "1 0 0\n0 1 0\n0 0 1\n", name="k.txt.gz")
-    with pytest.raises(ValueError, match="k.txt.gz"):
+    with pytest.raises(ValueError, match=r"k\.txt\.gz"):
         cli_gwas.readKinshipFile(fn, 3)

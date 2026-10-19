@@ -57,7 +57,7 @@ def run_cli(args, outfile, cwd):
     gen.check_no_comment_header(args)
     env = dict(os.environ)
     env["PYTHONPATH"] = REPO + os.pathsep + env.get("PYTHONPATH", "")
-    cmd = [sys.executable] + args + [outfile]
+    cmd = [sys.executable, *args, outfile]
     p = subprocess.run(
         cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
@@ -103,11 +103,11 @@ def read_any(fn):
     if name.endswith(".out"):
         lines = open(fn).read().splitlines()
         cols = lines[0].split("\t")[1:]
-        vals = np.array([[float(x) for x in l.split("\t")[1:]] for l in lines[1:]])
+        vals = np.array([[float(x) for x in line.split("\t")[1:]] for line in lines[1:]])
         vals = vals.reshape(-1, len(cols))
         return {c: vals[:, j] for j, c in enumerate(cols)}
     a = np.loadtxt(fn)
-    header = [l[2:] for l in open(fn) if l.startswith("# columns:")]
+    header = [ln[2:] for ln in open(fn) if ln.startswith("# columns:")]
     if a.ndim == 2 and header and len(header[0].replace(",", " ").split()) - 1 >= a.shape[1]:
         labels = header[0].replace(",", " ").split()[1:]
         if len(labels) == a.shape[1]:
@@ -121,31 +121,31 @@ def diffs(got, exp):
     got = np.asarray(got, float)
     exp = np.asarray(exp, float)
     if got.shape != exp.shape:
-        return dict(err="shape %s vs %s" % (got.shape, exp.shape))
+        return {"err": "shape %s vs %s" % (got.shape, exp.shape)}
     gn, en = np.isnan(got), np.isnan(exp)
     nanmis = int((gn != en).sum())
     ok = ~gn & ~en
     d = np.abs(got[ok] - exp[ok])
     if d.size == 0:
-        return dict(
-            n=int(exp.size),
-            nan=int(en.sum()),
-            nanmis=nanmis,
-            abs=0.0,
-            rel=0.0,
-            exact=bool(nanmis == 0),
-        )
+        return {
+            "n": int(exp.size),
+            "nan": int(en.sum()),
+            "nanmis": nanmis,
+            "abs": 0.0,
+            "rel": 0.0,
+            "exact": bool(nanmis == 0),
+        }
     denom = np.abs(exp[ok])
     nz = denom > 0
     rel = (d[nz] / denom[nz]).max() if nz.any() else 0.0
-    return dict(
-        n=int(exp.size),
-        nan=int(en.sum()),
-        nanmis=nanmis,
-        abs=float(d.max()),
-        rel=float(rel),
-        exact=bool(nanmis == 0 and d.max() == 0),
-    )
+    return {
+        "n": int(exp.size),
+        "nan": int(en.sum()),
+        "nanmis": nanmis,
+        "abs": float(d.max()),
+        "rel": float(rel),
+        "exact": bool(nanmis == 0 and d.max() == 0),
+    }
 
 
 def main():
@@ -202,7 +202,7 @@ def main():
         else:
             for c in exp:
                 rows.append(
-                    (c, diffs(got.get(c), exp[c]) if c in got else dict(err="missing column"))
+                    (c, diffs(got.get(c), exp[c]) if c in got else {"err": "missing column"})
                 )
             if "eigenvalues" in name or name.endswith(".kva.txt"):
                 e = exp["all"]

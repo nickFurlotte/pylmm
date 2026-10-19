@@ -49,39 +49,39 @@ def _grid(quick):
                 for nc in (1, 5):
                     for v in VPE:
                         cells.append(
-                            dict(
-                                source=src,
-                                n=N_BY_SOURCE[src],
-                                h2=h2,
-                                n_causal=nc,
-                                vpe=v,
-                                contam=0,
-                                m_kin=M_KIN,
-                                m_test=M_TEST,
-                                oracle=int(src != "bed" and h2 == 0.5),
-                                geno_seed=1,
-                            )
+                            {
+                                "source": src,
+                                "n": N_BY_SOURCE[src],
+                                "h2": h2,
+                                "n_causal": nc,
+                                "vpe": v,
+                                "contam": 0,
+                                "m_kin": M_KIN,
+                                "m_test": M_TEST,
+                                "oracle": int(src != "bed" and h2 == 0.5),
+                                "geno_seed": 1,
+                            }
                         )
         # proximal contamination: K from 500 SNPs, with vs without the causal SNPs in K
         for src in ("balding_nichols", "bed"):
             for contam in (0, 1):
                 for v in VPE:
                     cells.append(
-                        dict(
-                            source=src,
-                            n=N_BY_SOURCE[src],
-                            h2=0.5,
-                            n_causal=5,
-                            vpe=v,
-                            contam=contam,
-                            m_kin=M_KIN_CONTAM,
-                            m_test=M_TEST,
-                            oracle=0,
-                            geno_seed=1,
-                        )
+                        {
+                            "source": src,
+                            "n": N_BY_SOURCE[src],
+                            "h2": 0.5,
+                            "n_causal": 5,
+                            "vpe": v,
+                            "contam": contam,
+                            "m_kin": M_KIN_CONTAM,
+                            "m_test": M_TEST,
+                            "oracle": 0,
+                            "geno_seed": 1,
+                        }
                     )
     else:
-        base = dict(h2=0.5, vpe=0.02, contam=0, m_kin=400, m_test=400, geno_seed=1)
+        base = {"h2": 0.5, "vpe": 0.02, "contam": 0, "m_kin": 400, "m_test": 400, "geno_seed": 1}
         cells = [
             dict(base, source="unrelated", n=300, n_causal=1, oracle=1),
             dict(base, source="balding_nichols", n=300, n_causal=5, oracle=0),
@@ -196,7 +196,7 @@ def run_cell(params, seed):
     Gk, Gt, kin = _design(p)
     m = Gt.shape[1]
     k = p["n_causal"]
-    thresholds = list(ALPHA_FIXED) + [0.05 / m]
+    thresholds = [*list(ALPHA_FIXED), 0.05 / m]
 
     cidx = phenotypes.choose_causal(m, k, rng, G=Gt, min_maf=MIN_MAF)
     ph = phenotypes.simulate(kin, p["h2"], rng, G=Gt, causal_idx=cidx, causal_var=[p["vpe"]] * k)
@@ -273,7 +273,6 @@ def power_table(df):
     rows = []
     for key, d in df.groupby(KEYS, sort=True):
         base = dict(zip(KEYS, key))
-        nc = d["n_causal_obs"].sum()
         for name in METHODS:
             if "p_c_" + name not in d or d["p_c_" + name].isna().all():
                 continue

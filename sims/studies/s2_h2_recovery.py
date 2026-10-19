@@ -243,14 +243,14 @@ def _stat(x, truth):
     x = np.asarray(x, float)
     x = x[np.isfinite(x)]
     if len(x) == 0:
-        return dict(n=0, mean=np.nan, bias=np.nan, rmse=np.nan, sd=np.nan)
-    return dict(
-        n=len(x),
-        mean=x.mean(),
-        bias=x.mean() - truth,
-        rmse=float(np.sqrt(np.mean((x - truth) ** 2))),
-        sd=x.std(ddof=1) if len(x) > 1 else np.nan,
-    )
+        return {"n": 0, "mean": np.nan, "bias": np.nan, "rmse": np.nan, "sd": np.nan}
+    return {
+        "n": len(x),
+        "mean": x.mean(),
+        "bias": x.mean() - truth,
+        "rmse": float(np.sqrt(np.mean((x - truth) ** 2))),
+        "sd": x.std(ddof=1) if len(x) > 1 else np.nan,
+    }
 
 
 METHODS = [

@@ -104,7 +104,7 @@ def report(df, outdir):
     from sims import report as rpt
 
     by = ["n", "h2", "m_kin", "m_test"]
-    scalar = [c for c in rpt.scalar_metric_columns(df) if c not in by + ["geno_seed"]]
+    scalar = [c for c in rpt.scalar_metric_columns(df) if c not in [*by, "geno_seed"]]
     summary = rpt.summarize(df, by, scalar)
     rpt.write_summary(
         summary,

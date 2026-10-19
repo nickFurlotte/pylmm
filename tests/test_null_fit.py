@@ -23,7 +23,7 @@ def check_fit(L, prefix):
     for i, b in enumerate(beta):
         got["beta_%d" % i] = b
     expected_keys = sorted(k[len(prefix) + 1 :] for k in FITS if k.startswith(prefix + "."))
-    assert sorted(list(got) + ["N"]) == expected_keys
+    assert sorted([*list(got), "N"]) == expected_keys
     assert FITS[prefix + ".N"] == L.N
     for k in sorted(got):
         h.assert_close(

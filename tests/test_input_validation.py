@@ -220,7 +220,7 @@ def test_individual_ids_checked(prob):
     with pytest.raises(ValueError, match="different order"):
         GWAS(y, X[:, :1], K, ids=ids, K_ids=perm)
     with pytest.raises(ValueError, match="not in the kinship"):
-        LMM(y, K, ids=ids, K_ids=ids[:-1] + ["other"])
+        LMM(y, K, ids=ids, K_ids=[*ids[:-1], "other"])
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ def test_cli_constant_phenotype_is_a_usage_error(tmp_path, prob):
 
 
 @pytest.mark.parametrize(
-    "case,match",
+    ("case", "match"),
     [
         ("dup", "columns 1 and 2 are identical"),
         ("comb", "column 3 is a linear combination of columns 0, 1, 2"),
