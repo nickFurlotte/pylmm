@@ -15,6 +15,8 @@ From a source checkout you can also run `uv run pylmmGWAS ...` or `python script
 
 The GWAS program pylmmGWAS.py reads PLINK formated input files (BED or TPED only).  There is also an option to use "EMMA" formatted files.  We included this in order to make it easier for people using EMMA currently to try pylmm.  The kinship matrix file can be calculated using pylmmKinship.py which also takes PLINK or EMMA files as input.  The kinship matrix output is just a plain text file and follows the same format as that used by EMMA, so that you can use pre-computed kinship matrices from EMMA as well, or any other program for that matter.
 
+Individuals are matched by ID (FID, IID), not by row position. pylmmKinship writes, next to the kinship file `K`, an ID file `K.id` (one `FID IID` per line). If `K.id` exists, pylmmGWAS uses it to align the kinship to the genotype file (individuals missing from the kinship are dropped, with a warning); otherwise it warns and assumes that the kinship rows are in the order of the genotype file. You can write `K.id` yourself for a kinship computed elsewhere.
+
 ## Installation
 pylmm needs Python 3.10 or newer. pip installs numpy and scipy for you.
 Install pylmm with pip:
