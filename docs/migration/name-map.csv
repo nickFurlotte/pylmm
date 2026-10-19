@@ -57,7 +57,7 @@ getPhenosEMMA,get_phenos_emma,method,pylmm.plink_io.PlinkReader
 _emmaColumns,_emma_columns,method,pylmm.plink_io.PlinkReader
 _readTable,_read_table,method,pylmm.plink_io.PlinkReader
 _alignRows,_align_rows,method,pylmm.plink_io.PlinkReader
-getIndivs,get_indivs,method,pylmm.plink_io.PlinkReader
+getIndivs,_read_fam,method,pylmm.plink_io.PlinkReader
 readKinship,read_kinship,method,pylmm.plink_io.PlinkReader
 getCovariatesEMMA,get_covariates_emma,method,pylmm.plink_io.PlinkReader
 getCovariates,get_covariates,method,pylmm.plink_io.PlinkReader
@@ -76,7 +76,7 @@ kFile,k_file,attribute,pylmm.plink_io.PlinkReader
 phenoFile,pheno_file,attribute,pylmm.plink_io.PlinkReader
 normGenotype,norm_genotype,attribute,pylmm.plink_io.PlinkReader
 readKFile,read_k_file,attribute,pylmm.plink_io.PlinkReader
-fastLMM_kinship_style,fastlmm_kinship_style,attribute,pylmm.plink_io.PlinkReader
+fastLMM_kinship_style,fastlmm_kinship,attribute,pylmm.plink_io.PlinkReader
 snpFileHandle,snp_file_handle,attribute,pylmm.plink_io.PlinkReader
 numSNPs,num_snps,attribute,pylmm.plink_io.PlinkReader
 BytestoRead,_bytes_to_read,attribute,pylmm.plink_io.PlinkReader
@@ -89,3 +89,6 @@ buildParser,build_parser,function,pylmm.cli.kinship
 _plainWarning,_plain_warning,function,pylmm.cli.gwas
 readEigenFile,read_eigen_file,function,pylmm.cli.gwas
 betaSD,beta_sd,parameter,pylmm.cli.gwas._output_result
+next,__next__,method,pylmm.plink_io.PlinkReader
+y,Y,parameter,pylmm.misc.fit_two
+wgrids,ngrids,parameter,pylmm.misc.fit_two

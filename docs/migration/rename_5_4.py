@@ -111,7 +111,7 @@ RENAMES = [
     ("_emmaColumns", "_emma_columns", "method", IO + ".PlinkReader", "both"),
     ("_readTable", "_read_table", "method", IO + ".PlinkReader", "both"),
     ("_alignRows", "_align_rows", "method", IO + ".PlinkReader", "both"),
-    ("getIndivs", "get_indivs", "method", IO + ".PlinkReader", "both"),
+    ("getIndivs", "_read_fam", "method", IO + ".PlinkReader", "both"),
     ("readKinship", "read_kinship", "method", IO + ".PlinkReader", "both"),
     ("getCovariatesEMMA", "get_covariates_emma", "method", IO + ".PlinkReader", "both"),
     ("getCovariates", "get_covariates", "method", IO + ".PlinkReader", "both"),
@@ -145,7 +145,7 @@ RENAMES = [
     ("phenoFile", "pheno_file", "attribute", IO + ".PlinkReader", "attr"),
     ("normGenotype", "norm_genotype", "attribute", IO + ".PlinkReader", "attr"),
     ("readKFile", "read_k_file", "attribute", IO + ".PlinkReader", "attr"),
-    ("fastLMM_kinship_style", "fastlmm_kinship_style", "attribute", IO + ".PlinkReader", "attr"),
+    ("fastLMM_kinship_style", "fastlmm_kinship", "attribute", IO + ".PlinkReader", "attr"),
     ("snpFileHandle", "snp_file_handle", "attribute", IO + ".PlinkReader", "attr"),
     ("numSNPs", "num_snps", "attribute", IO + ".PlinkReader", "attr"),
     ("BytestoRead", "_bytes_to_read", "attribute", IO + ".PlinkReader", "attr"),
@@ -396,6 +396,16 @@ def apply():
     print("total: %d token renames" % total)
 
 
+# CSV-only rows: renames made by hand after the token pass (so not in RENAMES,
+# which --apply would rewrite across the tree).  `next` is the py2 iterator
+# spelling; callers should use `next(reader)`.
+EXTRA_ROWS = [
+    ("next", "__next__", "method", IO + ".PlinkReader"),
+    ("y", "Y", "parameter", M + ".fit_two"),
+    ("wgrids", "ngrids", "parameter", M + ".fit_two"),
+]
+
+
 def write_csv():
     path = os.path.join(REPO, "docs", "migration", "name-map.csv")
     with open(path, "w", newline="") as fh:
@@ -405,6 +415,8 @@ def write_csv():
             for owner in mod.split(";"):
                 if owner.startswith("pylmm"):
                     w.writerow([old, new, kind, owner])
+        for row in EXTRA_ROWS:
+            w.writerow(row)
     print("wrote", path)
 
 

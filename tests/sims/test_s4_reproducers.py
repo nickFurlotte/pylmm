@@ -293,7 +293,7 @@ def test_bug3_fittwo_can_select_k1_alone():
         n
     )
     with quiet():
-        h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(y, K1, K2, wgrids=20)
+        h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(y, K1, K2, ngrids=20)
     assert h2 == 0.0
 
 

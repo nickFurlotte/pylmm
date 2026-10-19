@@ -86,6 +86,8 @@ class _OldLMM(_OldNames, lmm.LMM):
 
 
 class _OldPlink(_OldNames, plink_io.PlinkReader):
+    next = plink_io.PlinkReader.__next__  # py2 spelling, used only by generate_golden
+
     def __init__(self, *a, **kw):
         super().__init__(*a, **_new_kw(kw))
 

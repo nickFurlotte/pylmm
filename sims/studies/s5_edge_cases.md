@@ -1,5 +1,7 @@
 # S5: edge cases and robustness: Phase 5 target list
 
+Code uses the post-5.4 API; other numbers are as of Phase 4.
+
 Study code: `sims/studies/s5_edge_cases.py`. Full table (161 cases, one row each, worst
 outcome over 6 replicates): `sims/results/s5_edge_cases/summary.md` / `summary.csv`.
 Reproduce: `just sim s5_edge_cases --jobs 6` then `just sim-report s5_edge_cases`
@@ -15,8 +17,8 @@ four paths:
 
 | path | what |
 |---|---|
-| `lib` | `lmm.LMM(...).fit()` plus `lmm.GWAS(...)` on raw genotypes (missing calls are removed per SNP) |
-| `lib_impute` | the caller mean-imputes first, then `lmm.GWAS` |
+| `lib` | `lmm.LMM(...).fit()` plus `lmm.gwas(...)` on raw genotypes (missing calls are removed per SNP) |
+| `lib_impute` | the caller mean-imputes first, then `lmm.gwas` |
 | `cli_impute` | `python -m pylmm.cli.gwas` through a subprocess on BED/fam/phenos/kin files written by the study. This is the CLI default (the BED reader mean-imputes and standardizes) |
 | `cli_remove` | the same with `--removeMissingGenotypes` |
 
@@ -76,10 +78,10 @@ Reproducer prelude (library items):
 
 ```python
 import numpy as np
-from pylmm.lmm import GWAS, LMM, calculateKinship
+from pylmm.lmm import LMM, calculate_kinship, gwas
 rng = np.random.default_rng(0)
 n = 40
-K = calculateKinship(rng.binomial(2, .3, (n, 200)).astype(float))
+K = calculate_kinship(rng.binomial(2, .3, (n, 200)).astype(float))
 y = rng.standard_normal(n)
 X = rng.binomial(2, .4, (n, 5)).astype(float)       # 5 test SNPs
 ```
@@ -106,7 +108,7 @@ medium to critical (measured |t| <= 1e-6 here, but the sign of the failure is "b
 number"). (`degenerate/mono_dosage`, `mono_ydrop`, `single_minor_ydrop`, `eq_cov`,
 `eq_cov_x2`; frequency 17% to 100% depending on rounding.)
 - Reproducers:
-  - `x[:] = 0.37` (a constant dosage): `GWAS(y, X_with_const_col, K)` gives `t = 6e-9`, not
+  - `x[:] = 0.37` (a constant dosage): `gwas(y, X_with_const_col, K)` gives `t = 6e-9`, not
     nan (n = 30, 50 and 100 all give finite values; n = 200 gives nan).
   - A SNP that equals a covariate (`X0 = [1, c]`, `x = c`): `t = 2e-8`, with a
     `LinAlgWarning`.
@@ -114,19 +116,19 @@ number"). (`degenerate/mono_dosage`, `mono_ydrop`, `single_minor_ydrop`, `eq_cov
     minor allele in an individual whose phenotype is `NA`. The BED reader standardizes using
     all individuals, the CLI then drops the `NA` rows, and `x.var() == 0` is false for a
     column that is constant up to rounding.
-- Observed: exact-zero variance tests (`x.var() == 0` in `lmm.GWAS` and in the CLI complete-SNP
+- Observed: exact-zero variance tests (`x.var() == 0` in `lmm.gwas` and in the CLI complete-SNP
   branch) pass on columns that are constant up to rounding. Whether you get nan or `t ~ 1e-8`
   depends on the constant, n and BLAS rounding. The missing-genotype branch of the CLI uses
   `<= 1e-6` instead (bug 13), so the two CLI branches also disagree.
 - Expected: nan.
-- Fix: one shared helper `snp_estimable(x, X0)` used by `GWAS` and both CLI branches: after
+- Fix: one shared helper `snp_estimable(x, X0)` used by `gwas` and both CLI branches: after
   dropping missing rows, project x on X0 (QR) and return nan if the residual variance is below
   `1e-10 * var(x)` or the remaining df is below 1. This covers constants, SNP = covariate and
   df <= 0 in one place.
 
 **3. Saturated or over-parameterized designs (n <= number of columns + 1) return finite t.**
 Severity critical. (`smalln` with k + 2 >= n at n = 10, 20, 50; every replicate.)
-- Reproducer: `GWAS(y, X, K, X0=np.column_stack([np.ones(n), rng.standard_normal((n, n - 1))]))`
+- Reproducer: `gwas(y, X, K, X0=np.column_stack([np.ones(n), rng.standard_normal((n, n - 1))]))`
   for n = 40 gives `[nan nan nan ...]`, but with `n - 3` covariate columns it gives
   `[-5.04, 0.56, -0.24, 0.38, -2.19]` with 1 residual df, and with `n - 2` columns it raises
   `BracketError` (item 7).
@@ -134,7 +136,7 @@ Severity critical. (`smalln` with k + 2 >= n at n = 10, 20, 50; every replicate.
   finite t with 0 or negative df.
 - Expected: `ValueError("n=%d observations, but the model has %d columns")`.
 - Fix: check `n_obs > q + 1` (q = covariates including the intercept) in `LMM.__init__` and
-  `GWAS`, after dropping missing y.
+  `gwas`, after dropping missing y.
 
 **4. CLI `--removeMissingGenotypes` fits the per-SNP null by ML, the complete-SNP branch by
 REML** (bug 1). Severity high. (`missing/mcar/cli_remove`, all 7 cells with
@@ -143,7 +145,7 @@ genotype-missing >= 1% and replicates mostly 6/6; relative t error 2% to 10%, h 
   `--removeMissingGenotypes` and compare to the oracle. The t of SNPs with missing calls match
   an ML-refit oracle, not the REML one.
 - Observed: `Ls.fit(REML=options.REML)` (default False) in the missing branch, `L.fit()`
-  (REML) in the complete branch. `lib` `GWAS` always uses REML for both. The library and the
+  (REML) in the complete branch. `lib` `gwas` always uses REML for both. The library and the
   CLI therefore disagree on the same data.
 - Expected: one convention (REML for the null fit) in both branches.
 - Fix: pass the same `REML` to every `fit`. Needs a decision on the default; the goldens in
@@ -151,7 +153,7 @@ genotype-missing >= 1% and replicates mostly 6/6; relative t error 2% to 10%, h 
 
 **5. A wrongly ordered, asymmetric or non-PSD K is accepted with no warning.** Severity high
 for ordering, medium for the rest. (`kin/wrong_order`, `upper_only`, `nonpsd`, `asym`.)
-- Reproducer: `GWAS(y, X, K[perm][:, perm])`. With sibship structure h changes by up to 0.78
+- Reproducer: `gwas(y, X, K[perm][:, perm])`. With sibship structure h changes by up to 0.78
   and the correlation of t with the right-order result drops below 0.9. No exception, no
   warning. pylmm has no way to detect this; the CLI kfile has no individual IDs at all.
 - Also: `K = np.triu(K)` is read as the lower triangle only (so K becomes diagonal); a
@@ -178,7 +180,7 @@ and CLI.)
 n = 20, 3 columns: 1/6 replicates; also n = 10 with 9 columns; fuzz with unrelated individuals:
 2/300 at n = 10, 0/300 at n >= 20.)
 - Reproducer: `rng = np.random.default_rng(1177); W = rng.binomial(2, rng.uniform(.05, .5, 100),
-  (10, 100)).astype(float); K = calculateKinship(W); y = rng.standard_normal(10)`, then
+  (10, 100)).astype(float); K = calculate_kinship(W); y = rng.standard_normal(10)`, then
   `LMM(y, K).fit()` raises `scipy.optimize._optimize.BracketError`. In that case the grid
   maximum is at h = 0.96 with a nearly flat profile up to 0.99.
 - Observed: `RuntimeWarning: invalid value encountered in log`, then the exception. A
@@ -191,7 +193,7 @@ n = 20, 3 columns: 1/6 replicates; also n = 10 with 9 columns; fuzz with unrelat
 
 **8. An all-missing SNP kills the whole scan** (bug 11). Severity high. (`degenerate/allmiss`:
 `lib`, `lib_impute`, `cli_impute`, 6/6.)
-- Reproducer: `X[:, 1] = np.nan; GWAS(y, X, K)` raises `LinAlgError: A singular matrix
+- Reproducer: `X[:, 1] = np.nan; gwas(y, X, K)` raises `LinAlgError: A singular matrix
   detected` (after `RuntimeWarning: Degrees of freedom <= 0`). CLI: `IndexError: boolean index
   did not match indexed array along axis 0; size of axis is 0 ...` (`normalizeGenotype`
   returns an empty array).
@@ -201,7 +203,7 @@ n = 20, 3 columns: 1/6 replicates; also n = 10 with 9 columns; fuzz with unrelat
 
 **9. Collinear, duplicate or zero covariates give a bare `LinAlgError`.** Severity medium.
 (`cov/collinear_dup`, `collinear_comb`, `intercept_dup`, `zero_cov`, lib and CLI, 6/6.)
-- Reproducer: `GWAS(y, X, K, X0=np.column_stack([np.ones(n), c, c]))`, or a covariate file
+- Reproducer: `gwas(y, X, K, X0=np.column_stack([np.ones(n), c, c]))`, or a covariate file
   with a column of ones (the CLI adds its own intercept unless `--noMean`, so this is easy to
   do by accident).
 - Observed: `numpy.linalg.LinAlgError: A singular matrix detected: slice(s) [0] are singular`
@@ -227,7 +229,7 @@ n = 20, 3 columns: 1/6 replicates; also n = 10 with 9 columns; fuzz with unrelat
 
 **11. Unvalidated nan/inf input in the library.** Severity medium. nan in K or in a covariate:
 `ValueError: array must not contain infs or NaNs` (scipy, no context; the CLI handles the
-covariate case with a proper `parser.error`). All-nan y: `LinAlgError` from `LMM`; `GWAS`
+covariate case with a proper `parser.error`). All-nan y: `LinAlgError` from `LMM`; `gwas`
 itself returns all-nan arrays, but as a numpy array instead of the list it normally returns
 (bug 15). `y = inf` yields all-nan output with no warning.
 - Fix: validate finite y (apart from nan), finite K and X0 at entry; one return type.
@@ -259,8 +261,8 @@ Fix: copy inside both functions.
   or has no residual df. The returned `t` there is almost always about 0 (|t| <= 1e-6), which
   is why those cases are rated medium; items 1, 3 (partly), 4, 5 and 6 produce numbers that
   are plausible-looking and not close to 0.
-- The harness runs `GWAS` and a standalone `LMM.fit` separately, so a crash can be reported
-  from the null fit even though `GWAS` itself returns arrays (all-nan y).
+- The harness runs `gwas` and a standalone `LMM.fit` separately, so a crash can be reported
+  from the null fit even though `gwas` itself returns arrays (all-nan y).
 - CLI cases pass the individual SNP t from the F_STAT column; h is parsed from the `-v`
   line, which prints three decimals (tolerances account for this).
 - Runtime: every library cell takes under 0.2 s and a CLI cell about 0.7 s (mostly Python and

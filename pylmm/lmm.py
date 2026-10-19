@@ -549,6 +549,7 @@ class LMM:
         default x0t will be used.  If X is set and stack=True, then x0t will be matrix concatenated with
         the input X.  If stack is false, then X is used in place of x0t in the LL calculation.
         REML is computed by adding additional terms to the standard LL and can be computed by setting reml=True.
+        Returns the 4-tuple (log_likelihood, beta, sigma, xx_inv).
         """
 
         if X is None:
@@ -560,13 +561,13 @@ class LMM:
         n = float(self.N)
         q = float(X.shape[1])
         beta, sigma, Q, xx_inv, xx = self.ml_solution(h, X)
-        log_likelihood = (
+        ll = (
             n * np.log(2 * np.pi)
             + np.log(h * self.kva + (1.0 - h)).sum()
             + n
             + n * np.log(1.0 / n * Q)
         )
-        log_likelihood = -0.5 * log_likelihood
+        ll = -0.5 * ll
 
         if reml:
             ll_reml_part = (
@@ -574,10 +575,10 @@ class LMM:
                 + np.log(linalg.det(_matrix_mult(X.T, X)))
                 - np.log(linalg.det(xx))
             )
-            log_likelihood = log_likelihood + 0.5 * ll_reml_part
+            ll = ll + 0.5 * ll_reml_part
 
-        log_likelihood = log_likelihood.sum()
-        return log_likelihood, beta, sigma, xx_inv
+        ll = ll.sum()
+        return ll, beta, sigma, xx_inv
 
     def _get_max(self, H, X=None, reml=False):
         """

@@ -11,9 +11,11 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 #### Python API: PEP 8 names (Phase 5.4)
 - Every Python name of the pylmm API follows PEP 8; a clean break, with no aliases or deprecation shims.
   [`docs/migration/name-map.csv`](docs/migration/name-map.csv) lists each changed name (`old_name`,
-  `new_name`, `kind`, `module` = where it lives now): 1 module, 1 class, 15 functions, 24 methods,
-  19 attributes and 16 parameters (29 rows counting each function that takes a renamed parameter). The
+  `new_name`, `kind`, `module` = where it lives now): 1 module, 1 class, 15 functions, 25 methods,
+  19 attributes and 18 parameters (31 rows counting each function that takes a renamed parameter). The
   rule is in [`docs/conventions.md`](docs/conventions.md).
+- `misc.fit_two(y, ..., wgrids=)` -> `fit_two(Y, ..., ngrids=)`; `PlinkReader.getIndivs` -> `_read_fam` (private);
+  `fastLMM_kinship_style` -> `fastlmm_kinship`. The py2 `reader.next()` is gone: use `next(reader)`.
 - Module `pylmm.input` -> `pylmm.plink_io` (`input` shadowed the builtin), class `plink` -> `PlinkReader`.
 - Examples: `lmm.calculateKinship` -> `calculate_kinship`, `lmm.GWAS` -> `gwas`, `LMM.LL` ->
   `log_likelihood`, `LMM.getMLSoln` -> `ml_solution`, `misc.fitTwo` -> `fit_two`,

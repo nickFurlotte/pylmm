@@ -43,3 +43,5 @@ The Phase 5.4 rename is a clean break (no aliases). `docs/migration/name-map.csv
 every changed pylmm name, old to new (`module` is where the name lives after the rename: the
 module, `module.Class`, or the function that takes the parameter);
 `docs/migration/rename_5_4.py` is the script that applied it and wrote the CSV (`--csv`).
+The row `next,__next__` records that the py2 `reader.next()` method is gone: callers should use
+`next(reader)`.

@@ -31,7 +31,7 @@ class PlinkReader:
         self.fbase = fbase
         self.type = type
         if type != "emma":
-            self.indivs = self.get_indivs(self.fbase, type)
+            self.indivs = self._read_fam(self.fbase, type)
         else:
             # Just read a line from the SNP file and see how many individuals we have
             f = open(fbase)
@@ -45,7 +45,7 @@ class PlinkReader:
         # NOW I want to use this module to just read SNPs so I'm allowing
         # the programmer to turn off the kinship reading.
         self.read_k_file = read_k_file
-        self.fastlmm_kinship_style = fastlmm_kinship
+        self.fastlmm_kinship = fastlmm_kinship
 
         if self.k_file:
             self.K = self.read_kinship(self.k_file)
@@ -178,9 +178,6 @@ class PlinkReader:
 
         else:
             sys.stderr.write("Do not understand type %s\n" % (self.type))
-
-    # Python 2 spelling, kept so existing callers of reader.next() keep working.
-    next = __next__
 
     def _get_genos_tped(self, X):
         G = []
@@ -380,7 +377,7 @@ class PlinkReader:
             )
         return out
 
-    def get_indivs(self, base, type="b"):
+    def _read_fam(self, base, type="b"):
         if type == "t":
             fam_file = "%s.tfam" % base
         else:
@@ -414,7 +411,7 @@ class PlinkReader:
 
         f = open(k_file)
         # read indivs
-        if self.fastlmm_kinship_style:
+        if self.fastlmm_kinship:
             v = f.readline().strip().split("\t")[1:]
             keys = [tuple(y.split()) for y in v]
             D = {}
@@ -423,7 +420,7 @@ class PlinkReader:
 
         # read matrix
         K = []
-        if self.fastlmm_kinship_style:
+        if self.fastlmm_kinship:
             for line in f:
                 K.append([float(x) for x in line.strip().split("\t")[1:]])
         else:
@@ -432,7 +429,7 @@ class PlinkReader:
         f.close()
         K = np.array(K)
 
-        if self.fastlmm_kinship_style:
+        if self.fastlmm_kinship:
             # reorder to match self.indivs
             L = []
             kept = []

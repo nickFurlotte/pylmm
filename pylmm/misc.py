@@ -12,7 +12,7 @@ import numpy as np
 from pylmm.lmm import LMM
 
 
-def fit_two(y, K1, K2, X0=None, wgrids=100):
+def fit_two(Y, K1, K2, X0=None, ngrids=100):
     """
     Simple function to fit a model with two variance components.
     It works by running the standard pylmm algorithm in a loop
@@ -21,7 +21,7 @@ def fit_two(y, K1, K2, X0=None, wgrids=100):
     """
 
     # Create a uniform grid
-    W = np.array(range(wgrids)) / float(wgrids)
+    W = np.array(range(ngrids)) / float(ngrids)
     results = []
     ll_grid = []
 
@@ -29,7 +29,7 @@ def fit_two(y, K1, K2, X0=None, wgrids=100):
         # heritability will be estimated for linear combo of kinships
         K = w * K1 + (1.0 - w) * K2
         sys.stderr.write("Fitting weight %0.2f\n" % (w))
-        L = LMM(y, K, X0=X0)
+        L = LMM(Y, K, X0=X0)
         R = L.fit()
         results.append(R)
         ll_grid.append(R[-1])
