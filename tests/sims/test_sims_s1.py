@@ -13,7 +13,7 @@ def test_s1_quick_cell_and_report(tmp_path):
     import pandas as pd
     from sims.studies import s1_null_calibration as s1
 
-    params = runner.study_grid(s1, quick=True)[0]     # unrelated, tiny
+    params = runner.study_grid(s1, quick=True)[0]  # unrelated, tiny
     rows = []
     for rep in range(2):
         out = s1.run_cell(params, runner.task_seed(s1.NAME, params, rep))

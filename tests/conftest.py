@@ -1,4 +1,3 @@
-
 import os
 import sys
 
@@ -13,20 +12,24 @@ if helpers.REPO not in sys.path:
 
 
 def pytest_addoption(parser):
-    parser.addoption('--runslow', action='store_true', default=False,
-                     help='also run tests marked @pytest.mark.slow')
+    parser.addoption(
+        "--runslow",
+        action="store_true",
+        default=False,
+        help="also run tests marked @pytest.mark.slow",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption('--runslow'):
+    if config.getoption("--runslow"):
         return
-    skip = pytest.mark.skip(reason='slow; use --runslow')
+    skip = pytest.mark.skip(reason="slow; use --runslow")
     for item in items:
-        if 'slow' in item.keywords:
+        if "slow" in item.keywords:
             item.add_marker(skip)
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def hmdp():
     """(Y, K, snps) for the hmdp data, all from text files.
 
@@ -39,12 +42,13 @@ def hmdp():
     return Y, K, snps
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def bed_null():
     """(Y, K, Kva, Kve) for the README BED data (1219 individuals)."""
     from scipy import linalg
     from pylmm import input as pinput
-    IN = pinput.plink(helpers.BED_BASE, type='b', phenoFile=helpers.FAKE_PHENOS)
+
+    IN = pinput.plink(helpers.BED_BASE, type="b", phenoFile=helpers.FAKE_PHENOS)
     n = len(IN.indivs)
     K = helpers.load_readme_kinship(n)
     Y = IN.phenos[:, 0]

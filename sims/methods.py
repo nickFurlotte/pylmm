@@ -20,26 +20,36 @@ def _quiet():
     return contextlib.redirect_stderr(io.StringIO())
 
 
-def pylmm_null(y: np.ndarray, kin, X0: Optional[np.ndarray] = None,
-               REML: bool = True) -> dict:
+def pylmm_null(y: np.ndarray, kin, X0: Optional[np.ndarray] = None, REML: bool = True) -> dict:
     """Null-model fit with ``pylmm.lmm.LMM(...).fit(REML=REML)``.
 
     Returns {'h', 'sigma', 'll', 'beta'} (beta as an array).  Missing y are
     dropped by pylmm itself (which then recomputes the eigh).
     """
     from pylmm.lmm import LMM
+
     y = np.asarray(y, dtype=np.float64)
     Kva, Kve = kin.eig_for_pylmm()
     with _quiet():
         L = LMM(y, np.asarray(kin.K), Kva, Kve, X0=X0)
         h, beta, sigma, ll = L.fit(REML=REML)
-    return {"h": float(np.sum(h)), "sigma": float(np.sum(sigma)),
-            "ll": float(np.sum(ll)), "beta": np.asarray(beta).reshape(-1),
-            "lmm": L}
+    return {
+        "h": float(np.sum(h)),
+        "sigma": float(np.sum(sigma)),
+        "ll": float(np.sum(ll)),
+        "beta": np.asarray(beta).reshape(-1),
+        "lmm": L,
+    }
 
 
-def pylmm_gwas(y: np.ndarray, G: np.ndarray, kin, X0: Optional[np.ndarray] = None,
-               REML: bool = True, refit: bool = False):
+def pylmm_gwas(
+    y: np.ndarray,
+    G: np.ndarray,
+    kin,
+    X0: Optional[np.ndarray] = None,
+    REML: bool = True,
+    refit: bool = False,
+):
     """``pylmm.lmm.GWAS`` on the columns of G -> (t, p) float arrays.
 
     Note what GWAS does: since Phase 5.2 ``REML`` reaches the null fit,
@@ -49,11 +59,20 @@ def pylmm_gwas(y: np.ndarray, G: np.ndarray, kin, X0: Optional[np.ndarray] = Non
     Non-estimable SNPs (monomorphic, collinear with X0) give nan.
     """
     from pylmm.lmm import GWAS
+
     Kva, Kve = kin.eig_for_pylmm()
-    G = np.array(G, dtype=np.float64)        # GWAS does not mutate, but be safe
+    G = np.array(G, dtype=np.float64)  # GWAS does not mutate, but be safe
     with _quiet():
-        ts, ps = GWAS(np.asarray(y, dtype=np.float64), G, np.asarray(kin.K),
-                      Kva, Kve, X0=X0, REML=REML, refit=refit)
+        ts, ps = GWAS(
+            np.asarray(y, dtype=np.float64),
+            G,
+            np.asarray(kin.K),
+            Kva,
+            Kve,
+            X0=X0,
+            REML=REML,
+            refit=refit,
+        )
     return np.asarray(ts, dtype=np.float64), np.asarray(ps, dtype=np.float64)
 
 
@@ -85,7 +104,7 @@ def ols_gwas(y: np.ndarray, G: np.ndarray, X0: Optional[np.ndarray] = None):
         t[complete], df[complete] = _ols_block(y, G[:, complete], X0)
     for j in np.where(~complete)[0]:
         ok = ~np.isnan(G[:, j])
-        tj, dfj = _ols_block(y[ok], G[ok, j:j + 1], X0[ok])
+        tj, dfj = _ols_block(y[ok], G[ok, j : j + 1], X0[ok])
         t[j], df[j] = tj[0], dfj[0]
     p = np.full(m, np.nan)
     good = ~np.isnan(t)
@@ -99,11 +118,11 @@ def _ols_block(y, G, X0):
     Qx, _ = np.linalg.qr(X0)
     ry = y - Qx @ (Qx.T @ y)
     RG = G - Qx @ (Qx.T @ G)
-    ss_g = (RG ** 2).sum(axis=0)
+    ss_g = (RG**2).sum(axis=0)
     df = n - q - 1
     with np.errstate(divide="ignore", invalid="ignore"):
         b = (RG.T @ ry) / ss_g
-        rss = (ry @ ry) - b ** 2 * ss_g
+        rss = (ry @ ry) - b**2 * ss_g
         se = np.sqrt(rss / df / ss_g)
         t = b / se
     # monomorphic (after covariates) -> nan, mirroring pylmm

@@ -26,9 +26,9 @@ def prob():
     """The S5 reproducer prelude: n = 40, K from 200 SNPs, 5 test SNPs."""
     rng = np.random.default_rng(0)
     n = 40
-    K = calculateKinship(rng.binomial(2, .3, (n, 200)).astype(float))
+    K = calculateKinship(rng.binomial(2, 0.3, (n, 200)).astype(float))
     y = rng.standard_normal(n)
-    X = rng.binomial(2, .4, (n, 5)).astype(float)
+    X = rng.binomial(2, 0.4, (n, 5)).astype(float)
     return rng, n, K, y, X
 
 
@@ -36,9 +36,10 @@ def prob():
 # P0-2 / issue 19 / bug 13: SNPs that cannot be estimated give nan
 # ---------------------------------------------------------------------------
 
+
 def test_constant_dosage_snp_is_nan(prob):
     rng, n, K, y, X = prob
-    X[:, 2] = 0.37                       # var() is ~1e-33, not exactly 0
+    X[:, 2] = 0.37  # var() is ~1e-33, not exactly 0
     t, p = GWAS(y, X, K)
     assert np.isnan(t[2]) and np.isnan(p[2])
     assert np.isfinite(np.delete(t, 2)).all()
@@ -48,9 +49,9 @@ def test_snp_equal_to_covariate_is_nan(prob):
     rng, n, K, y, X = prob
     c = rng.standard_normal(n)
     X[:, 1] = c
-    X[:, 3] = 2 * c + 1                  # in the span of [1, c]
+    X[:, 3] = 2 * c + 1  # in the span of [1, c]
     with warnings.catch_warnings():
-        warnings.simplefilter("error")   # no LinAlgWarning any more
+        warnings.simplefilter("error")  # no LinAlgWarning any more
         t, p = GWAS(y, X, K, X0=np.column_stack([np.ones(n), c]))
     assert np.isnan(t[1]) and np.isnan(t[3])
     assert np.isfinite([t[0], t[2], t[4]]).all()
@@ -60,7 +61,7 @@ def test_snp_constant_after_dropping_missing_is_nan(prob):
     rng, n, K, y, X = prob
     X[:, 0] = 1.0
     X[:3, 0] = np.nan
-    X[3, 0] = 1.0 + 1e-14               # one rounding-level difference
+    X[3, 0] = 1.0 + 1e-14  # one rounding-level difference
     t, p = GWAS(y, X, K)
     assert np.isnan(t[0])
 
@@ -74,7 +75,7 @@ def test_snp_estimable_helper():
     assert not snp_estimable(np.full(n, 0.37), one)
     assert not snp_estimable(np.zeros(n), one)
     assert not snp_estimable(x, np.column_stack([np.ones(n), 3 * x]))
-    assert not snp_estimable(x[:2], one[:2])           # no residual df
+    assert not snp_estimable(x[:2], one[:2])  # no residual df
     assert not snp_estimable(np.r_[np.nan, x[1:]], one)
     # without an intercept a constant SNP is estimable
     assert snp_estimable(np.full(n, 0.37), rng.standard_normal((n, 1)))
@@ -113,15 +114,17 @@ def test_cli_non_estimable_snps_are_nan_in_both_branches(tmp_path, prob, remove)
     y = y.copy()
     y[:4] = np.nan
     only_na = np.full(n, 1.0)
-    only_na[:4] = [0.0, 2.0, 0.0, 2.0]   # varies only where y is NA
+    only_na[:4] = [0.0, 2.0, 0.0, 2.0]  # varies only where y is NA
     const = np.full(n, 0.37)
     const_miss = const.copy()
     const_miss[10] = np.nan
     ok = X[:, 0]
     snps, ph, kf = _write_emma(tmp_path, [ok, only_na, const, const_miss], y, K)
     out = str(tmp_path / "o")
-    _run(["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, out]
-         + (["--removeMissingGenotypes"] if remove else []))
+    _run(
+        ["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, out]
+        + (["--removeMissingGenotypes"] if remove else [])
+    )
     r = _read(out)
     assert np.isfinite(r[0]).all()
     assert np.isnan(r[1:]).all()
@@ -130,6 +133,7 @@ def test_cli_non_estimable_snps_are_nan_in_both_branches(tmp_path, prob, remove)
 # ---------------------------------------------------------------------------
 # P0-3 / issue 20: saturated designs raise
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("q_minus_n", [-1, 0, 1])
 def test_saturated_design_raises(prob, q_minus_n):
@@ -144,7 +148,7 @@ def test_saturated_design_raises(prob, q_minus_n):
 
 def test_design_with_one_residual_df_is_fine(prob):
     rng, n, K, y, X = prob
-    X0 = np.column_stack([np.ones(n), rng.standard_normal((n, n - 3))])   # q + 1 = n - 1
+    X0 = np.column_stack([np.ones(n), rng.standard_normal((n, n - 3))])  # q + 1 = n - 1
     with quiet(), np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
         GWAS(y, X[:, :1], K, X0=X0)
@@ -153,7 +157,7 @@ def test_design_with_one_residual_df_is_fine(prob):
 def test_saturated_after_dropping_missing_y_raises(prob):
     rng, n, K, y, X = prob
     y = y.copy()
-    y[5:] = np.nan                       # 5 observations
+    y[5:] = np.nan  # 5 observations
     X0 = np.column_stack([np.ones(n), rng.standard_normal((n, 3))])
     with pytest.raises(ValueError, match="n=5 observations"):
         GWAS(y, X, K, X0=X0)
@@ -163,11 +167,14 @@ def test_saturated_after_dropping_missing_y_raises(prob):
 # P0-5 / issue 21: K checks
 # ---------------------------------------------------------------------------
 
+
 def test_kinship_nan_raises(prob):
     rng, n, K, y, X = prob
     K = K.copy()
     K[3, 7] = K[7, 3] = np.nan
-    with pytest.raises(ValueError, match="kinship matrix has 2 nan/inf values, the first at row 3, column 7"):
+    with pytest.raises(
+        ValueError, match="kinship matrix has 2 nan/inf values, the first at row 3, column 7"
+    ):
         LMM(y, K)
     with pytest.raises(ValueError, match="kinship"):
         GWAS(y, X, K)
@@ -199,7 +206,7 @@ def test_kinship_non_psd_warns_with_most_negative_eigenvalue(prob):
 def test_valid_rank_deficient_kinship_does_not_warn(prob):
     """Round-off eigenvalues of a rank-deficient GRM are not reported."""
     rng, n, K, y, X = prob
-    Klow = calculateKinship(rng.binomial(2, .3, (n, 5)).astype(float))   # rank <= 5
+    Klow = calculateKinship(rng.binomial(2, 0.3, (n, 5)).astype(float))  # rank <= 5
     with quiet(), warnings.catch_warnings():
         warnings.simplefilter("error")
         LMM(y, Klow).fit()
@@ -219,6 +226,7 @@ def test_individual_ids_checked(prob):
 # ---------------------------------------------------------------------------
 # P0-6 / issues 22, 24: phenotype checks
 # ---------------------------------------------------------------------------
+
 
 def test_constant_phenotype_raises(prob):
     rng, n, K, y, X = prob
@@ -257,21 +265,27 @@ def test_cli_constant_phenotype_is_a_usage_error(tmp_path, prob):
 # P1-9 / issue 23, P1-11: covariate checks
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("case,match", [
-    ("dup", "columns 1 and 2 are identical"),
-    ("comb", "column 3 is a linear combination of columns 0, 1, 2"),
-    ("intercept", "columns 0 and 1 are identical"),
-    ("zero", r"column\(s\) 1 are all zero"),
-    ("nan", r"nan/inf values, in column\(s\) 1"),
-])
+
+@pytest.mark.parametrize(
+    "case,match",
+    [
+        ("dup", "columns 1 and 2 are identical"),
+        ("comb", "column 3 is a linear combination of columns 0, 1, 2"),
+        ("intercept", "columns 0 and 1 are identical"),
+        ("zero", r"column\(s\) 1 are all zero"),
+        ("nan", r"nan/inf values, in column\(s\) 1"),
+    ],
+)
 def test_bad_covariates_raise_naming_the_column(prob, case, match):
     rng, n, K, y, X = prob
     c, d = rng.standard_normal(n), rng.standard_normal(n)
-    X0 = {"dup": [np.ones(n), c, c],
-          "comb": [np.ones(n), c, d, c - 2 * d + 1],
-          "intercept": [np.ones(n), np.ones(n), c],
-          "zero": [np.ones(n), np.zeros(n)],
-          "nan": [np.ones(n), np.r_[np.nan, c[1:]]]}[case]
+    X0 = {
+        "dup": [np.ones(n), c, c],
+        "comb": [np.ones(n), c, d, c - 2 * d + 1],
+        "intercept": [np.ones(n), np.ones(n), c],
+        "zero": [np.ones(n), np.zeros(n)],
+        "nan": [np.ones(n), np.r_[np.nan, c[1:]]],
+    }[case]
     X0 = np.column_stack(X0)
     with pytest.raises(ValueError, match=match):
         check_covariates(X0)
@@ -286,7 +300,7 @@ def test_covariate_collinear_only_after_dropping_missing_y(prob):
     rng, n, K, y, X = prob
     y = y.copy()
     y[:10] = np.nan
-    b = np.r_[np.ones(10), np.zeros(n - 10)]      # 0 on every observed individual
+    b = np.r_[np.ones(10), np.zeros(n - 10)]  # 0 on every observed individual
     with pytest.raises(ValueError, match="individuals with a phenotype"):
         LMM(y, K, X0=np.column_stack([np.ones(n), b]))
 
@@ -304,8 +318,19 @@ def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
         f.write(" ".join("%.6f" % v for v in rng.standard_normal(n)) + "\n")
     err = io.StringIO()
     with pytest.raises(SystemExit), contextlib.redirect_stderr(err):
-        cli_gwas.main(["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, "--emmaCOV", cov,
-                       str(tmp_path / "o")])
+        cli_gwas.main(
+            [
+                "--emmaSNP",
+                snps,
+                "--emmaPHENO",
+                ph,
+                "--kfile",
+                kf,
+                "--emmaCOV",
+                cov,
+                str(tmp_path / "o"),
+            ]
+        )
     assert "columns 0 and 1 are identical" in err.getvalue() and "--noMean" in err.getvalue()
     out = str(tmp_path / "o")
     _run(["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, "--emmaCOV", cov, "--noMean", out])
@@ -316,13 +341,14 @@ def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
 # bug 12: inputs are not modified
 # ---------------------------------------------------------------------------
 
+
 def test_gwas_and_lmm_do_not_modify_inputs(prob):
     rng, n, K, y, X = prob
     y = y.copy()
     y[2] = np.nan
     X[5, 1] = np.nan
     Kva, Kve = np.linalg.eigh(K)
-    Kva[0] = -1e-3                       # gets clamped inside LMM
+    Kva[0] = -1e-3  # gets clamped inside LMM
     X0 = np.column_stack([np.ones(n), rng.standard_normal(n)])
     before = [a.copy() for a in (y, X, K, Kva, Kve, X0)]
     with quiet(), warnings.catch_warnings():
@@ -337,6 +363,7 @@ def test_gwas_and_lmm_do_not_modify_inputs(prob):
 # ---------------------------------------------------------------------------
 # Phase 5.2 review fixes
 # ---------------------------------------------------------------------------
+
 
 def test_covariate_nan_only_where_y_is_nan_is_accepted(prob):
     """A covariate that is nan only for individuals without a phenotype is
@@ -380,12 +407,12 @@ def test_snp_estimable_with_big_offset():
 def test_collinear_on_subset_gives_nan_and_one_summary_warning(prob):
     rng, n, K, y, X = prob
     b = np.zeros(n)
-    b[:3] = 1.0                           # an indicator of three individuals
+    b[:3] = 1.0  # an indicator of three individuals
     X0 = np.column_stack([np.ones(n), b])
-    X[:3, 0] = np.nan                     # ... all missing: b is 0 on the subset
+    X[:3, 0] = np.nan  # ... all missing: b is 0 on the subset
     X[:3, 1] = np.nan
     X[:3, 2] = np.nan
-    X[0, 3] = np.nan                      # b stays non-constant
+    X[0, 3] = np.nan  # b stays non-constant
     with pytest.warns(UserWarning, match=r"3 of 5 SNPs are nan") as rec:
         t, p = GWAS(y, X, K, X0=X0)
     assert len([w for w in rec if "SNPs are nan" in str(w.message)]) == 1

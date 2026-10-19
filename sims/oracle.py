@@ -110,15 +110,15 @@ from scipy import linalg, optimize, stats
 @dataclasses.dataclass
 class OracleFit:
     h: float
-    ll: float               # standard profile (RE)ML log-likelihood at h
-    sigma2: float           # = sigma2_reml if reml else sigma2_ml (see sigma2_kind)
-    sigma2_ml: float        # Q/n at h
-    sigma2_reml: float      # Q/(n-p) at h (what pylmm reports, also under ML)
+    ll: float  # standard profile (RE)ML log-likelihood at h
+    sigma2: float  # = sigma2_reml if reml else sigma2_ml (see sigma2_kind)
+    sigma2_ml: float  # Q/n at h
+    sigma2_reml: float  # Q/(n-p) at h (what pylmm reports, also under ML)
     beta: np.ndarray
     reml: bool
-    identifiable: bool      # False if the profile is flat in h
-    at_boundary: bool       # h within 1e-6 of 0 or of the grid's upper end
-    h_grid: np.ndarray      # grid the profile was evaluated on
+    identifiable: bool  # False if the profile is flat in h
+    at_boundary: bool  # h within 1e-6 of 0 or of the grid's upper end
+    h_grid: np.ndarray  # grid the profile was evaluated on
     ll_grid: np.ndarray
     ml_unbounded: bool = False  # ML profile -> +inf as h -> 1 (see module docstring)
     n: int = 0
@@ -144,7 +144,7 @@ class OracleWald:
     se: float
     df: int
     h: float
-    sigma2: float           # variance scale used for se
+    sigma2: float  # variance scale used for se
     fit: OracleFit
 
 
@@ -200,16 +200,26 @@ def _profile(h, y, K, X, reml):
     if reml:
         _, logdet_XtHiX = np.linalg.slogdet(XtHiX)
         _, logdet_XtX = np.linalg.slogdet(X.T @ X)
-        ll = -0.5 * ((n - p) * np.log(2 * np.pi * Q / (n - p)) + logdetH
-                     + logdet_XtHiX - logdet_XtX + (n - p))
+        ll = -0.5 * (
+            (n - p) * np.log(2 * np.pi * Q / (n - p))
+            + logdetH
+            + logdet_XtHiX
+            - logdet_XtX
+            + (n - p)
+        )
     else:
         ll = -0.5 * (n * np.log(2 * np.pi * Q / n) + logdetH + n)
     return float(ll), beta, Q
 
 
-def profile_loglik(h: float, y: np.ndarray, K: np.ndarray,
-                   X: Optional[np.ndarray] = None, reml: bool = True,
-                   eig_clamp: Optional[float] = None):
+def profile_loglik(
+    h: float,
+    y: np.ndarray,
+    K: np.ndarray,
+    X: Optional[np.ndarray] = None,
+    reml: bool = True,
+    eig_clamp: Optional[float] = None,
+):
     """(ll, beta_hat, sigma2_hat) at a fixed h; ll = -inf if H(h) is singular.
     sigma2_hat is Q/(n-p) for REML and Q/n for ML.  ``eig_clamp`` applies
     pylmm's eigenvalue floor to K first (an eigh per call; in loops clamp once
@@ -232,8 +242,12 @@ def _search_fine(ll, n_grid):
     if identifiable:
         for i in range(1, n_grid - 1):
             if L[i] >= L[i - 1] and L[i] >= L[i + 1] and np.isfinite(L[i]):
-                res = optimize.minimize_scalar(lambda h: -ll(h), bounds=(H[i - 1], H[i + 1]),
-                                               method="bounded", options={"xatol": 1e-10})
+                res = optimize.minimize_scalar(
+                    lambda h: -ll(h),
+                    bounds=(H[i - 1], H[i + 1]),
+                    method="bounded",
+                    options={"xatol": 1e-10},
+                )
                 candidates.append((-res.fun, float(res.x)))
                 candidates.append((L[i], H[i]))
     # best LL; ties -> smallest h (so a flat profile gives h = 0)
@@ -247,26 +261,27 @@ def _search_pylmm(ll):
     likelihood.  The REML constant offset cannot change any comparison or
     Brent step, so the path is the same as pylmm's."""
     ngrids = 100
-    H = np.array(range(ngrids)) / float(ngrids)          # 0, 0.01, ..., 0.99
+    H = np.array(range(ngrids)) / float(ngrids)  # 0, 0.01, ..., 0.99
     L = np.array([ll(h) for h in H])
 
     def LL_brent(h):
         if h < 0 or h > 1:
-            return 1e6                                    # pylmm's guard
+            return 1e6  # pylmm's guard
         v = ll(h)
         # pylmm takes log(h*Kva + 1 - h): any non-positive term (h > 1) gives nan
         return np.nan if not np.isfinite(v) else -v
 
     n = len(L)
     HOpt = []
-    for i in range(1, n - 2):                             # off-by-one kept (#2)
+    for i in range(1, n - 2):  # off-by-one kept (#2)
         if L[i - 1] < L[i] and L[i] > L[i + 1]:
             # bounded to the bracketing grid interval, like pylmm since Phase 5.1 (#4)
-            res = optimize.minimize_scalar(LL_brent, bounds=(H[i - 1], H[i + 1]),
-                                           method="bounded", options={"xatol": 1e-10})
+            res = optimize.minimize_scalar(
+                LL_brent, bounds=(H[i - 1], H[i + 1]), method="bounded", options={"xatol": 1e-10}
+            )
             HOpt.append(float(res.x))
     if len(HOpt) >= 1:
-        h = HOpt[0]                                       # first, not best
+        h = HOpt[0]  # first, not best
     elif L[0] > L[n - 1]:
         h = H[0]
     else:
@@ -276,9 +291,15 @@ def _search_pylmm(ll):
     return float(h), H, L, identifiable
 
 
-def fit(y: np.ndarray, K: np.ndarray, X: Optional[np.ndarray] = None,
-        reml: bool = True, n_grid: int = 201, eig_clamp: Optional[float] = None,
-        h_grid: str = "fine") -> OracleFit:
+def fit(
+    y: np.ndarray,
+    K: np.ndarray,
+    X: Optional[np.ndarray] = None,
+    reml: bool = True,
+    n_grid: int = 201,
+    eig_clamp: Optional[float] = None,
+    h_grid: str = "fine",
+) -> OracleFit:
     """Maximise the profile (RE)ML over h; see module docstring.
 
     pylmm-convention switches: ``eig_clamp=1e-6`` (eigenvalue floor),
@@ -302,20 +323,40 @@ def fit(y: np.ndarray, K: np.ndarray, X: Optional[np.ndarray] = None,
     llv, beta, Q = _profile(h_best, y, K, X, reml)
     # -1/2 log(1-h) grows by ~3.45 from 1-1e-6 to 1-1e-9; a bounded profile is flat there
     ml_unbounded = bool(not reml and ll(1 - 1e-9) > ll(1 - 1e-6) + 1.0)
-    return OracleFit(h=h_best, ll=llv, sigma2=Q / ((n - p) if reml else n),
-                     sigma2_ml=Q / n, sigma2_reml=Q / (n - p), beta=beta, reml=reml,
-                     identifiable=identifiable,
-                     at_boundary=bool(h_best <= 1e-6 or h_best >= H[-1] - 1e-6),
-                     h_grid=H, ll_grid=L, ml_unbounded=ml_unbounded, n=n, p=p,
-                     eig_clamp=eig_clamp, search=h_grid)
+    return OracleFit(
+        h=h_best,
+        ll=llv,
+        sigma2=Q / ((n - p) if reml else n),
+        sigma2_ml=Q / n,
+        sigma2_reml=Q / (n - p),
+        beta=beta,
+        reml=reml,
+        identifiable=identifiable,
+        at_boundary=bool(h_best <= 1e-6 or h_best >= H[-1] - 1e-6),
+        h_grid=H,
+        ll_grid=L,
+        ml_unbounded=ml_unbounded,
+        n=n,
+        p=p,
+        eig_clamp=eig_clamp,
+        search=h_grid,
+    )
 
 
-def wald(y: np.ndarray, K: np.ndarray, x: np.ndarray,
-         X0: Optional[np.ndarray] = None, null_reml: bool = True,
-         test_reml: Optional[bool] = None, h: Optional[float] = None,
-         refit: bool = False, sigma_convention: str = "textbook",
-         eig_clamp: Optional[float] = None, h_grid: str = "fine",
-         n_grid: int = 201) -> OracleWald:
+def wald(
+    y: np.ndarray,
+    K: np.ndarray,
+    x: np.ndarray,
+    X0: Optional[np.ndarray] = None,
+    null_reml: bool = True,
+    test_reml: Optional[bool] = None,
+    h: Optional[float] = None,
+    refit: bool = False,
+    sigma_convention: str = "textbook",
+    eig_clamp: Optional[float] = None,
+    h_grid: str = "fine",
+    n_grid: int = 201,
+) -> OracleWald:
     """Wald t-test of the last column x in [X0, x].
 
     h: the given ``h``; else a fit of [X0, x] if ``refit``; else a fit of the
@@ -347,11 +388,23 @@ def wald(y: np.ndarray, K: np.ndarray, x: np.ndarray,
     else:
         llv, b, Qf = _profile(h, y, K, Xf, null_reml)
         nf, pf = Xf.shape
-        f = OracleFit(h=float(h), ll=llv, sigma2=Qf / ((nf - pf) if null_reml else nf),
-                      sigma2_ml=Qf / nf, sigma2_reml=Qf / (nf - pf), beta=b,
-                      reml=null_reml, identifiable=True, at_boundary=h in (0.0, 1.0),
-                      h_grid=np.array([h]), ll_grid=np.array([llv]), n=nf, p=pf,
-                      eig_clamp=eig_clamp, search="given")
+        f = OracleFit(
+            h=float(h),
+            ll=llv,
+            sigma2=Qf / ((nf - pf) if null_reml else nf),
+            sigma2_ml=Qf / nf,
+            sigma2_reml=Qf / (nf - pf),
+            beta=b,
+            reml=null_reml,
+            identifiable=True,
+            at_boundary=h in (0.0, 1.0),
+            h_grid=np.array([h]),
+            ll_grid=np.array([llv]),
+            n=nf,
+            p=pf,
+            eig_clamp=eig_clamp,
+            search="given",
+        )
     p = X.shape[1]
     C = linalg.cho_factor(h * K + (1.0 - h) * np.eye(n), lower=True)
     cov = linalg.inv(X.T @ linalg.cho_solve(C, X))
@@ -362,8 +415,16 @@ def wald(y: np.ndarray, K: np.ndarray, x: np.ndarray,
     se = float(np.sqrt(s2 * cov[-1, -1]))
     t = float(beta[-1] / se)
     df = n - p
-    return OracleWald(t=t, p=float(2 * stats.t.sf(abs(t), df)), beta=float(beta[-1]),
-                      se=se, df=df, h=float(h), sigma2=s2, fit=f)
+    return OracleWald(
+        t=t,
+        p=float(2 * stats.t.sf(abs(t), df)),
+        beta=float(beta[-1]),
+        se=se,
+        df=df,
+        h=float(h),
+        sigma2=s2,
+        fit=f,
+    )
 
 
 def pylmm_reml_offset(n: int, p: int) -> float:

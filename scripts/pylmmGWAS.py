@@ -16,10 +16,10 @@ import sys
 # to it even if another (installed or already-imported) pylmm is around.
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO)
-for _m in [m for m in sys.modules if m == 'pylmm' or m.startswith('pylmm.')]:
+for _m in [m for m in sys.modules if m == "pylmm" or m.startswith("pylmm.")]:
     del sys.modules[_m]
 
 from pylmm.cli.gwas import main  # noqa: E402
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

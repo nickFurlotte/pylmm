@@ -25,9 +25,9 @@ from sims import genotypes as _geno
 
 @dataclasses.dataclass
 class Kinship:
-    K: np.ndarray      # n x n, read-only
-    Kva: np.ndarray    # eigenvalues (ascending), read-only, NOT clamped
-    Kve: np.ndarray    # eigenvectors (columns), read-only
+    K: np.ndarray  # n x n, read-only
+    Kva: np.ndarray  # eigenvalues (ascending), read-only, NOT clamped
+    Kve: np.ndarray  # eigenvectors (columns), read-only
     meta: dict = dataclasses.field(default_factory=dict)
 
     @property
@@ -52,6 +52,7 @@ class Kinship:
 def kinship(G: np.ndarray, center: bool = False) -> np.ndarray:
     """``pylmm.lmm.calculateKinship`` on a copy of G (G is left untouched)."""
     from pylmm.lmm import calculateKinship
+
     return calculateKinship(np.array(G, dtype=np.float64), center=center)
 
 
@@ -93,8 +94,7 @@ def get(geno_spec: dict, snps=None, center: bool = False) -> Kinship:
         G = _geno.get(geno_spec).G
         if snps is not None:
             G = G[:, snps]
-        _CACHE[key] = from_matrix(kinship(G, center=center),
-                                  geno_spec=geno_spec, n_snps=G.shape[1])
+        _CACHE[key] = from_matrix(kinship(G, center=center), geno_spec=geno_spec, n_snps=G.shape[1])
     return _CACHE[key]
 
 
@@ -102,8 +102,13 @@ def clear_cache() -> None:
     _CACHE.clear()
 
 
-def split_snps(m: int, n_kinship: Optional[int], n_test: Optional[int],
-               rng: Optional[np.random.Generator] = None, overlap: bool = False):
+def split_snps(
+    m: int,
+    n_kinship: Optional[int],
+    n_test: Optional[int],
+    rng: Optional[np.random.Generator] = None,
+    overlap: bool = False,
+):
     """Split range(m) into (kinship_idx, test_idx).
 
     ``overlap=False`` makes the sets disjoint (kinship SNPs first, then test

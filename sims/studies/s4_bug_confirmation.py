@@ -61,32 +61,80 @@ MIN_MAF = 0.05
 # grid
 # ---------------------------------------------------------------------------
 
+
 def _full_grid():
     g = []
     # bugs 1 / 9 / 17: n = 300; 'unrel_m200' has m_kin < n (ML bounded)
     for pop, mk in (("unrelated", 200), ("unrelated", 2000), ("family", 2000), ("bed", 2000)):
         for h2 in (0.2, 0.5, 0.8):
             for blk in (0,):
-                g.append({"exp": "remlml", "pop": pop, "n": 300, "m_kin": mk, "m_test": 200,
-                          "h2": h2, "block": blk})
+                g.append(
+                    {
+                        "exp": "remlml",
+                        "pop": pop,
+                        "n": 300,
+                        "m_kin": mk,
+                        "m_test": 200,
+                        "h2": h2,
+                        "block": blk,
+                    }
+                )
     # bugs 2 / 3 / 4: high h2
     for pop, n in (("family", 200), ("unrelated", 300), ("bed", 300)):
         for h2 in (0.8, 0.9, 0.95, 0.99):
             for blk in (0, 1):
-                g.append({"exp": "hgrid", "pop": pop, "n": n, "m_kin": 2000, "m_test": 200,
-                          "h2": h2, "block": blk})
+                g.append(
+                    {
+                        "exp": "hgrid",
+                        "pop": pop,
+                        "n": n,
+                        "m_kin": 2000,
+                        "m_test": 200,
+                        "h2": h2,
+                        "block": blk,
+                    }
+                )
     # bug 8
-    for pop, n, miss, mono in (("hmdp", 94, 0.0, 0.0), ("bed", 300, 0.0, 0.0),
-                               ("unrelated", 300, 0.02, 0.25), ("unrelated", 300, 0.10, 0.25)):
+    for pop, n, miss, mono in (
+        ("hmdp", 94, 0.0, 0.0),
+        ("bed", 300, 0.0, 0.0),
+        ("unrelated", 300, 0.02, 0.25),
+        ("unrelated", 300, 0.10, 0.25),
+    ):
         for h2 in (0.5, 0.8):
-            g.append({"exp": "kinship", "pop": pop, "n": n, "m_kin": 2000, "m_test": 200,
-                      "h2": h2, "miss": miss, "mono": mono, "block": 0})
+            g.append(
+                {
+                    "exp": "kinship",
+                    "pop": pop,
+                    "n": n,
+                    "m_kin": 2000,
+                    "m_test": 200,
+                    "h2": h2,
+                    "miss": miss,
+                    "mono": mono,
+                    "block": 0,
+                }
+            )
     # bug 17
-    for pop, mk in (("unrelated", 100), ("unrelated", 150), ("unrelated", 400),
-                    ("unrelated", 2000), ("bed", 2000)):
+    for pop, mk in (
+        ("unrelated", 100),
+        ("unrelated", 150),
+        ("unrelated", 400),
+        ("unrelated", 2000),
+        ("bed", 2000),
+    ):
         for h2 in (0.2, 0.5, 0.8):
-            g.append({"exp": "mlcent", "pop": pop, "n": 200, "m_kin": mk, "m_test": 0,
-                      "h2": h2, "block": 0})
+            g.append(
+                {
+                    "exp": "mlcent",
+                    "pop": pop,
+                    "n": 200,
+                    "m_kin": mk,
+                    "m_test": 0,
+                    "h2": h2,
+                    "block": 0,
+                }
+            )
     g += _bednull_grid()
     return g
 
@@ -94,13 +142,29 @@ def _full_grid():
 def _bednull_grid():
     g = []
     # (pop, n, h2, n_causal, blocks): blocks x REPS replicates per cell
-    for pop, n, h2, nc, nb in (("bed", 300, 0.0, 0, 4), ("bed", 300, 0.5, 0, 4),
-                               ("bed", 300, 0.95, 0, 4), ("bed", 600, 0.0, 0, 4),
-                               ("bed", 600, 0.5, 0, 2), ("bed", 600, 0.95, 0, 2),
-                               ("bed", 600, 0.5, 5, 2), ("unrelated", 600, 0.5, 0, 2)):
+    for pop, n, h2, nc, nb in (
+        ("bed", 300, 0.0, 0, 4),
+        ("bed", 300, 0.5, 0, 4),
+        ("bed", 300, 0.95, 0, 4),
+        ("bed", 600, 0.0, 0, 4),
+        ("bed", 600, 0.5, 0, 2),
+        ("bed", 600, 0.95, 0, 2),
+        ("bed", 600, 0.5, 5, 2),
+        ("unrelated", 600, 0.5, 0, 2),
+    ):
         for blk in range(nb):
-            g.append({"exp": "bednull", "pop": pop, "n": n, "m_kin": 6000, "m_test": 5000,
-                      "h2": h2, "n_causal": nc, "block": blk})
+            g.append(
+                {
+                    "exp": "bednull",
+                    "pop": pop,
+                    "n": n,
+                    "m_kin": 6000,
+                    "m_test": 5000,
+                    "h2": h2,
+                    "n_causal": nc,
+                    "block": blk,
+                }
+            )
     return g
 
 
@@ -110,20 +174,71 @@ def _quick_grid():
     ledger quotes these numbers where the full grid has not been run."""
     q = []
     for pop, mk in (("unrelated", 200), ("unrelated", 2000), ("bed", 2000)):
-        q.append({"exp": "remlml", "pop": pop, "n": 300, "m_kin": mk, "m_test": 200,
-                  "h2": 0.5, "block": 0})
+        q.append(
+            {
+                "exp": "remlml",
+                "pop": pop,
+                "n": 300,
+                "m_kin": mk,
+                "m_test": 200,
+                "h2": 0.5,
+                "block": 0,
+            }
+        )
     for pop, n in (("family", 200), ("bed", 300)):
-        q.append({"exp": "hgrid", "pop": pop, "n": n, "m_kin": 2000, "m_test": 200,
-                  "h2": 0.95, "block": 0})
-    q.append({"exp": "kinship", "pop": "hmdp", "n": 94, "m_kin": 2000, "m_test": 200,
-              "h2": 0.5, "miss": 0.0, "mono": 0.0, "block": 0})
-    q.append({"exp": "kinship", "pop": "unrelated", "n": 300, "m_kin": 2000, "m_test": 200,
-              "h2": 0.5, "miss": 0.10, "mono": 0.25, "block": 0})
+        q.append(
+            {
+                "exp": "hgrid",
+                "pop": pop,
+                "n": n,
+                "m_kin": 2000,
+                "m_test": 200,
+                "h2": 0.95,
+                "block": 0,
+            }
+        )
+    q.append(
+        {
+            "exp": "kinship",
+            "pop": "hmdp",
+            "n": 94,
+            "m_kin": 2000,
+            "m_test": 200,
+            "h2": 0.5,
+            "miss": 0.0,
+            "mono": 0.0,
+            "block": 0,
+        }
+    )
+    q.append(
+        {
+            "exp": "kinship",
+            "pop": "unrelated",
+            "n": 300,
+            "m_kin": 2000,
+            "m_test": 200,
+            "h2": 0.5,
+            "miss": 0.10,
+            "mono": 0.25,
+            "block": 0,
+        }
+    )
     for pop, mk in (("unrelated", 100), ("unrelated", 2000), ("bed", 2000)):
-        q.append({"exp": "mlcent", "pop": pop, "n": 200, "m_kin": mk, "m_test": 0,
-                  "h2": 0.5, "block": 0})
-    q.append({"exp": "bednull", "pop": "bed", "n": 200, "m_kin": 1000, "m_test": 300,
-              "h2": 0.5, "n_causal": 0, "block": 0})
+        q.append(
+            {"exp": "mlcent", "pop": pop, "n": 200, "m_kin": mk, "m_test": 0, "h2": 0.5, "block": 0}
+        )
+    q.append(
+        {
+            "exp": "bednull",
+            "pop": "bed",
+            "n": 200,
+            "m_kin": 1000,
+            "m_test": 300,
+            "h2": 0.5,
+            "n_causal": 0,
+            "block": 0,
+        }
+    )
     return q
 
 
@@ -144,6 +259,7 @@ def reps(quick):
 # ---------------------------------------------------------------------------
 # shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _quiet():
     return contextlib.redirect_stderr(io.StringIO())
@@ -194,11 +310,11 @@ def gls_t(y, K, G, h, X0=None, sigma="reml"):
     Qx, _ = np.linalg.qr(Xt)
     ry = yt - Qx @ (Qx.T @ yt)
     RG = Gt - Qx @ (Qx.T @ Gt)
-    ss = (RG ** 2).sum(axis=0)
+    ss = (RG**2).sum(axis=0)
     p = X0.shape[1] + 1
     with np.errstate(divide="ignore", invalid="ignore"):
         b = (RG.T @ ry) / ss
-        rss = ry @ ry - b ** 2 * ss
+        rss = ry @ ry - b**2 * ss
         s2 = rss / ((n - p) if sigma == "reml" else n)
         t = b / np.sqrt(s2 / ss)
     t[ss <= 1e-12] = np.nan
@@ -221,8 +337,10 @@ def _counts(p, prefix):
 
 
 def _null_summary(p, prefix):
-    out = {prefix + "lambda": metrics.lambda_gc(p),
-           prefix + "meanchi2": float(np.mean(metrics.chi2_from_p(p)))}
+    out = {
+        prefix + "lambda": metrics.lambda_gc(p),
+        prefix + "meanchi2": float(np.mean(metrics.chi2_from_p(p))),
+    }
     out.update(_counts(p, prefix))
     return out
 
@@ -262,14 +380,17 @@ def pylmm_fit_instrumented(y, kin, REML=True, X=None):
         with _quiet(), np.errstate(all="ignore"):
             h = L.fit(X=X, REML=REML)[0]
         out["h"] = float(np.sum(h))
-    except Exception as e:          # scipy >= 1.11 raises BracketError (bug 4)
+    except Exception as e:  # scipy >= 1.11 raises BracketError (bug 4)
         out.update(h=np.nan, crashed=1, crash_type=type(e).__name__)
     LLs = getattr(L, "LLs", None)
     out["skip98"] = int(LLs is not None and bool(LLs[97] < LLs[98] > LLs[99]))
     out["cap"] = int(out["h"] == 0.99)
     out["gt1"] = int(any(h > 1 for h, _ in L.evals))
-    out["nan_fallback"] = int(not out["crashed"] and any(np.isnan(v) for _, v in L.evals)
-                              and out["h"] in set(np.round(np.arange(100) / 100.0, 2)))
+    out["nan_fallback"] = int(
+        not out["crashed"]
+        and any(np.isnan(v) for _, v in L.evals)
+        and out["h"] in set(np.round(np.arange(100) / 100.0, 2))
+    )
     return out
 
 
@@ -295,6 +416,7 @@ def _std_setup(params):
         kin = kinship.get(spec, snps=slice(0, mk))
         G_test = impute_filter(geno.G[:, mk:], mt) if mt else np.zeros((params["n"], 0))
         return kin, G_test, geno
+
     return _cached(key, build)
 
 
@@ -302,45 +424,53 @@ def _std_setup(params):
 # experiments
 # ---------------------------------------------------------------------------
 
+
 def run_remlml(params, rng):
     from pylmm.lmm import LMM
+
     kin, G, _ = _std_setup(params)
     K = np.asarray(kin.K)
     n = params["n"]
     cidx = phenotypes.choose_causal(G.shape[1], 2, rng, G=G)
-    ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng, G=G, causal_idx=cidx,
-                             causal_var=0.08)            # 4% each
+    ph = phenotypes.simulate(
+        kin, h2=params["h2"], rng=rng, G=G, causal_idx=cidx, causal_var=0.08
+    )  # 4% each
     y = ph.y
     out = {}
     null_reml = pylmm_fit_instrumented(y, kin, REML=True)
     null_ml = pylmm_fit_instrumented(y, kin, REML=False)
     out["reml_pylmm_crashed"] = null_reml["crashed"]
-    if null_reml["crashed"]:                 # bug 4: GWAS would raise too
+    if null_reml["crashed"]:  # bug 4: GWAS would raise too
         return out
     t_reml, p_reml = methods.pylmm_gwas(y, G, kin, REML=True)
     # the pre-Phase-5.2 CLI default (REML null, Q/(n-q) Wald) == REML=True;
     # since 5.2, REML=False would be a real ML scan (bug 1 fixed)
-    t_cli, p_cli = methods.pylmm_gwas(y, G, kin, REML=True)           # CLI default (pre-5.2)
+    t_cli, p_cli = methods.pylmm_gwas(y, G, kin, REML=True)  # CLI default (pre-5.2)
     out["cli_vs_reml_max_abs_dt"] = float(np.nanmax(np.abs(t_cli - t_reml)))
-    out.update(h_reml_pylmm=null_reml["h"], h_ml_pylmm=null_ml["h"],
-               ml_pylmm_cap=null_ml["cap"], ml_pylmm_crashed=null_ml["crashed"])
+    out.update(
+        h_reml_pylmm=null_reml["h"],
+        h_ml_pylmm=null_ml["h"],
+        ml_pylmm_cap=null_ml["cap"],
+        ml_pylmm_crashed=null_ml["crashed"],
+    )
     fml = oracle.fit(y, K, reml=False, n_grid=101)
     fre = oracle.fit(y, K, reml=True, n_grid=101)
     out.update(h_ml_oracle=fml.h, h_reml_oracle=fre.h, ml_unbounded=int(fml.ml_unbounded))
     null = np.setdiff1d(np.arange(G.shape[1]), cidx)
     if not fml.ml_unbounded:
-        t_mlw, p_mlw = gls_t(y, K, G, fml.h, sigma="ml")               # textbook ML Wald
-        t_mlw9, p_mlw9 = gls_t(y, K, G, fml.h, sigma="reml")           # ML h, pylmm sigma
+        t_mlw, p_mlw = gls_t(y, K, G, fml.h, sigma="ml")  # textbook ML Wald
+        t_mlw9, p_mlw9 = gls_t(y, K, G, fml.h, sigma="reml")  # ML h, pylmm sigma
         d = mlogp(p_cli) - mlogp(p_mlw)
         out.update(
             cli_vs_mlwald_mean_abs_dt=float(np.nanmean(np.abs(t_cli - t_mlw))),
             cli_vs_mlwald_max_abs_dt=float(np.nanmax(np.abs(t_cli - t_mlw))),
             cli_vs_mlwald_dlogp_causal=float(np.mean(d[cidx])),
             cli_vs_mlwald_max_abs_dlogp=float(np.nanmax(np.abs(d))),
-            bug1_only_max_abs_dt=float(np.nanmax(np.abs(t_cli - t_mlw9))),   # h REML vs ML
-            bug9_only_max_abs_dt=float(np.nanmax(np.abs(t_mlw9 - t_mlw))),   # sigma convention
+            bug1_only_max_abs_dt=float(np.nanmax(np.abs(t_cli - t_mlw9))),  # h REML vs ML
+            bug9_only_max_abs_dt=float(np.nanmax(np.abs(t_mlw9 - t_mlw))),  # sigma convention
             bug9_dlogp_causal=float(np.mean((mlogp(p_mlw9) - mlogp(p_mlw))[cidx])),
-            bug1_dlogp_causal=float(np.mean((mlogp(p_cli) - mlogp(p_mlw9))[cidx])))
+            bug1_dlogp_causal=float(np.mean((mlogp(p_cli) - mlogp(p_mlw9))[cidx])),
+        )
         out.update(_counts(p_mlw[null], "mlw_"))
         # ML LRT (per-SNP ML refit of h) on the causal SNPs + 4 null SNPs
         sel = np.r_[cidx, rng.choice(null, size=4, replace=False)]
@@ -351,8 +481,10 @@ def run_remlml(params, rng):
             lrt_p.append(stats.chi2.sf(max(0.0, 2 * (fa.ll - ll0)), 1))
         lrt_p = np.array(lrt_p)
         dl = mlogp(p_cli[sel]) - mlogp(lrt_p)
-        out.update(cli_vs_lrt_dlogp_causal=float(np.mean(dl[:2])),
-                   cli_vs_lrt_max_abs_dlogp=float(np.max(np.abs(dl))))
+        out.update(
+            cli_vs_lrt_dlogp_causal=float(np.mean(dl[:2])),
+            cli_vs_lrt_max_abs_dlogp=float(np.max(np.abs(dl))),
+        )
     out.update(_counts(p_cli[null], "cli_"))
     out["dlogp_causal_cli"] = float(np.mean(mlogp(p_cli[cidx])))
     # --refit: CLI fits h by ML per SNP (REML=options.REML), lib GWAS(refit) by REML
@@ -370,16 +502,21 @@ def run_remlml(params, rng):
                 L.fit(X=x, REML=False)
                 h_r_cli.append(L.optH)
                 t_r_cli.append(L.association(x, REML=True)[0])
-                L.fit(X=x)                                   # lmm.GWAS(refit=True)
+                L.fit(X=x)  # lmm.GWAS(refit=True)
                 h_r_lib.append(L.optH)
                 t_r_lib.append(L.association(x, REML=True)[0])
         except Exception:
             crash += 1
     out["refit_crashes"] = crash
     if t_r_cli:
-        out.update(refit_h_cli_mean=float(np.mean(h_r_cli)), refit_h_lib_mean=float(np.mean(h_r_lib)),
-                   refit_cli_cap_frac=float(np.mean(np.array(h_r_cli) == 0.99)),
-                   refit_cli_vs_lib_max_abs_dt=float(np.max(np.abs(np.array(t_r_cli) - np.array(t_r_lib)))))
+        out.update(
+            refit_h_cli_mean=float(np.mean(h_r_cli)),
+            refit_h_lib_mean=float(np.mean(h_r_lib)),
+            refit_cli_cap_frac=float(np.mean(np.array(h_r_cli) == 0.99)),
+            refit_cli_vs_lib_max_abs_dt=float(
+                np.max(np.abs(np.array(t_r_cli) - np.array(t_r_lib)))
+            ),
+        )
     return out
 
 
@@ -403,12 +540,15 @@ def run_hgrid(params, rng):
     t_p, p_p = methods.pylmm_gwas(y, G, kin, REML=True)
     t_o, p_o = gls_t(y, K, G, fo.h, sigma="reml")
     d = mlogp(p_p) - mlogp(p_o)
-    out.update(max_abs_dt=float(np.nanmax(np.abs(t_p - t_o))),
-               max_abs_dlogp=float(np.nanmax(np.abs(d))),
-               dlogp_causal=float(np.mean(d[cidx])),
-               mlogp_causal_oracle=float(np.mean(mlogp(p_o[cidx]))))
+    out.update(
+        max_abs_dt=float(np.nanmax(np.abs(t_p - t_o))),
+        max_abs_dlogp=float(np.nanmax(np.abs(d))),
+        dlogp_causal=float(np.mean(d[cidx])),
+        mlogp_causal_oracle=float(np.mean(mlogp(p_o[cidx]))),
+    )
     # refit-mode crash exposure: per-SNP REML refits on 20 SNPs
     from pylmm.lmm import LMM
+
     Kva, Kve = kin.eig_for_pylmm()
     with _quiet():
         L = LMM(y, K, Kva, Kve)
@@ -424,12 +564,14 @@ def run_hgrid(params, rng):
 
 
 def _kinship_setup(params):
-    key = json.dumps({k: params[k] for k in ("pop", "n", "m_kin", "m_test", "miss", "mono")},
-                     sort_keys=True)
+    key = json.dumps(
+        {k: params[k] for k in ("pop", "n", "m_kin", "m_test", "miss", "mono")}, sort_keys=True
+    )
 
     def build():
         from pylmm import input as pinput
         from pylmm.lmm import calculateKinship
+
         mk, mt = params["m_kin"], params["m_test"]
         spec = _geno_spec(params["pop"], params["n"], mk + mt + mt // 2)
         geno = genotypes.get(spec)
@@ -440,7 +582,7 @@ def _kinship_setup(params):
         if params["pop"] == "unrelated":
             n_mono = int(round(mk * params["mono"] / (1 - params["mono"])))
             Gk = np.hstack([Gk, np.zeros((Gk.shape[0], n_mono))])
-            K_true = calculateKinship(Gk[:, :mk].copy()) * 1.0   # complete, all polymorphic
+            K_true = calculateKinship(Gk[:, :mk].copy()) * 1.0  # complete, all polymorphic
             Gk = genotypes.with_missing(Gk, params["miss"], rng)
         m = Gk.shape[1]
         poly = np.array([np.nanvar(Gk[:, j]) > 0 for j in range(m)])
@@ -448,7 +590,7 @@ def _kinship_setup(params):
         K_fix = K_lib * m / poly.sum()
         W = np.zeros((Gk.shape[0], 0))
         cols = []
-        for j in range(m):                                   # pylmmKinship CLI path
+        for j in range(m):  # pylmmKinship CLI path
             g = pinput.plink.normalizeGenotype(None, Gk[:, j].copy())
             if g.var() == 0:
                 continue
@@ -459,13 +601,17 @@ def _kinship_setup(params):
         if K_true is not None:
             ks["true"] = K_true
         kins = {k: kinship.from_matrix(v) for k, v in ks.items()}
-        info = {"mono_frac": float(1 - poly.mean()), "miss_frac": float(np.isnan(Gk).mean()),
-                "scale_c": float(poly.sum() / m),
-                "max_abs_dK_lib_cli": float(np.max(np.abs(K_lib - K_cli))),
-                "meandiag_lib": float(np.mean(np.diag(K_lib))),
-                "meandiag_cli": float(np.mean(np.diag(K_cli))),
-                "meandiag_fix": float(np.mean(np.diag(K_fix)))}
+        info = {
+            "mono_frac": float(1 - poly.mean()),
+            "miss_frac": float(np.isnan(Gk).mean()),
+            "scale_c": float(poly.sum() / m),
+            "max_abs_dK_lib_cli": float(np.max(np.abs(K_lib - K_cli))),
+            "meandiag_lib": float(np.mean(np.diag(K_lib))),
+            "meandiag_cli": float(np.mean(np.diag(K_cli))),
+            "meandiag_fix": float(np.mean(np.diag(K_fix))),
+        }
         return kins, G_test, info
+
     return _cached(key, build)
 
 
@@ -473,8 +619,9 @@ def run_kinship(params, rng):
     kins, G, info = _kinship_setup(params)
     ref = "true" if "true" in kins else "fix"
     cidx = phenotypes.choose_causal(G.shape[1], 2, rng, G=G)
-    ph = phenotypes.simulate(kins[ref], h2=params["h2"], rng=rng, G=G, causal_idx=cidx,
-                             causal_var=0.08)
+    ph = phenotypes.simulate(
+        kins[ref], h2=params["h2"], rng=rng, G=G, causal_idx=cidx, causal_var=0.08
+    )
     y = ph.y
     out = dict(info)
     res = {}
@@ -511,12 +658,19 @@ def run_mlcent(params, rng):
     pml = pylmm_fit_instrumented(y, kin, REML=False)
     pre = pylmm_fit_instrumented(y, kin, REML=True)
     # the -1/2 log(1-h) term of the null direction: LL gain from 0.9 to 0.99
-    ll = lambda h: oracle.profile_loglik(h, y, K, reml=False)[0]   # noqa: E731
-    out = {"ml_unbounded": int(fml.ml_unbounded), "h_ml_oracle": fml.h, "h_reml_oracle": fre.h,
-           "h_ml_pylmm": pml["h"], "h_reml_pylmm": pre["h"], "ml_pylmm_cap": pml["cap"],
-           "ml_pylmm_crashed": pml["crashed"], "reml_pylmm_cap": pre["cap"],
-           "rank_K": int((np.asarray(kin.Kva) > 1e-8).sum()),
-           "ml_ll_gain_0999": float(ll(0.999) - ll(0.99))}
+    ll = lambda h: oracle.profile_loglik(h, y, K, reml=False)[0]  # noqa: E731
+    out = {
+        "ml_unbounded": int(fml.ml_unbounded),
+        "h_ml_oracle": fml.h,
+        "h_reml_oracle": fre.h,
+        "h_ml_pylmm": pml["h"],
+        "h_reml_pylmm": pre["h"],
+        "ml_pylmm_cap": pml["cap"],
+        "ml_pylmm_crashed": pml["crashed"],
+        "reml_pylmm_cap": pre["cap"],
+        "rank_K": int((np.asarray(kin.Kva) > 1e-8).sum()),
+        "ml_ll_gain_0999": float(ll(0.999) - ll(0.99)),
+    }
     if not pml["crashed"]:
         out["dh_ml_minus_reml_pylmm"] = pml["h"] - pre["h"]
     return out
@@ -530,14 +684,17 @@ def _bednull_setup(params):
         Gall = np.where(np.isnan(geno.G), -1.0, geno.G)
         Z = (G - G.mean(0)) / G.std(0)
         ev = np.clip(np.linalg.eigvalsh(Z @ Z.T / G.shape[1]), 0, None)
-        info = {"rank_K": int((np.asarray(kin.Kva) > 1e-6).sum()),
-                "unique_indivs": int(len(np.unique(Gall, axis=0))),
-                "unique_test_patterns": int(len(np.unique(np.round(G.T, 6), axis=0))),
-                # effective number of independent tests (participation ratio of
-                # the SNP correlation spectrum) -- n x n form of the same spectrum
-                "meff": float(ev.sum() ** 2 / (ev ** 2).sum()),
-                "m_test_used": int(G.shape[1])}
+        info = {
+            "rank_K": int((np.asarray(kin.Kva) > 1e-6).sum()),
+            "unique_indivs": int(len(np.unique(Gall, axis=0))),
+            "unique_test_patterns": int(len(np.unique(np.round(G.T, 6), axis=0))),
+            # effective number of independent tests (participation ratio of
+            # the SNP correlation spectrum) -- n x n form of the same spectrum
+            "meff": float(ev.sum() ** 2 / (ev**2).sum()),
+            "m_test_used": int(G.shape[1]),
+        }
         return kin, G, info
+
     return _cached("bn" + key, build)
 
 
@@ -548,13 +705,14 @@ def run_bednull(params, rng):
     cidx = np.zeros(0, dtype=int)
     if nc:
         cidx = phenotypes.choose_causal(G.shape[1], nc, rng, G=G)
-    ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng, G=G if nc else None,
-                             causal_idx=cidx, causal_var=0.02 * nc)
+    ph = phenotypes.simulate(
+        kin, h2=params["h2"], rng=rng, G=G if nc else None, causal_idx=cidx, causal_var=0.02 * nc
+    )
     y = ph.y
     out = dict(info)
     null = np.setdiff1d(np.arange(G.shape[1]), cidx)
     nf = pylmm_fit_instrumented(y, kin, REML=True)
-    out["pylmm_crashed"] = nf["crashed"]                 # bug 4 (BracketError) at high h2
+    out["pylmm_crashed"] = nf["crashed"]  # bug 4 (BracketError) at high h2
     fo = oracle.fit(y, K, reml=True, n_grid=101)
     if nf["crashed"]:
         p_l = np.full(G.shape[1], np.nan)
@@ -564,8 +722,9 @@ def run_bednull(params, rng):
     h_true = ph.sigma_g2 / (ph.sigma_g2 + ph.sigma_e2)
     _, p_t = gls_t(y, K, G, h_true) if h_true < 1 else (None, p_o)
     _, p_ols = methods.ols_gwas(y, G)
-    out.update(h_pylmm=nf["h"], h_oracle=fo.h, dh_oracle=nf["h"] - fo.h,
-               pylmm_at_h0=int(nf["h"] == 0.0))
+    out.update(
+        h_pylmm=nf["h"], h_oracle=fo.h, dh_oracle=nf["h"] - fo.h, pylmm_at_h0=int(nf["h"] == 0.0)
+    )
     sets = (("orc_", p_o), ("true_", p_t), ("ols_", p_ols))
     if not nf["crashed"]:
         sets = (("lmm_", p_l),) + sets
@@ -579,8 +738,13 @@ def run_bednull(params, rng):
     return out
 
 
-EXPERIMENTS = {"remlml": run_remlml, "hgrid": run_hgrid, "kinship": run_kinship,
-               "mlcent": run_mlcent, "bednull": run_bednull}
+EXPERIMENTS = {
+    "remlml": run_remlml,
+    "hgrid": run_hgrid,
+    "kinship": run_kinship,
+    "mlcent": run_mlcent,
+    "bednull": run_bednull,
+}
 
 
 def run_cell(params, seed):
@@ -592,6 +756,7 @@ def run_cell(params, seed):
 # report
 # ---------------------------------------------------------------------------
 
+
 def _pooled_t1e(d, prefix):
     rows = {}
     n = d[prefix + "n"].sum()
@@ -599,8 +764,9 @@ def _pooled_t1e(d, prefix):
         k = d[prefix + "k_" + metrics.alpha_label(a)].sum()
         lo, hi = metrics.rate_ci(k, n)
         rows["t1e_%s_%s" % (prefix.rstrip("_"), metrics.alpha_label(a))] = k / n if n else np.nan
-        rows["t1e_%s_%s_ci" % (prefix.rstrip("_"), metrics.alpha_label(a))] = \
+        rows["t1e_%s_%s_ci" % (prefix.rstrip("_"), metrics.alpha_label(a))] = (
             "[%.3g, %.3g]" % (lo, hi) if n else ""
+        )
     return rows
 
 
@@ -633,29 +799,43 @@ def report(df, outdir):
     if len(d0):
         rows = []
         for (pop, mk, h2), d in d0.groupby(["pop", "m_kin", "h2"]):
-            r = {"pop": pop, "m_kin": mk, "h2": h2, "reps": len(d),
-                 "reml_crash_rate": frac(d, "reml_pylmm_crashed"),
-                 "cli_vs_reml_max_dt": mx(d, "cli_vs_reml_max_abs_dt"),
-                 "h_reml": mean(d, "h_reml_pylmm"), "h_ml_oracle": mean(d, "h_ml_oracle"),
-                 "h_ml_pylmm": mean(d, "h_ml_pylmm"), "ml_unbounded": frac(d, "ml_unbounded"),
-                 "ml_pylmm_cap": frac(d, "ml_pylmm_cap"),
-                 "cli_vs_mlwald_mean_dt": mean(d, "cli_vs_mlwald_mean_abs_dt"),
-                 "cli_vs_mlwald_max_dt": mx(d, "cli_vs_mlwald_max_abs_dt"),
-                 "dlogp_causal_cli_vs_mlwald": mean(d, "cli_vs_mlwald_dlogp_causal"),
-                 "bug1_dlogp_causal": mean(d, "bug1_dlogp_causal"),
-                 "bug9_dlogp_causal": mean(d, "bug9_dlogp_causal"),
-                 "dlogp_causal_cli_vs_lrt": mean(d, "cli_vs_lrt_dlogp_causal"),
-                 "max_abs_dlogp_cli_vs_lrt": mx(d, "cli_vs_lrt_max_abs_dlogp"),
-                 "mlogp_causal_cli": mean(d, "dlogp_causal_cli"),
-                 "refit_h_cli(ML)": mean(d, "refit_h_cli_mean"),
-                 "refit_h_lib(REML)": mean(d, "refit_h_lib_mean"),
-                 "refit_cli_cap_frac": mean(d, "refit_cli_cap_frac"),
-                 "refit_cli_vs_lib_max_dt": mx(d, "refit_cli_vs_lib_max_abs_dt"),
-                 "refit_crashes": float(d["refit_crashes"].sum()) if "refit_crashes" in d else np.nan}
+            r = {
+                "pop": pop,
+                "m_kin": mk,
+                "h2": h2,
+                "reps": len(d),
+                "reml_crash_rate": frac(d, "reml_pylmm_crashed"),
+                "cli_vs_reml_max_dt": mx(d, "cli_vs_reml_max_abs_dt"),
+                "h_reml": mean(d, "h_reml_pylmm"),
+                "h_ml_oracle": mean(d, "h_ml_oracle"),
+                "h_ml_pylmm": mean(d, "h_ml_pylmm"),
+                "ml_unbounded": frac(d, "ml_unbounded"),
+                "ml_pylmm_cap": frac(d, "ml_pylmm_cap"),
+                "cli_vs_mlwald_mean_dt": mean(d, "cli_vs_mlwald_mean_abs_dt"),
+                "cli_vs_mlwald_max_dt": mx(d, "cli_vs_mlwald_max_abs_dt"),
+                "dlogp_causal_cli_vs_mlwald": mean(d, "cli_vs_mlwald_dlogp_causal"),
+                "bug1_dlogp_causal": mean(d, "bug1_dlogp_causal"),
+                "bug9_dlogp_causal": mean(d, "bug9_dlogp_causal"),
+                "dlogp_causal_cli_vs_lrt": mean(d, "cli_vs_lrt_dlogp_causal"),
+                "max_abs_dlogp_cli_vs_lrt": mx(d, "cli_vs_lrt_max_abs_dlogp"),
+                "mlogp_causal_cli": mean(d, "dlogp_causal_cli"),
+                "refit_h_cli(ML)": mean(d, "refit_h_cli_mean"),
+                "refit_h_lib(REML)": mean(d, "refit_h_lib_mean"),
+                "refit_cli_cap_frac": mean(d, "refit_cli_cap_frac"),
+                "refit_cli_vs_lib_max_dt": mx(d, "refit_cli_vs_lib_max_abs_dt"),
+                "refit_crashes": float(d["refit_crashes"].sum())
+                if "refit_crashes" in d
+                else np.nan,
+            }
             r.update({k: v for k, v in _pooled_t1e(d, "cli_").items() if "0.05" in k})
             if "mlw_n" in d and d["mlw_n"].notna().any():
-                r.update({k: v for k, v in _pooled_t1e(d.dropna(subset=["mlw_n"]), "mlw_").items()
-                          if "0.05" in k})
+                r.update(
+                    {
+                        k: v
+                        for k, v in _pooled_t1e(d.dropna(subset=["mlw_n"]), "mlw_").items()
+                        if "0.05" in k
+                    }
+                )
             rows.append(r)
         t = pd.DataFrame(rows)
         tables.append(("Bugs 1 / 9 / 17: CLI default vs REML vs textbook ML (n = 300)", t))
@@ -666,17 +846,28 @@ def report(df, outdir):
         rows = []
         for (pop, n, h2), d in d0.groupby(["pop", "n", "h2"]):
             ok = d[d.crashed == 0]
-            rows.append({"pop": pop, "n": n, "h2": h2, "reps": len(d),
-                         "crash_rate": frac(d, "crashed"), "cap_rate": frac(ok, "cap"),
-                         "skip98_rate": frac(ok, "skip98"), "oracle_h>0.99": frac(d, "oracle_above_099"),
-                         "mismatch_rate(|dh|>1e-3)": frac(ok, "mismatch"),
-                         "mean_abs_dh": mean(ok, "abs_dh"), "max_abs_dh": mx(ok, "abs_dh"),
-                         "max_abs_clamp_dh": float(ok["clamp_dh"].abs().max()) if len(ok) else np.nan,
-                         "max_abs_dt": mx(ok, "max_abs_dt"), "max_abs_dlogp": mx(ok, "max_abs_dlogp"),
-                         "mean_dlogp_causal": mean(ok, "dlogp_causal"),
-                         "q05_dlogp_causal": _q(ok.get("dlogp_causal", []), 0.05),
-                         "mlogp_causal_oracle": mean(ok, "mlogp_causal_oracle"),
-                         "refit_crash_frac": mean(d, "refit_crash_frac")})
+            rows.append(
+                {
+                    "pop": pop,
+                    "n": n,
+                    "h2": h2,
+                    "reps": len(d),
+                    "crash_rate": frac(d, "crashed"),
+                    "cap_rate": frac(ok, "cap"),
+                    "skip98_rate": frac(ok, "skip98"),
+                    "oracle_h>0.99": frac(d, "oracle_above_099"),
+                    "mismatch_rate(|dh|>1e-3)": frac(ok, "mismatch"),
+                    "mean_abs_dh": mean(ok, "abs_dh"),
+                    "max_abs_dh": mx(ok, "abs_dh"),
+                    "max_abs_clamp_dh": float(ok["clamp_dh"].abs().max()) if len(ok) else np.nan,
+                    "max_abs_dt": mx(ok, "max_abs_dt"),
+                    "max_abs_dlogp": mx(ok, "max_abs_dlogp"),
+                    "mean_dlogp_causal": mean(ok, "dlogp_causal"),
+                    "q05_dlogp_causal": _q(ok.get("dlogp_causal", []), 0.05),
+                    "mlogp_causal_oracle": mean(ok, "mlogp_causal_oracle"),
+                    "refit_crash_frac": mean(d, "refit_crash_frac"),
+                }
+            )
         t = pd.DataFrame(rows)
         tables.append(("Bugs 2 / 3 / 4: pylmm REML search vs dense oracle at high h2", t))
         _plot_hgrid(d0, outdir, plots)
@@ -686,36 +877,64 @@ def report(df, outdir):
     if len(d0):
         rows = []
         for (pop, miss, mono, h2), d in d0.groupby(["pop", "miss", "mono", "h2"]):
-            r = {"pop": pop, "miss_added": miss, "mono_added": mono, "h2": h2, "reps": len(d),
-                 "mono_frac": mean(d, "mono_frac"), "miss_frac": mean(d, "miss_frac"),
-                 "scale_c": mean(d, "scale_c"), "max|K_lib-K_cli|": mean(d, "max_abs_dK_lib_cli"),
-                 "diag_lib": mean(d, "meandiag_lib"), "diag_cli": mean(d, "meandiag_cli"),
-                 "diag_fix": mean(d, "meandiag_fix")}
+            r = {
+                "pop": pop,
+                "miss_added": miss,
+                "mono_added": mono,
+                "h2": h2,
+                "reps": len(d),
+                "mono_frac": mean(d, "mono_frac"),
+                "miss_frac": mean(d, "miss_frac"),
+                "scale_c": mean(d, "scale_c"),
+                "max|K_lib-K_cli|": mean(d, "max_abs_dK_lib_cli"),
+                "diag_lib": mean(d, "meandiag_lib"),
+                "diag_cli": mean(d, "meandiag_cli"),
+                "diag_fix": mean(d, "meandiag_fix"),
+            }
             for k in ("lib", "cli", "fix", "true"):
                 if "h_" + k in d and d["h_" + k].notna().any():
                     r["h_" + k] = mean(d, "h_" + k)
             for k in ("lib", "cli", "fix"):
-                for c in ("dh_%s" % k, "max_abs_dt_%s" % k, "max_abs_dlogp_%s" % k,
-                          "dlogp_causal_%s" % k):
+                for c in (
+                    "dh_%s" % k,
+                    "max_abs_dt_%s" % k,
+                    "max_abs_dlogp_%s" % k,
+                    "dlogp_causal_%s" % k,
+                ):
                     if c in d and d[c].notna().any():
                         r[c] = mx(d, c) if c.startswith("max") else mean(d, c)
             rows.append(r)
         t = pd.DataFrame(rows)
-        tables.append(("Bug 8: kinship normalisation (reference K: 'true' for synthetic, "
-                       "'fix' = lib with corrected denominator for real data)", t))
+        tables.append(
+            (
+                "Bug 8: kinship normalisation (reference K: 'true' for synthetic, "
+                "'fix' = lib with corrected denominator for real data)",
+                t,
+            )
+        )
 
     # mlcent
     d0 = df[df.exp == "mlcent"]
     if len(d0):
         rows = []
         for (pop, mk, h2), d in d0.groupby(["pop", "m_kin", "h2"]):
-            rows.append({"pop": pop, "n": int(d.n.iloc[0]), "m_kin": mk, "h2": h2, "reps": len(d),
-                         "rank_K": mean(d, "rank_K"), "ml_unbounded": frac(d, "ml_unbounded"),
-                         "h_reml_oracle": mean(d, "h_reml_oracle"),
-                         "h_ml_pylmm": mean(d, "h_ml_pylmm"), "h_reml_pylmm": mean(d, "h_reml_pylmm"),
-                         "ml_pylmm_cap": frac(d, "ml_pylmm_cap"),
-                         "ml_minus_reml_h": mean(d, "dh_ml_minus_reml_pylmm"),
-                         "ml_ll_gain_0.99->0.999": mean(d, "ml_ll_gain_0999")})
+            rows.append(
+                {
+                    "pop": pop,
+                    "n": int(d.n.iloc[0]),
+                    "m_kin": mk,
+                    "h2": h2,
+                    "reps": len(d),
+                    "rank_K": mean(d, "rank_K"),
+                    "ml_unbounded": frac(d, "ml_unbounded"),
+                    "h_reml_oracle": mean(d, "h_reml_oracle"),
+                    "h_ml_pylmm": mean(d, "h_ml_pylmm"),
+                    "h_reml_pylmm": mean(d, "h_reml_pylmm"),
+                    "ml_pylmm_cap": frac(d, "ml_pylmm_cap"),
+                    "ml_minus_reml_h": mean(d, "dh_ml_minus_reml_pylmm"),
+                    "ml_ll_gain_0.99->0.999": mean(d, "ml_ll_gain_0999"),
+                }
+            )
         t = pd.DataFrame(rows)
         tables.append(("Bug 17: ML with the centred GRM (n = 200)", t))
 
@@ -724,14 +943,24 @@ def report(df, outdir):
     if len(d0):
         rows = []
         for (pop, n, h2, nc), d in d0.groupby(["pop", "n", "h2", "n_causal"]):
-            r = {"pop": pop, "n": n, "h2": h2, "n_causal": nc, "reps": len(d),
-                 "rank_K": mean(d, "rank_K"), "unique_indivs": mean(d, "unique_indivs"),
-                 "unique_test_patterns": mean(d, "unique_test_patterns"), "meff": mean(d, "meff"),
-                 "h_pylmm": mean(d, "h_pylmm"), "pylmm_at_h0": frac(d, "pylmm_at_h0"),
-                 "pylmm_crash_rate": float(d["pylmm_crashed"].fillna(0).mean())
-                 if "pylmm_crashed" in d else 0.0,
-                 "max_abs_dh_oracle": float(d["dh_oracle"].abs().max()),
-                 "max_abs_dlogp_lmm_orc": mx(d, "max_abs_dlogp_lmm_orc")}
+            r = {
+                "pop": pop,
+                "n": n,
+                "h2": h2,
+                "n_causal": nc,
+                "reps": len(d),
+                "rank_K": mean(d, "rank_K"),
+                "unique_indivs": mean(d, "unique_indivs"),
+                "unique_test_patterns": mean(d, "unique_test_patterns"),
+                "meff": mean(d, "meff"),
+                "h_pylmm": mean(d, "h_pylmm"),
+                "pylmm_at_h0": frac(d, "pylmm_at_h0"),
+                "pylmm_crash_rate": float(d["pylmm_crashed"].fillna(0).mean())
+                if "pylmm_crashed" in d
+                else 0.0,
+                "max_abs_dh_oracle": float(d["dh_oracle"].abs().max()),
+                "max_abs_dlogp_lmm_orc": mx(d, "max_abs_dlogp_lmm_orc"),
+            }
             tags = ("lmm_", "orc_", "true_", "ols_") + (("cond_",) if nc else ())
             for tag in tags:
                 lam = d[tag + "lambda"]
@@ -763,25 +992,47 @@ def report(df, outdir):
 
 
 def _write_md(tables, outdir, rpt):
-    runs = os.path.join(outdir if os.path.basename(outdir) != "quick" else os.path.dirname(outdir),
-                        "raw", "runs.jsonl")
+    runs = os.path.join(
+        outdir if os.path.basename(outdir) != "quick" else os.path.dirname(outdir),
+        "raw",
+        "runs.jsonl",
+    )
     info = ""
     if os.path.exists(runs):
         mode = "quick" if os.path.basename(outdir) == "quick" else "full"
         last = [json.loads(x) for x in open(runs) if x.strip()]
         last = [r for r in last if r.get("mode") == mode]
         if last:
-            info = ("_Last run: %s, git %s, jobs=%d, wall %.0fs; total task time over all "
-                    "runs %.0fs._\n\n" % (last[-1]["time"], last[-1]["git"], last[-1]["jobs"],
-                                          last[-1]["wall_s"], sum(x["task_cpu_s"] for x in last)))
-    parts = ["# S4: bug confirmation (measured impact)\n\n", info,
-             "The verdicts and the ledger are in sims/studies/s4_bug_confirmation.md. "
-             "Every number below has its column in summary.csv / table_*.csv.\n"]
+            info = (
+                "_Last run: %s, git %s, jobs=%d, wall %.0fs; total task time over all "
+                "runs %.0fs._\n\n"
+                % (
+                    last[-1]["time"],
+                    last[-1]["git"],
+                    last[-1]["jobs"],
+                    last[-1]["wall_s"],
+                    sum(x["task_cpu_s"] for x in last),
+                )
+            )
+    parts = [
+        "# S4: bug confirmation (measured impact)\n\n",
+        info,
+        "The verdicts and the ledger are in sims/studies/s4_bug_confirmation.md. "
+        "Every number below has its column in summary.csv / table_*.csv.\n",
+    ]
     for title, t in tables:
         if "Item 18" in title:
-            keep = [c for c in t.columns if not c.endswith("_ci") and "q05" not in c
-                    and not c.endswith("_se") and "1e-0" not in c and "0.01" not in c
-                    and not c.endswith("_min") and not c.endswith("_max")]
+            keep = [
+                c
+                for c in t.columns
+                if not c.endswith("_ci")
+                and "q05" not in c
+                and not c.endswith("_se")
+                and "1e-0" not in c
+                and "0.01" not in c
+                and not c.endswith("_min")
+                and not c.endswith("_max")
+            ]
             t = t[keep]
         parts.append("\n## %s\n\n" % title)
         parts.append(rpt.markdown_table(t, floatfmt="%.3g"))
@@ -793,9 +1044,15 @@ def _plot_hgrid(d0, outdir, plots):
     ok = d0[d0.crashed == 0]
     if not len(ok):
         return
-    plots.scatter(ok["h_oracle"].values, ok["h"].values, os.path.join(outdir, "hgrid_h_pylmm_vs_oracle.png"),
-                  xlabel="oracle REML h (fine grid over [0, 1])", ylabel="pylmm REML h",
-                  title="bugs 2/3/4: pylmm vs oracle h at high h2 (crashes omitted)", identity=True)
+    plots.scatter(
+        ok["h_oracle"].values,
+        ok["h"].values,
+        os.path.join(outdir, "hgrid_h_pylmm_vs_oracle.png"),
+        xlabel="oracle REML h (fine grid over [0, 1])",
+        ylabel="pylmm REML h",
+        title="bugs 2/3/4: pylmm vs oracle h at high h2 (crashes omitted)",
+        identity=True,
+    )
 
 
 def _plot_bednull(d0, outdir, plots):
@@ -824,33 +1081,101 @@ def _plot_bednull(d0, outdir, plots):
 
 LEDGER = [
     # bug, short name, verdict, severity, affected path, recommended phase
-    (1, "null fit always REML; --REML no-op on default path", "CONFIRMED", "medium",
-     "CLI default + lmm.GWAS(REML=False); CLI --refit/--removeMissingGenotypes use ML", "5"),
+    (
+        1,
+        "null fit always REML; --REML no-op on default path",
+        "CONFIRMED",
+        "medium",
+        "CLI default + lmm.GWAS(REML=False); CLI --refit/--removeMissingGenotypes use ML",
+        "5",
+    ),
     (2, "getMax range(1, n-2) skips grid index 98", "CONFIRMED", "low", "every null fit", "6.3"),
-    (3, "h grid capped at 0.99 (and fitTwo w grid)", "CONFIRMED", "medium", "every null fit at high h2; misc.fitTwo", "6.3"),
-    (4, "unbounded Brent above h = 1", "CONFIRMED", "high",
-     "every null fit and refit at high h2: crash on scipy >= 1.11; on scipy < 1.11 correct, "
-     "except h > 1 (LL nan) when the ML profile is unbounded", "5"),
+    (
+        3,
+        "h grid capped at 0.99 (and fitTwo w grid)",
+        "CONFIRMED",
+        "medium",
+        "every null fit at high h2; misc.fitTwo",
+        "6.3",
+    ),
+    (
+        4,
+        "unbounded Brent above h = 1",
+        "CONFIRMED",
+        "high",
+        "every null fit and refit at high h2: crash on scipy >= 1.11; on scipy < 1.11 correct, "
+        "except h > 1 (LL nan) when the ML profile is unbounded",
+        "5",
+    ),
     (5, "tstat(log=True) adds 2.0 not log 2", "UNREACHABLE", "cosmetic", "no caller", "6.3"),
     (6, "--kfile2 NameError", "CONFIRMED", "low", "CLI --kfile2 only", "5"),
     (7, "--eigen cannot read pylmmKinship output", "CONFIRMED", "low", "CLI --eigen only", "5"),
-    (8, "kinship normalisation / denominator", "CONFIRMED", "low", "lmm.calculateKinship, pylmmKinship", "6.3"),
+    (
+        8,
+        "kinship normalisation / denominator",
+        "CONFIRMED",
+        "low",
+        "lmm.calculateKinship, pylmmKinship",
+        "6.3",
+    ),
     (9, "ML sigma uses Q/(n-q)", "CONVENTION", "cosmetic", "association(REML=False)", "6.3"),
-    (10, "getPhenos drops individuals missing from the pheno file", "CONFIRMED", "medium",
-     "CLI whenever the pheno/cov file lacks a fam individual (crash)", "5"),
-    (11, "all-missing SNP returns an empty array", "CONFIRMED", "medium", "CLI GWAS + pylmmKinship (crash)", "5"),
-    (12, "LMM mutates caller's Kva; calculateKinship mutates W", "CONFIRMED", "low", "library API", "5"),
+    (
+        10,
+        "getPhenos drops individuals missing from the pheno file",
+        "CONFIRMED",
+        "medium",
+        "CLI whenever the pheno/cov file lacks a fam individual (crash)",
+        "5",
+    ),
+    (
+        11,
+        "all-missing SNP returns an empty array",
+        "CONFIRMED",
+        "medium",
+        "CLI GWAS + pylmmKinship (crash)",
+        "5",
+    ),
+    (
+        12,
+        "LMM mutates caller's Kva; calculateKinship mutates W",
+        "CONFIRMED",
+        "low",
+        "library API",
+        "5",
+    ),
     (13, "inconsistent zero-variance filters", "CONFIRMED", "cosmetic", "CLI", "5"),
     (14, "crash without a pheno file", "CONFIRMED", "low", "CLI usage error", "5"),
     (15, "inconsistent return types; 1x1 arrays", "CONFIRMED", "cosmetic", "library API", "5"),
-    (16, "headered / wrong-size --kfile read silently", "CONFIRMED", "high", "CLI --kfile (numpy < 2.3; size mismatch on all)", "5"),
-    (17, "ML unbounded as h -> 1 with centred GRM", "NOT A BUG", "medium", "ML paths: fit(REML=False), CLI --refit / --removeMissingGenotypes", "6.3"),
-    (18, "lambda_GC 1.3-4.9 on BED genotypes", "NOT A BUG", "none", "study design (LD, few effective tests)", "-"),
+    (
+        16,
+        "headered / wrong-size --kfile read silently",
+        "CONFIRMED",
+        "high",
+        "CLI --kfile (numpy < 2.3; size mismatch on all)",
+        "5",
+    ),
+    (
+        17,
+        "ML unbounded as h -> 1 with centred GRM",
+        "NOT A BUG",
+        "medium",
+        "ML paths: fit(REML=False), CLI --refit / --removeMissingGenotypes",
+        "6.3",
+    ),
+    (
+        18,
+        "lambda_GC 1.3-4.9 on BED genotypes",
+        "NOT A BUG",
+        "none",
+        "study design (LD, few effective tests)",
+        "-",
+    ),
 ]
 
 
 def _write_ledger_csv(outdir):
     import csv
+
     with open(os.path.join(outdir, "ledger.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["bug", "name", "verdict", "severity", "affected", "phase"])

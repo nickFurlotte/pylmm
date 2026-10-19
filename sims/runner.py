@@ -66,7 +66,7 @@ import numpy as np
 
 SIMS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SIMS_DIR)
-MAX_JOBS = 6    # 8-core laptop (4 performance cores), 16 GB RAM
+MAX_JOBS = 6  # 8-core laptop (4 performance cores), 16 GB RAM
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,7 @@ def study_reps(mod, quick: bool) -> int:
 # ids and seeds
 # ---------------------------------------------------------------------------
 
+
 def _json_default(o):
     if isinstance(o, np.integer):
         return int(o)
@@ -150,8 +151,11 @@ def cell_id(params: dict, version: int = 1) -> str:
     """12-hex id of a cell.  Version 1 hashes the params alone (the ids of
     every raw file written before STUDY_VERSION existed); later versions hash
     the version too, so their rows never collide with older ones."""
-    key = canonical(params) if int(version) == 1 else \
-        canonical({"params": params, "study_version": int(version)})
+    key = (
+        canonical(params)
+        if int(version) == 1
+        else canonical({"params": params, "study_version": int(version)})
+    )
     return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
@@ -170,6 +174,7 @@ def task_seed(study: str, params: dict, rep: int, seed_params=None) -> int:
 # ---------------------------------------------------------------------------
 # storage
 # ---------------------------------------------------------------------------
+
 
 def results_root() -> str:
     return os.environ.get("SIMS_RESULTS_DIR") or os.path.join(SIMS_DIR, "results")
@@ -195,8 +200,10 @@ def read_rows(path: str) -> List[dict]:
             try:
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
-                sys.stderr.write("warning: skipping unreadable line %d of %s "
-                                 "(interrupted write?)\n" % (i + 1, path))
+                sys.stderr.write(
+                    "warning: skipping unreadable line %d of %s "
+                    "(interrupted write?)\n" % (i + 1, path)
+                )
     return rows
 
 
@@ -231,19 +238,31 @@ def current_rows(ref: str, quick: bool = False, mod=None) -> List[dict]:
             seen.add(k)
             keep.append(r)
     if len(keep) < len(rows):
-        sys.stderr.write("note: %s: ignoring %d of %d raw rows not in the current plan "
-                         "(grid or STUDY_VERSION %d) or duplicated\n"
-                         % (name, len(rows) - len(keep), len(rows), ver))
+        sys.stderr.write(
+            "note: %s: ignoring %d of %d raw rows not in the current plan "
+            "(grid or STUDY_VERSION %d) or duplicated\n"
+            % (name, len(rows) - len(keep), len(rows), ver)
+        )
     return keep
 
 
 def git_sha() -> str:
     try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO,
-                             capture_output=True, text=True, timeout=10)
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         sha = out.stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
-                               cwd=REPO, capture_output=True, text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
         return sha + ("-dirty" if dirty else "")
     except Exception:
         return "unknown"
@@ -252,6 +271,7 @@ def git_sha() -> str:
 # ---------------------------------------------------------------------------
 # execution
 # ---------------------------------------------------------------------------
+
 
 def _execute(ref: str, tasks: List[tuple]) -> List[dict]:
     """Run tasks [(cell_id, params, rep, seed), ...] in this process."""
@@ -269,20 +289,39 @@ def _execute(ref: str, tasks: List[tuple]) -> List[dict]:
                 raise KeyError("metric names clash with param names: %s" % sorted(clash))
             # round-trip now so a non-serialisable metric fails here, not later
             metrics = json.loads(json.dumps(metrics, default=_json_default))
-            out.append({"ok": True, "cell_id": cid, "rep": rep, "seed": seed,
-                        "study_version": ver, "params": params, "metrics": metrics,
-                        "elapsed": time.perf_counter() - t0,
-                        "time": _dt.datetime.now().isoformat(timespec="seconds")})
+            out.append(
+                {
+                    "ok": True,
+                    "cell_id": cid,
+                    "rep": rep,
+                    "seed": seed,
+                    "study_version": ver,
+                    "params": params,
+                    "metrics": metrics,
+                    "elapsed": time.perf_counter() - t0,
+                    "time": _dt.datetime.now().isoformat(timespec="seconds"),
+                }
+            )
         except Exception:
-            out.append({"ok": False, "cell_id": cid, "rep": rep, "seed": seed,
-                        "study_version": ver, "params": params, "error": traceback.format_exc(),
-                        "elapsed": time.perf_counter() - t0,
-                        "time": _dt.datetime.now().isoformat(timespec="seconds")})
+            out.append(
+                {
+                    "ok": False,
+                    "cell_id": cid,
+                    "rep": rep,
+                    "seed": seed,
+                    "study_version": ver,
+                    "params": params,
+                    "error": traceback.format_exc(),
+                    "elapsed": time.perf_counter() - t0,
+                    "time": _dt.datetime.now().isoformat(timespec="seconds"),
+                }
+            )
     return out
 
 
 def _worker_init():
     import sims as _s
+
     _s.pin_blas_threads()
 
 
@@ -301,9 +340,17 @@ def plan(ref: str, quick: bool, reps: Optional[int] = None, mod=None) -> List[tu
     return tasks
 
 
-def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None,
-        force: bool = False, chunk: Optional[int] = None, verbose: bool = True,
-        job_cap: int = MAX_JOBS, cells: Optional[Iterable[str]] = None) -> dict:
+def run(
+    ref: str,
+    quick: bool = False,
+    jobs: int = 1,
+    reps: Optional[int] = None,
+    force: bool = False,
+    chunk: Optional[int] = None,
+    verbose: bool = True,
+    job_cap: int = MAX_JOBS,
+    cells: Optional[Iterable[str]] = None,
+) -> dict:
     """Run (or resume) a study.  Returns a small summary dict.
 
     Only replicates missing from ``raw/<mode>.jsonl`` run (earlier failures
@@ -313,8 +360,10 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
     path = raw_path(name, quick)
     err_path = path.replace(".jsonl", ".errors.jsonl")
     if jobs > job_cap:
-        sys.stderr.write("note: --jobs %d capped at %d (laptop budget; pass a "
-                         "higher job_cap/--no-job-cap to override)\n" % (jobs, job_cap))
+        sys.stderr.write(
+            "note: --jobs %d capped at %d (laptop budget; pass a "
+            "higher job_cap/--no-job-cap to override)\n" % (jobs, job_cap)
+        )
         jobs = job_cap
     jobs = max(1, int(jobs))
     if force:
@@ -327,18 +376,29 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
         cells = set(cells)
         unknown = cells - {t[0] for t in tasks}
         if unknown:
-            raise ValueError("unknown cell ids for %s: %s (see `python -m sims plan`)"
-                             % (name, ", ".join(sorted(unknown))))
+            raise ValueError(
+                "unknown cell ids for %s: %s (see `python -m sims plan`)"
+                % (name, ", ".join(sorted(unknown)))
+            )
         tasks = [t for t in tasks if t[0] in cells]
     done = {(r["cell_id"], r["rep"]) for r in read_rows(path)}
     todo = [t for t in tasks if (t[0], t[2]) not in done]
     if os.path.exists(err_path):
-        os.remove(err_path)       # failures are retried; keep only this run's
-    log = lambda msg: verbose and sys.stderr.write(msg + "\n")   # noqa: E731
-    log("%s [%s]: %d cells x %d reps = %d tasks; %d already done, %d to run, jobs=%d"
-        % (name, "quick" if quick else "full", len({t[0] for t in tasks}),
-           study_reps(mod, quick) if reps is None else reps, len(tasks),
-           len(tasks) - len(todo), len(todo), jobs))
+        os.remove(err_path)  # failures are retried; keep only this run's
+    log = lambda msg: verbose and sys.stderr.write(msg + "\n")  # noqa: E731
+    log(
+        "%s [%s]: %d cells x %d reps = %d tasks; %d already done, %d to run, jobs=%d"
+        % (
+            name,
+            "quick" if quick else "full",
+            len({t[0] for t in tasks}),
+            study_reps(mod, quick) if reps is None else reps,
+            len(tasks),
+            len(tasks) - len(todo),
+            len(todo),
+            jobs,
+        )
+    )
 
     # chunks: consecutive reps of one cell, so a worker reuses cached data
     by_cell: Dict[str, List[tuple]] = {}
@@ -348,7 +408,7 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
     for cell_tasks in by_cell.values():
         size = chunk or (1 if jobs == 1 else max(1, min(10, math.ceil(len(cell_tasks) / jobs))))
         for i in range(0, len(cell_tasks), size):
-            chunks.append(cell_tasks[i:i + size])
+            chunks.append(cell_tasks[i : i + size])
 
     t0 = time.time()
     n_ok = n_err = 0
@@ -363,8 +423,10 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
         if bad:
             _append(err_path, bad)
             for b in bad:
-                log("ERROR cell %s rep %d: %s" % (b["cell_id"], b["rep"],
-                                                   b["error"].strip().splitlines()[-1]))
+                log(
+                    "ERROR cell %s rep %d: %s"
+                    % (b["cell_id"], b["rep"], b["error"].strip().splitlines()[-1])
+                )
         n_ok += len(good)
         n_err += len(bad)
         task_time += sum(r["elapsed"] for r in results)
@@ -378,21 +440,33 @@ def run(ref: str, quick: bool = False, jobs: int = 1, reps: Optional[int] = None
             handle(_execute(ref, c))
     else:
         ctx = multiprocessing.get_context("spawn")
-        with cf.ProcessPoolExecutor(max_workers=jobs, mp_context=ctx,
-                                    initializer=_worker_init) as ex:
+        with cf.ProcessPoolExecutor(
+            max_workers=jobs, mp_context=ctx, initializer=_worker_init
+        ) as ex:
             futs = [ex.submit(_execute, ref, c) for c in chunks]
             for f in cf.as_completed(futs):
                 handle(f.result())
 
     wall = time.time() - t0
-    summary = {"study": name, "mode": "quick" if quick else "full", "tasks": len(tasks),
-               "study_version": study_version(mod),
-               "cells": None if cells is None else sorted(cells),
-               "skipped": len(tasks) - len(todo), "ran": n_ok, "errors": n_err,
-               "jobs": jobs, "wall_s": round(wall, 2), "task_cpu_s": round(task_time, 2),
-               "git": git_sha(), "time": _dt.datetime.now().isoformat(timespec="seconds"),
-               "path": os.path.relpath(path, REPO) if path.startswith(REPO) else path}
+    summary = {
+        "study": name,
+        "mode": "quick" if quick else "full",
+        "tasks": len(tasks),
+        "study_version": study_version(mod),
+        "cells": None if cells is None else sorted(cells),
+        "skipped": len(tasks) - len(todo),
+        "ran": n_ok,
+        "errors": n_err,
+        "jobs": jobs,
+        "wall_s": round(wall, 2),
+        "task_cpu_s": round(task_time, 2),
+        "git": git_sha(),
+        "time": _dt.datetime.now().isoformat(timespec="seconds"),
+        "path": os.path.relpath(path, REPO) if path.startswith(REPO) else path,
+    }
     _append(os.path.join(os.path.dirname(path), "runs.jsonl"), [summary])
-    log("%s: ran %d, errors %d, wall %.1fs (sum of task times %.1fs) -> %s"
-        % (name, n_ok, n_err, wall, task_time, summary["path"]))
+    log(
+        "%s: ran %d, errors %d, wall %.1fs (sum of task times %.1fs) -> %s"
+        % (name, n_ok, n_err, wall, task_time, summary["path"])
+    )
     return summary

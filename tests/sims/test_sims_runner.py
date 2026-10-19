@@ -9,7 +9,7 @@ import pytest
 
 from sims import methods, metrics, runner
 
-FAKE_STUDY = textwrap.dedent('''
+FAKE_STUDY = textwrap.dedent("""
     import os
     import numpy as np
     NAME = "fake"
@@ -24,7 +24,7 @@ FAKE_STUDY = textwrap.dedent('''
             raise RuntimeError("boom")
         rng = np.random.default_rng(seed)
         return {"x": float(rng.random()), "a2": params["a"] * 2, "arr": [1.0, 2.0]}
-''')
+""")
 
 
 @pytest.fixture
@@ -42,13 +42,14 @@ def _rows(name="fake", quick=False):
 
 def test_seed_is_deterministic_and_distinct():
     s = runner.task_seed("st", {"a": 1, "b": 2}, 0)
-    assert s == runner.task_seed("st", {"b": 2, "a": 1}, 0)     # key order irrelevant
+    assert s == runner.task_seed("st", {"b": 2, "a": 1}, 0)  # key order irrelevant
     assert s != runner.task_seed("st", {"a": 1, "b": 2}, 1)
     assert s != runner.task_seed("other", {"a": 1, "b": 2}, 0)
     # SEED_PARAMS: common random numbers across cells differing in other params
-    assert runner.task_seed("st", {"a": 1, "m": "x"}, 0, ["a"]) == \
-        runner.task_seed("st", {"a": 1, "m": "y"}, 0, ["a"])
-    assert 0 <= s < 2 ** 63
+    assert runner.task_seed("st", {"a": 1, "m": "x"}, 0, ["a"]) == runner.task_seed(
+        "st", {"a": 1, "m": "y"}, 0, ["a"]
+    )
+    assert 0 <= s < 2**63
 
 
 def test_expand_grid():
@@ -61,8 +62,14 @@ def test_run_resume_and_quick(fake):
     s = runner.run(fake, verbose=False)
     assert (s["ran"], s["skipped"], s["errors"]) == (6, 0, 0)
     rows = _rows()
-    assert sorted((r["params"]["a"], r["rep"]) for r in rows) == \
-        [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)]
+    assert sorted((r["params"]["a"], r["rep"]) for r in rows) == [
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+    ]
     assert all(r["metrics"]["arr"] == [1.0, 2.0] for r in rows)
     # resume: nothing to do
     s = runner.run(fake, verbose=False)
@@ -76,9 +83,10 @@ def test_run_resume_and_quick(fake):
     by = {(r["cell_id"], r["rep"]): r["metrics"]["x"] for r in _rows(quick=True)}
     full = {(r["cell_id"], r["rep"]): r["metrics"]["x"] for r in _rows()}
     for k, v in by.items():
-        assert full[k] == v           # same cell + rep -> same seed -> same result
-    log = runner.read_rows(os.path.join(os.path.dirname(runner.raw_path("fake", False)),
-                                        "runs.jsonl"))
+        assert full[k] == v  # same cell + rep -> same seed -> same result
+    log = runner.read_rows(
+        os.path.join(os.path.dirname(runner.raw_path("fake", False)), "runs.jsonl")
+    )
     assert len(log) == 4
 
 
@@ -101,7 +109,7 @@ def test_cells_option_runs_only_those_cells(fake):
     s = runner.run(fake, cells=[a2], verbose=False)
     assert (s["ran"], s["tasks"]) == (3, 3)
     assert {r["cell_id"] for r in _rows()} == {a2}
-    s = runner.run(fake, verbose=False)          # the rest, then nothing
+    s = runner.run(fake, verbose=False)  # the rest, then nothing
     assert (s["ran"], s["skipped"]) == (3, 3) and set(ids) == {r["cell_id"] for r in _rows()}
     with pytest.raises(ValueError):
         runner.run(fake, cells=["nope"], verbose=False)
@@ -109,9 +117,12 @@ def test_cells_option_runs_only_those_cells(fake):
 
 def test_study_version_in_rows_ids_and_loaders(fake, tmp_path):
     import hashlib
+
     params = {"a": 1, "b": "x"}
     # version 1 ids are the historical ones (params only), so old raw files stay valid
-    assert runner.cell_id(params) == hashlib.sha1(runner.canonical(params).encode()).hexdigest()[:12]
+    assert (
+        runner.cell_id(params) == hashlib.sha1(runner.canonical(params).encode()).hexdigest()[:12]
+    )
     assert runner.cell_id(params, 2) != runner.cell_id(params)
     runner.run(fake, verbose=False)
     assert all(r["study_version"] == 1 for r in _rows())
@@ -128,7 +139,7 @@ def test_study_version_in_rows_ids_and_loaders(fake, tmp_path):
     assert (s["ran"], s["skipped"]) == (6, 0)
     cur = runner.current_rows(str(v2))
     assert len(cur) == 6 and all(r["study_version"] == 2 for r in cur)
-    assert len(runner.current_rows(fake)) == 6     # v1 view unchanged
+    assert len(runner.current_rows(fake)) == 6  # v1 view unchanged
 
 
 def test_truncated_line_is_skipped(fake):
@@ -156,10 +167,17 @@ def test_job_cap(fake):
 def test_report_load(fake):
     pd = pytest.importorskip("pandas")
     from sims import report
+
     runner.run(fake, verbose=False)
     df = report.load_results("fake")
     assert len(df) == 6
-    assert len(report.load_results("fake", mod=runner.load_study(fake))) == 6 and {"a", "b", "x", "arr", "rep"} <= set(df.columns)
+    assert len(report.load_results("fake", mod=runner.load_study(fake))) == 6 and {
+        "a",
+        "b",
+        "x",
+        "arr",
+        "rep",
+    } <= set(df.columns)
     s = report.summarize(df, ["a"], ["x", "a2"])
     assert list(s["n_reps"]) == [3, 3] and "x_se" in s.columns
     out = report.report(fake)
@@ -172,6 +190,7 @@ def test_report_load(fake):
 # ---------------------------------------------------------------------------
 # metrics + OLS baseline
 # ---------------------------------------------------------------------------
+
 
 def test_lambda_and_t1e_on_uniform():
     p = np.random.default_rng(0).random(200000)
@@ -200,11 +219,12 @@ def test_qq_thinning_and_misc():
 
 def test_ols_gwas_matches_lstsq_and_handles_missing():
     from scipy import stats
+
     rng = np.random.default_rng(0)
     n = 80
     G = rng.binomial(2, 0.3, (n, 5)).astype(float)
-    G[:, 4] = 1.0                                   # monomorphic
-    G[3, 2] = np.nan                                # one missing call
+    G[:, 4] = 1.0  # monomorphic
+    G[3, 2] = np.nan  # one missing call
     Z = rng.standard_normal((n, 1))
     X0 = np.c_[np.ones(n), Z]
     y = rng.standard_normal(n)
@@ -225,8 +245,10 @@ def test_ols_gwas_matches_lstsq_and_handles_missing():
 # example study
 # ---------------------------------------------------------------------------
 
+
 def test_example_study_quick_cell():
     from sims.studies import example_null as ex
+
     params = runner.study_grid(ex, quick=True)[1]
     out = ex.run_cell(params, runner.task_seed("example_null", params, 0))
     json.dumps(out)
@@ -243,12 +265,13 @@ def test_plots_write_pngs(tmp_path):
     pytest.importorskip("matplotlib")
     pd = pytest.importorskip("pandas")
     from sims import plots
+
     p = np.random.default_rng(0).random(3000)
-    a = plots.qq({"a": p, "b": p ** 1.1}, str(tmp_path / "qq.png"), title="t")
-    df = pd.DataFrame({"x": [0, 1, 0, 1], "y": [0.1, 0.9, 0.2, 1.0],
-                       "y_se": [0.01] * 4, "g": [1, 1, 2, 2]})
-    b = plots.lines(df, "x", "y", str(tmp_path / "l.png"), hue="g", yerr="y_se",
-                    identity=True)
+    a = plots.qq({"a": p, "b": p**1.1}, str(tmp_path / "qq.png"), title="t")
+    df = pd.DataFrame(
+        {"x": [0, 1, 0, 1], "y": [0.1, 0.9, 0.2, 1.0], "y_se": [0.01] * 4, "g": [1, 1, 2, 2]}
+    )
+    b = plots.lines(df, "x", "y", str(tmp_path / "l.png"), hue="g", yerr="y_se", identity=True)
     c = plots.scatter([1, 2], [1, 2.1], str(tmp_path / "s.png"))
     for f in (a, b, c):
         assert os.path.getsize(f) > 1000
