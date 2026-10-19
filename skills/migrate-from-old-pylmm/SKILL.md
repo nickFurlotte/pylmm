@@ -5,8 +5,8 @@ description: Port code and scripts written for the old pylmm (Python 2 era, came
 
 # Migrate old pylmm code and commands
 
-pylmm's Python names were made PEP 8 (Phase 5.4), the API was cleaned up (5b.1) and the two old programs
-became one `pylmm` command (5b.2), all as **clean breaks: no aliases**. The complete maps:
+In 1.0.0 pylmm's Python names were made PEP 8, the API was cleaned up and the two old programs became
+one `pylmm` command, all as **clean breaks: no aliases**. The complete maps:
 
 * [docs/migration/name-map.csv](../../docs/migration/name-map.csv): every renamed Python name
   (`old_name, new_name, kind, module, phase, notes`; `kind=signature` rows are changed types/defaults).
@@ -97,7 +97,7 @@ A shell script or notes file (any file not ending in `.py`) passed to the script
 | `L.getMax(H, X, REML=...)` | `L._get_max(...)` (private) | call `fit()` and read `opt_h` / `opt_ll`; the script flags it |
 | `True - np.isnan(x)` (py2 negation) | `~np.isnan(x)` | raises `TypeError` on current numpy; the script flags it, it does not rewrite it |
 | `getPhenos`, `getCovariates` | `read_phenos`, `read_covariates` | rows matched by (FID, IID); absent individuals are `nan` rows, not skipped |
-| `plink.getSNPIterator()` | `PlinkReader.iter_snps()` | renamed twice (5.4 `get_snp_iterator`, 5b.1 `iter_snps`) |
+| `plink.getSNPIterator()` | `PlinkReader.iter_snps()` | renamed twice (first `get_snp_iterator`, then `iter_snps`) |
 | `misc.fitTwo(y, ..., wgrids=)` | `misc.fit_two(Y, ..., ngrids=)` | |
 | `from pylmm import input` | `from pylmm import plink_io` | `input` shadowed the builtin |
 | `pylmm.plink_io.IndivKey` | `pylmm.samples.SampleID` | |

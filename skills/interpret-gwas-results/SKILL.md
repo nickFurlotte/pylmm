@@ -152,15 +152,15 @@ assert 0.8 < lam_gc < 1.25
   polygenic signal tends to *deflate* the test statistics instead, because K absorbs it; LOCO is the
   remedy, see `custom-association-analysis`.)
 * λ < 1: K built from the tested SNPs absorbing signal (proximal contamination; LOCO helps), or h² = 0 fits
-  (mildly conservative, Phase 4).
-* **Few effective tests** (inbred panels, small scans, one chromosome): λ from one scan is noise (Phase 4:
+  (mildly conservative in the simulation studies).
+* **Few effective tests** (inbred panels, small scans, one chromosome): λ from one scan is noise (simulation studies:
   5–95% range 0.7–1.5 under the null on the bundled mice). Do not GC-correct LMM results by default.
 
 ## 5. When to distrust a result
 
 * **h at a boundary**: `null model: heritability=0.990` (capped; true h² may be 1) or `0.000`. At 0 the
   LMM reduces to OLS (K plays no role); at 0.99 small errors in h move p-values (up to 0.8 in −log10 p at
-  h² = 0.99 in Phase 4).
+  h² = 0.99 in the simulation studies).
 * **Near-singular K**: few distinct genotypes (inbred strains, replicates) give a K of low rank; pylmm
   floors eigenvalues at 1e-6. Fine for the LMM, but the effective sample size for a SNP is the number of
   distinct genotypes. Check `np.linalg.matrix_rank(K)` and the number of strains carrying the minor allele;
@@ -214,5 +214,5 @@ interval around the lead), compute `r²` with the lead SNP over the window from 
   `estimate-heritability` sections 3 and 7.
 * For a written comparison, fill in [comparison-worksheet.md](comparison-worksheet.md) first: kinship
   formula and scale, observation unit, transform, null-only vs per-SNP refit, build, named allele, SNP
-  set, thresholds and the pre-registered rule for "replicated". In the Phase R replication of two EMMA-era
+  set, thresholds and the pre-registered rule for "replicated". In the [replication](../../docs/replication.md) of two EMMA-era
   mouse GWAS, an IBS-style K with a per-SNP refit came closest to the published p-values.

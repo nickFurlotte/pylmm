@@ -16,8 +16,8 @@ Contents: 1 install · 2 the model · 3 loading data · 4 kinship · 5 the null 
 
 ## 1. Install
 
-pylmm needs Python 3.11+, numpy and scipy. Install the Python 3 branch, `main` (the repository's default
-branch still holds the old Python 2 code):
+pylmm needs Python 3.11+, numpy and scipy. Install the `main` branch (the older `master` branch keeps the
+original Python 2 code):
 
 ```bash skip-ci: network install
 pip install "git+https://github.com/nickFurlotte/pylmm@main"
@@ -182,7 +182,7 @@ Two implementations of the realized relationship matrix `K = Z Z' / m` (`Z` the 
   dosages, fractions, already standardised).
 
 They agree when no call is missing. With missing calls the reader's SNPs have variance below 1, so the
-command-line K is a little smaller (bug 8, deferred to Phase 6.3). Both skip monomorphic SNPs but count
+command-line K is a little smaller (known, not yet fixed; see *Known caveats* in AGENTS.md). Both skip monomorphic SNPs but count
 them in `m`.
 
 ```python
@@ -257,9 +257,9 @@ assert 0.4 < h < 0.8
 * After `fit`, the model keeps `opt_h`, `opt_sigma`, `opt_beta`, `opt_ll`, and the log-likelihood on the
   search grid, `ll_grid` over `h_grid` (0, 0.01, ..., 0.99).
 * `fit(reml=False)` is ML. Prefer REML: with a centred kinship built from more SNPs than individuals the
-  ML optimum can run to the 0.99 cap (no MLE exists; Phase 4 bug 17).
+  ML optimum can run to the 0.99 cap (no MLE exists; bug 17 in the simulation studies).
 * `h` is searched on [0, 0.99]: `h = 1` is never returned and a true h² ≥ 0.98 is reported as 0.99
-  (deferred to Phase 6.3). Treat 0 and 0.99 as boundary estimates.
+  (known, not yet fixed). Treat 0 and 0.99 as boundary estimates.
 
 **Is `h` comparable with a published h²?** `h` is the share of `s2` on the scale of K. It equals the
 proportion of phenotypic variance explained only if K is scaled so that the average variance it implies is
@@ -466,11 +466,11 @@ pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.phen
 10. **`association` with `nan`** fails; `gwas` handles missing calls.
 11. **Imputation set.** When K drops individuals, genotypes are standardised over the kept individuals, but
     individuals dropped for a missing phenotype or covariate still count in the mean and SD (|Δt| ≤ 0.024
-    in our check; Phase 6.3b).
+    in our check; known, not yet fixed).
 
 ## 13. Validated behaviour
 
-pylmm's default path (REML null fit, Wald test) was checked by simulation in Phase 4
+pylmm's default path (REML null fit, Wald test) was checked by simulation studies
 ([docs/phase4-simulations.md](phase4-simulations.md), framework in [sims/README.md](../sims/README.md)):
 
 * **Calibrated null p-values** on unrelated, structured (Balding–Nichols), family and the bundled mouse
@@ -480,14 +480,14 @@ pylmm's default path (REML null fit, Wald test) was checked by simulation in Pha
   optimum for h² ≤ 0.95.
 * **Power ≥ OLS**, much higher under population structure (e.g. 0.94 vs 0.15 at h² = 0.5, 5% variance
   explained, Balding–Nichols), and OLS is badly inflated there.
-* **Known limits** (deferred to Phase 6.3): ĥ capped at 0.99; ML unidentified with a centred K from m > n
+* **Known limits** (not yet fixed; see *Known caveats* in AGENTS.md): ĥ capped at 0.99; ML unidentified with a centred K from m > n
   SNPs; kinship normalisation (bug 8).
-* The Phase 1 golden tests (`tests/golden/`) pin every number of the original 2013 code: the CLI output is
+* The golden tests (`tests/golden/`) pin every number of the original 2013 code: the CLI output is
   byte-identical for the default path.
 
-**Against published results** (Phase R, [replication.md](replication.md)): an agent using only these docs
+**Against published results** ([replication.md](replication.md)): an agent using only these docs
 and the skills reanalysed two published mouse GWAS from their original phenotypes. Farber et al. 2011
-(bone mineral density): **partially replicated**. All 5 published loci have a nearby signal (median
+(bone mineral density): **partially replicated**. All 5 published loci have a signal in the published ±1.3 Mb interval, 3 at the published position (median
 −log10 p 0.47 below published); 1/5 pass Bonferroni and 3/5 the paper's threshold. Bennett et al. 2010
 (HDL): **replicated**, same lead SNP, −log10 p 11.5 vs 9.4 published.
 Closest method: an IBS-style kinship with a per-SNP REML refit. No numerical bug was found.

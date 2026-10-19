@@ -2,7 +2,7 @@
 
 Use this before you say a published association "replicated" or "did not replicate". Fill in one copy per
 study, **before** looking at your p-values for the intervals and thresholds, and keep it with the
-analysis. Each item is something that changed −log10 p by about 0.3–3.5 units in the Phase R replication
+analysis. Each item is something that changed −log10 p by about 0.3–3.5 units in the [replication](../../docs/replication.md)
 of two HMDP mouse GWAS ([docs/replication.md](../../docs/replication.md)); together they explain most
 "why is my p-value different".
 
@@ -46,7 +46,7 @@ RESULT               per locus: our best SNP, chr:bp, -log10 p, threshold met?, 
 pylmm's `calculate_kinship` is the standardized (GRM-style) one. The *scale* changes h² but no test
 statistic (`estimate-heritability` section 3); the *formula* changes the weighting and so the p-values.
 An EMMA-style homozygous IBS kinship for 0/1 strain genotypes, centred and Gower-scaled so that it is on
-the same scale as `calculate_kinship(G, center=True)` (a named IBS option is planned for Phase 6):
+the same scale as `calculate_kinship(G, center=True)` (a named IBS option is planned):
 
 ```python
 import numpy as np

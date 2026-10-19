@@ -1,4 +1,4 @@
-# Validated against published results: two HMDP mouse GWAS (Phase R)
+# Validated against published results: two HMDP mouse GWAS
 
 In October 2026 a fresh agent, working only from [AGENTS.md](../AGENTS.md), [guide.md](guide.md) and the
 [skills](../skills/), reanalysed two published GWAS of the Hybrid Mouse Diversity Panel with pylmm. It read
@@ -64,6 +64,6 @@ the null-fit modes; Bonferroni 6.3). Individual-level SNP h² 0.80 [0.75, 0.85] 
   while the refit overshot Bennett (11.5). Use `--refit` / `refit=True` when matching an EMMA or
   GEMMA-exact analysis, and report which mode you used.
 
-Planned from these findings (Phase 6): a named IBS kinship option, strain-aware expansion and imputation,
+Planned from these findings: a named IBS kinship option, strain-aware expansion and imputation,
 a LOCO flag for the command line, marker metadata through the EMMA path, and a machine-readable null-fit
 summary.

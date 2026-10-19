@@ -58,7 +58,7 @@ REML). ML ignores the degrees of freedom used by the fixed effects, so its varia
 simulations of 300 unrelated people with true h² of 0.3 and 0.8, ML gave a higher h than REML every time, by
 0.03 to 0.2) and, for a centred K built from more SNPs than individuals
 (the usual outbred GRM), its optimum can run to the boundary: there is no MLE, and pylmm returns ~0.99
-(Phase 4, bug 17).
+(bug 17 in the simulation studies).
 
 ## 3. Making h2 comparable
 
@@ -152,7 +152,7 @@ When comparing with another tool or a paper, also check:
 
 ## 4. Boundaries and the h = 0 test
 
-The h search is a grid 0, 0.01, ..., 0.99 plus a bounded refinement (Phase 6.3 will extend it to 1):
+The h search is a grid 0, 0.01, ..., 0.99 plus a bounded refinement (extending it to 1 is planned):
 
 * `h == 0`: no detectable genetic variance (common for small n or weak K).
 * `h == 0.99`: "0.98 or more", capped; true values ≥ 0.98 are all reported as 0.99.

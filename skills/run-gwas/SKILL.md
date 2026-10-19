@@ -85,7 +85,7 @@ Options that matter:
 | option | default | when to change it |
 |---|---|---|
 | `--reml` / `--ml` | REML | ML only to match a method that used ML; ML is ill-posed for a centred K from more SNPs than individuals |
-| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in Phase 4; **can abort at high h²** (per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md)): avoid it when the null h is near 0.99 |
+| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in the simulation studies; **can abort at high h²** (per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md)): avoid it when the null h is near 0.99 |
 | `--covar F --covar-name a b` | none | covariates; the intercept is added unless `--no-intercept` |
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
@@ -134,7 +134,7 @@ Checklist:
    K that does not match the samples. (λ growing with n·h²/M is the linear-regression, no-LMM result; with
    an LMM whose K includes the tested SNPs, polygenic signal tends to deflate λ, and LOCO is the remedy.)
    In inbred panels
-   with few effective tests, λ from one scan is noisy (Phase 4: 5–95% range 0.7–1.5 under the null). The
+   with few effective tests, λ from one scan is noisy (simulation studies: 5–95% range 0.7–1.5 under the null). The
    example above prints λ ≈ 0.4: 3000 SNPs of one chromosome of an inbred panel are a handful of
    independent tests, and the planted SNP is also in K, which absorbs part of its signal (proximal
    contamination). Such a λ says nothing.
