@@ -17,6 +17,8 @@ pylmm gwas -v --bfile data/snps.132k.clean.noX \
     --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv
 ```
 
+The GWAS example uses the kinship shipped with the data (computed by the original 2013 code) rather than the `snps.kin` just computed, so that its output can be compared byte for byte with the reference results. The two kinships are not bit-identical: they agree to round-off (largest difference 1.8e-15), but the values themselves differ in their last bits, not only in how they are printed, so a scan with `snps.kin` gives p-values that differ slightly (relative difference up to about 2e-9).
+
 `pylmm --help`, `pylmm gwas --help` and `pylmm kinship --help` list every option, with more examples. From a source checkout run `uv run pylmm ...` (or `python -m pylmm ...`); `just readme-example` runs both commands above.
 
 The output of `pylmm gwas` (`-o/--out`) is a tab-separated file with one line per SNP: `SNP_ID`, `BETA`, `BETA_SD`, `F_STAT` and `P_VALUE`.
@@ -27,8 +29,8 @@ Common options of `pylmm gwas`:
 |---|---|
 | `--bfile PREFIX` / `--tfile PREFIX` / `--emma-geno FILE` | the genotypes: PLINK BED, PLINK TPED, or an EMMA matrix (exactly one) |
 | `--pheno FILE` | PLINK-style phenotype file (`FID IID value ...`, `NA`/`-9` missing); default `PREFIX.phenos` |
-| `--pheno-name NAME` / `--pheno-index N` | the phenotype column to test, by header name or 0-based index (default: the first) |
-| `--covar FILE`, `--covar-name NAME ...` | covariates, optionally only the named columns; an intercept is added unless `--no-mean` |
+| `--pheno-name NAME` / `--pheno-col N` | the phenotype column to test, by header name or by number, 1-based like plink2 (default: 1, the first) |
+| `--covar FILE`, `--covar-name NAME ...` | covariates, optionally only the named columns; an intercept is added unless `--no-intercept` |
 | `--kinship FILE` | the kinship matrix (required), e.g. from `pylmm kinship` |
 | `--id-match {fid-iid,iid}` | match samples on FID and IID (default) or on the IID alone |
 | `--ml` | maximum likelihood instead of REML (the default, `--reml`) |

@@ -54,11 +54,26 @@ and optparse `dest` names such as `options.phenoFile`) is resolved: there is one
   `args.log_level`);
 - choice values are kebab-case too (`--id-match fid-iid`), mapped to the library's values
   (`id_match="fid_iid"`);
-- every output file is an option (`-o/--out`), never a positional argument;
+- column numbers are 1-based, as in plink2 (`--pheno-col N`, like `--pheno-col-nums`; GCTA
+  `--mpheno` and GEMMA `-n` count the same way); the library's `columns=` indices stay 0-based;
+- every output file is an option (`-o/--out`), never a positional argument; the commands check
+  that the outputs can be written before they start the work;
 - exit codes: 0 success, 2 usage or input error, 1 unexpected error; messages go to the `pylmm`
-  logger as `pylmm: <level>: <message>`.
+  logger as `pylmm: <level>: <message>`. The file readers of `pylmm.samples` and
+  `pylmm.plink_io` raise `InputError` (a `ValueError` subclass) for a malformed or inconsistent
+  input file, also one found while reading the SNPs, and the CLI reports it as an input error
+  (exit 2); a plain `ValueError` from the library means a bad argument;
+- removed invocations are tombstones, not aliases: `python -m pylmm.cli.gwas` exits 2 with one
+  line naming `pylmm gwas`.
 
-`docs/migration/cli-map.csv` maps every old command and flag to the new one.
+`docs/migration/cli-map.csv` maps every old command and flag to the new one. Its columns:
+`old_command`, `old_flag`, `old_takes_value`, `new_command`, `new_flag`, `new_takes_value`
+(`yes`/`no`), `kind` and `notes`. The flag columns hold only flags (a positional argument has
+an empty flag and is described in `notes`), and `kind` is one of `renamed`, `value→flag`
+(an option that took a value is now a flag), `removed`, `removed-earlier` (gone before Phase
+5b.2), `new`, `behaviour-changed`, `semantics-changed` (same option, different meaning of its
+value) or `unchanged`. `tests/test_cli.py` checks the schema and that every option of the
+parser has a row.
 
 ## Exceptions that are not Python names
 

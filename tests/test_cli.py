@@ -4,7 +4,9 @@ mutually exclusive groups, validation), exit codes, `--version`,
 
 The numerical outputs are covered by test_cli_gwas.py and test_kinship.py."""
 
+import argparse
 import contextlib
+import csv
 import io
 import logging
 import os
@@ -487,3 +489,66 @@ def test_logging_is_restored_after_main(emma):
         rc, _, err = run([*emma["argv"], "-v"])
         assert rc == 0 and err.count("Reading SNP input") == 1
     assert (list(logger.handlers), logger.level, logger.propagate) == before
+
+
+# ---------------------------------------------------------------------------
+# docs/migration/cli-map.csv
+# ---------------------------------------------------------------------------
+
+CLI_MAP_KINDS = {
+    "renamed",
+    "value→flag",
+    "removed",
+    "removed-earlier",
+    "new",
+    "behaviour-changed",
+    "semantics-changed",
+    "unchanged",
+}
+
+
+def _cli_map():
+    with open(os.path.join(h.REPO, "docs", "migration", "cli-map.csv"), encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_cli_map_schema():
+    rows = _cli_map()
+    assert list(rows[0]) == [
+        "old_command",
+        "old_flag",
+        "old_takes_value",
+        "new_command",
+        "new_flag",
+        "new_takes_value",
+        "kind",
+        "notes",
+    ]
+    for row in rows:
+        assert row["kind"] in CLI_MAP_KINDS, row
+        for side in ("old", "new"):
+            # flags only: no VALUE or (positional) text in the flag columns
+            assert all(f.startswith("-") for f in row[side + "_flag"].split("/") if f), row
+            assert row[side + "_takes_value"] in ("yes", "no", ""), row
+        assert (row["old_command"] == "") == (row["kind"] == "new"), row
+
+
+def test_cli_map_covers_every_option():
+    """Every option of `pylmm gwas` / `pylmm kinship` has a row, and every
+    new flag of the map exists and takes a value as the map says."""
+    parser = cli.build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    actual = {}
+    for name, p in sub.choices.items():
+        for action in p._actions:
+            for opt in action.option_strings:
+                actual[("pylmm " + name, opt)] = action.nargs != 0
+    mapped = set()
+    for row in _cli_map():
+        for command in row["new_command"].split(", "):
+            for opt in row["new_flag"].split("/"):
+                if opt and command != "pylmm":
+                    assert (command, opt) in actual, row
+                    assert actual[(command, opt)] == (row["new_takes_value"] == "yes"), row
+                    mapped.add((command, opt))
+    assert set(actual) - mapped == set()
