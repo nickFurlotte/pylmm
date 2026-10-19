@@ -25,7 +25,8 @@ Supported formats
     (FID, IID, ...).  SNP names are read from ``<fbase>.bim`` if it exists,
     otherwise from ``<fbase>.map``, which must list the same SNPs in the same
     order.  Alleles must already be recoded as ``1``/``2`` (``0`` is missing);
-    nucleotide letters are not supported.
+    nucleotide letters are not supported.  With PLINK 1.9, make such a file
+    with ``plink --bfile X --recode 12 transpose --out Y``.
 
 ``type="emma"``: EMMA genotype matrix
     ``fbase`` is the path of a whitespace-separated numeric text file with
@@ -44,14 +45,24 @@ whitespace-separated square matrix in genotype order, or in the FaSTLMM style
 Genotype coding
 ---------------
 A genotype is the **fraction of copies of the second allele** (the ``A2``
-allele of the ``.bim`` file; the second allele of each TPED pair after
-``1``/``2`` recoding): ``0.0`` (homozygous A1), ``0.5`` (heterozygous) or
-``1.0`` (homozygous A2).  It is **not** a 0/1/2 allele count; EMMA input is
-passed through unchanged.  With ``norm_genotype=True`` (the default) each SNP
+allele of the ``.bim`` file; for a TPED, the allele coded ``2``): ``0.0``
+(homozygous A1), ``0.5`` (heterozygous) or ``1.0`` (homozygous A2).  It is
+**not** a 0/1/2 allele count; EMMA input is passed through unchanged.  With ``norm_genotype=True`` (the default) each SNP
 is then standardised (see :meth:`PlinkReader.normalize_genotype`): missing
 values are mean-imputed, then the SNP is centred and scaled to unit
 variance.  Pass ``norm_genotype=False`` to get the raw 0 / 0.5 / 1 / nan
 values.
+
+Effect scale and allele
+-----------------------
+The scale of an association effect (``beta`` of ``LMM.association``) is the
+scale of the genotype column it is fitted on.  With ``norm_genotype=True``
+(the default) ``beta`` is per SD of the standardised genotype.  With
+``norm_genotype=False`` it is per 0 -> 1 step, which is two copies of the A2
+allele (fraction coding), so it is 2x the per-A2-copy effect and has the
+opposite sign to PLINK's default per-A1-copy ``--linear`` / ``--assoc``
+convention (the t statistic changes sign, its size does not).  The
+t statistic and p-value do not depend on the scale.
 
 Missing values
 --------------
@@ -74,13 +85,22 @@ equal the number of individuals.  A FaSTLMM-style kinship matrix is reordered
 to ``indivs``, and individuals absent from it are dropped from ``indivs``
 (listed in ``indivs_removed``).
 
+.. warning::
+   The genotype vector of each SNP has length ``N``, the number of
+   individuals in the genotype file, NOT ``len(indivs)``.  A FaSTLMM kinship
+   that drops individuals shrinks ``indivs``, ``K`` and ``phenos``, but the
+   SNP vectors are not subset to match, so they no longer line up with
+   ``K`` and ``phenos``.  Subset them yourself (by the positions of the
+   kept individuals) before testing.  TODO(5b): subset the SNP vectors too.
+
 Examples
 --------
 Write a tiny BED/BIM/FAM set (3 individuals, 2 SNPs) and read it back:
 
 >>> import os, tempfile
 >>> from pylmm.plink_io import PlinkReader
->>> base = os.path.join(tempfile.mkdtemp(), "toy")
+>>> tmp = tempfile.TemporaryDirectory()
+>>> base = os.path.join(tmp.name, "toy")
 >>> with open(base + ".fam", "w") as f:
 ...     _ = f.write("F1 I1 0 0 1 -9\nF1 I2 0 0 1 -9\nF2 I3 0 0 2 -9\n")
 >>> with open(base + ".bim", "w") as f:
@@ -94,6 +114,8 @@ Write a tiny BED/BIM/FAM set (3 individuals, 2 SNPs) and read it back:
 ...     print(name, g)
 rs1 [0.  0.5 1. ]
 rs2 [ 1. nan  0.]
+>>> del reader
+>>> tmp.cleanup()                     # remove the temporary files
 
 The bundled 132k-SNP example is read the same way; the path is relative to
 the repository root, hence the skips:
@@ -168,7 +190,9 @@ class PlinkReader:
         stays the same when a FaSTLMM kinship drops individuals from
         `indivs`.  (Since Phase 5.5 it is also set for EMMA input.)
     K : numpy.ndarray or None
-        Kinship matrix, shape ``(n, n)``, or None if none was read.
+        Kinship matrix, shape ``(n, n)``, or None if none was read (also
+        None when an automatically found ``fbase + ".kin"`` exists but
+        ``read_k_file`` is false).
     phenos : numpy.ndarray or None
         Phenotypes, shape ``(n, n_phenotypes)``, aligned with `indivs`; None
         if there is no phenotype file.
@@ -245,6 +269,8 @@ class PlinkReader:
             self.k_file = "%s.kin" % fbase
             if self.read_k_file:
                 self.K = self.read_kinship(self.k_file)
+            else:
+                self.K = None
         else:
             self.k_file = None
             self.K = None
@@ -266,7 +292,13 @@ class PlinkReader:
 
         Resets the iteration, so it can be called again to re-read from the
         first SNP.  Each ``next()`` returns ``(genotypes, snp_name)``: a
-        float64 array of length ``len(indivs)`` and the SNP's name.
+        float64 array of length ``N`` and the SNP's name.
+
+        .. warning::
+           The length is ``N``, the number of individuals in the genotype
+           file, NOT ``len(indivs)``.  If a FaSTLMM kinship dropped
+           individuals, ``indivs``, ``K`` and ``phenos`` are shorter than the
+           genotype vector, which is not subset to match (TODO(5b)).
 
         Returns
         -------
@@ -279,6 +311,12 @@ class PlinkReader:
             If `type` is not a known format.  (The constructor already
             rejects one; this catches a later reassignment.  It used to
             write to stderr and return None.)
+        StopIteration
+            For a BED file that is not SNP-major (third header byte not
+            ``0x01``): a message goes to stderr and a bare ``StopIteration``
+            is raised.  Because it is raised by ``iter(reader)`` itself, it
+            escapes a ``for g, name in reader`` loop as an exception instead
+            of ending the loop quietly.  TODO(5b): make this a ValueError.
         """
         if self.type == "b":
             return self._get_snp_iterator_bed()
@@ -351,9 +389,11 @@ class PlinkReader:
     def __next__(self) -> tuple[NDArray[np.float64], str]:
         """Return the next SNP as ``(genotypes, snp_name)``.
 
-        ``genotypes`` is a float64 array of length ``len(indivs)``: the
-        fraction of A2 alleles (0, 0.5, 1; nan if missing), standardised if
-        ``norm_genotype`` is true.  ``snp_name`` is the SNP id from the
+        ``genotypes`` is a float64 array of length ``N``, the number of
+        individuals in the genotype file (NOT ``len(indivs)``; they differ
+        when a FaSTLMM kinship dropped individuals, and the vector is not
+        subset to match: TODO(5b)): the fraction of A2 alleles (0, 0.5, 1;
+        nan if missing), standardised if ``norm_genotype`` is true.  ``snp_name`` is the SNP id from the
         ``.bim``/``.map`` file (``SNP_<k>`` for EMMA).
 
         Raises
@@ -361,7 +401,9 @@ class PlinkReader:
         StopIteration
             After the last SNP.
         ValueError
-            If the BED file is truncated.
+            If the BED file is truncated, or (``type="t"``) a TPED allele
+            code is not 0, 1 or 2 (see the module docstring; the message
+            names the SNP and gives the PLINK recode command).
         """
         if self.have_read == self.num_snps:
             raise StopIteration
@@ -416,7 +458,7 @@ class PlinkReader:
             # Unreachable unless `type` was reassigned after get_snp_iterator.
             raise ValueError("unknown genotype file type %r" % (self.type,))
 
-    # Allele codes of a 1/2-recoded TPED (PLINK --recode12 / --transpose):
+    # Allele codes of a 1/2-recoded TPED (PLINK 1.9 --recode 12 transpose):
     # 1 and 2 are the alleles, 0 is PLINK's default missing-genotype code.
     _TPED_ALLELE_CODES = frozenset(("0", "1", "2"))
 
@@ -430,8 +472,8 @@ class PlinkReader:
         ------
         ValueError
             If an allele code is not ``0``, ``1`` or ``2`` (e.g. a nucleotide
-            letter: the alleles must be recoded to 1/2 first, ``plink
-            --recode12``), naming the SNP (`snp`) and the code.  Before this
+            letter: the alleles must be recoded to 1/2 first, with PLINK
+            1.9 ``plink --bfile X --recode 12 transpose --out Y``), naming the SNP (`snp`) and the code.  Before this
             check such a code silently reused the previous individual's
             genotype or raised UnboundLocalError.
         """
@@ -439,8 +481,8 @@ class PlinkReader:
         if bad:
             raise ValueError(
                 "TPED file %s.tped, SNP %s: allele code %r is not 0, 1 or 2; pylmm reads "
-                "1/2-recoded TPED files only (0 = missing; recode with plink --recode12)"
-                % (self.fbase, snp, sorted(bad)[0])
+                "1/2-recoded TPED files only (0 = missing; recode with PLINK 1.9: "
+                "plink --bfile X --recode 12 transpose --out Y)" % (self.fbase, snp, sorted(bad)[0])
             )
         G: list[float] = []
         for i in range(0, len(X) - 1, 2):
@@ -862,7 +904,12 @@ class PlinkReader:
         Returns
         -------
         numpy.ndarray
-            Shape ``(len(indivs), n_covariates)``, float64.
+            Shape ``(len(indivs), n_covariates)``, float64: the covariate
+            columns of the file only, WITHOUT an intercept column.  Passing
+            this alone as ``X0`` to `pylmm.lmm.gwas` or `pylmm.lmm.LMM`
+            silently fits a model with no intercept (test statistics can
+            change a lot).  Add one: ``X0 = np.column_stack([np.ones(n),
+            cov])``.
 
         Raises
         ------

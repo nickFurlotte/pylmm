@@ -75,3 +75,16 @@ def test_emma_sets_n_and_integer_indivs(tmp_path):
     assert r.indivs == [0, 1, 2, 3]
     g, name = next(r.get_snp_iterator())
     assert name == "SNP_1" and np.isnan(g[3]) and g[:3].tolist() == [0.0, 1.0, 2.0]
+
+
+def test_auto_found_kin_file_not_read_gives_k_none(tmp_path):
+    """Bug: with fbase + '.kin' present and read_k_file=False, self.K was never
+    assigned, so reader.K raised AttributeError."""
+    fn = tmp_path / "geno.emma"
+    fn.write_text("0 1 2\n1 1 0\n")
+    (tmp_path / "geno.emma.kin").write_text("1 0 0\n0 1 0\n0 0 1\n")
+    r = PlinkReader(str(fn), type="emma")
+    assert r.K is None
+    assert r.k_file == str(fn) + ".kin"
+    r2 = PlinkReader(str(fn), type="emma", read_k_file=True)
+    assert r2.K is not None and r2.K.shape == (3, 3)

@@ -41,6 +41,7 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
   Phase 5b), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
 - numpydoc docstrings with runnable examples for the public API; pytest runs them as doctests
   (`--doctest-modules`).
+- `pylmm.__version__`, the installed package version.
 - `PlinkReader.N` is also set for EMMA input (the number of genotype columns); `indivs` is documented as
   `(FID, IID)` pairs, or column positions `0..n-1` for EMMA, which has no IDs.
 

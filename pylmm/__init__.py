@@ -50,6 +50,32 @@ True
 >>> len(ps)
 10
 
+Reading PLINK files
+-------------------
+A BED -> genotype matrix ``W`` (n x m) recipe, for the first ``m`` SNPs
+(``reader.phenos`` is ``(n, k)``, so take ``[:, 0]`` for one phenotype):
+
+>>> import itertools                                          # doctest: +SKIP
+>>> from pylmm.plink_io import PlinkReader                    # doctest: +SKIP
+>>> reader = PlinkReader("data/snps.132k.clean.noX", type="b")  # doctest: +SKIP
+>>> W = np.column_stack([g for g, _ in itertools.islice(reader, m)])  # doctest: +SKIP
+>>> Y = reader.phenos[:, 0]                                   # doctest: +SKIP
+
+``gwas`` handles missing genotype calls (``nan``); ``LMM.association`` does
+not, and fails on a SNP that contains one.
+
+Effect scale and covariates
+---------------------------
+* ``beta`` is per unit of the genotype column you pass.  With
+  ``PlinkReader``'s default ``norm_genotype=True`` it is per SD of the
+  standardised genotype.  With ``norm_genotype=False`` it is per 0 -> 1 step
+  of the A2-allele fraction, i.e. two copies of A2, so its sign and scale
+  differ from PLINK's per-A1-copy convention (see ``pylmm.plink_io``).
+* ``PlinkReader.get_covariates`` returns the covariate columns WITHOUT an
+  intercept, and ``X0`` is used as given.  Passing covariates alone fits a
+  model with no intercept (test statistics can change a lot); add one:
+  ``X0 = np.column_stack([np.ones(n), cov])``.
+
 Where to read more
 ------------------
 * ``docs/conventions.md``: naming (PEP 8, except that a single capital letter,

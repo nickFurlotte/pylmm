@@ -18,7 +18,7 @@ The model, for ``n`` individuals, is::
     e ~ N(0, sigma2 * (1 - h) * I)
 
 where ``y`` is the phenotype (n,), ``X0`` the covariates (n, q; the default is
-an intercept), ``x`` one SNP (n,), ``K`` the kinship matrix (n, n), ``sigma2``
+an intercept), ``x`` one SNP (an (n, 1) column), ``K`` the kinship matrix (n, n), ``sigma2``
 the total phenotypic variance and ``h`` in [0, 1) the heritability (the share
 of ``sigma2`` due to ``K``).  ``K`` is eigendecomposed once, ``K = V diag(kva)
 V'``; every likelihood is then evaluated on ``V' y`` and ``V' X`` with a
@@ -28,11 +28,19 @@ rotation.
 Conventions (see `LMM` and ``docs/conventions.md`` for details):
 
 * REML is the default everywhere (``reml=True``); ``reml=False`` uses ML.
-* ``sigma2`` is ``Q / (n - q)`` under REML and in `LMM.ml_solution`; the ML
-  Wald test (``association(reml=False)``) rescales it to ``Q / n``.  ``Q`` is
-  the weighted residual sum of squares.
-* The h search runs on a grid on [0, 0.99] followed by a bounded refinement,
-  so ``h = 1`` is never returned (known limitation, deferred to Phase 6.3).
+* ``sigma2`` is ``Q / (n - p)`` everywhere (``p`` is the number of columns of
+  the design), including `LMM.fit` with ``reml=False`` and `LMM.ml_solution`,
+  EXCEPT the ML Wald test of one SNP (``association(reml=False)`` and
+  ``gwas(reml=False)``), which rescales it to ``Q / n``.  ``Q`` is the
+  weighted residual sum of squares.
+* ``X0`` is used exactly as given; the default (``X0=None``) is a single
+  column of ones.  If you pass covariates (for example from
+  ``PlinkReader.get_covariates``, which returns the covariate columns only,
+  no intercept) you must add the intercept yourself, or the model has none:
+  ``X0 = np.column_stack([np.ones(n), cov])``.
+* The h search runs on a grid (for the default ``ngrids=100``, 0, 0.01, ...,
+  0.99) followed by a bounded refinement, so ``h = 1`` is never returned
+  (known limitation, deferred to Phase 6.3).
 * Eigenvalues of ``K`` below 1e-6 are raised to 1e-6 (the caller's arrays are
   not modified).
 * Names that are a single capital letter (``Y``, ``X``, ``X0``, ``K``) are
@@ -57,7 +65,7 @@ import sys
 import time
 import warnings
 from collections.abc import Sequence
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -80,17 +88,20 @@ def _matrix_mult(A: ArrayLike, B: ArrayLike) -> Any:
 def calculate_kinship(W: ArrayLike, center: bool = False) -> FloatArray:
     """Realized relationship matrix (genomic kinship) from a SNP matrix.
 
-    Each SNP column is mean-imputed where missing (that is, with its minor
-    allele frequency times two, for 0/1/2 coding), standardised to mean 0 and
-    variance 1, and ``K = Z Z' / m`` is returned, where ``Z`` is the matrix of
-    the kept standardised columns.
+    Each SNP column is mean-imputed where missing (with the mean of its
+    observed values), standardised to mean 0 and variance 1, and
+    ``K = Z Z' / m`` is returned, where ``Z`` is the matrix of the kept
+    standardised columns.
 
     Parameters
     ----------
     W : (n, m) array
-        Genotypes of ``n`` individuals at ``m`` SNPs, coded as the number of
-        minor alleles (0, 1, 2) or any numeric dosage; ``nan`` marks a missing
-        call.  Not modified.
+        Genotypes of ``n`` individuals at ``m`` SNPs, in any additive numeric
+        coding (0/1/2 counts, dosages, or the 0/0.5/1 fractions of
+        `pylmm.plink_io.PlinkReader`); ``nan`` marks a missing call.  Because
+        each column is standardised, ``K`` is identical for 0/1/2 and for
+        0/0.5/1 coding, and it does not matter which allele is counted.  Not
+        modified.
     center : bool, default False
         If True, return ``(n - 1) * K / trace(P K P)`` with
         ``P = I - 11'/n``, i.e. a K centred on the individuals and scaled so
@@ -418,7 +429,7 @@ def gwas(
     refit: bool = False,
     ids: Sequence[Any] | None = None,
     kinship_ids: Sequence[Any] | None = None,
-) -> tuple[list[Any], list[Any]]:
+) -> tuple[list[float], list[float]]:
     """Scan SNPs one at a time with the mixed model (Wald test per SNP).
 
     For each column of ``X`` the model ``y = X0 b + x a + u + e`` (see the
@@ -436,8 +447,9 @@ def gwas(
         Phenotype; ``nan`` = missing.  Not modified.
     X : (n, m) array, or (n,) for a single SNP
         Genotypes (any numeric coding), one column per SNP; ``nan`` = missing.
-    K : (n, n) array
-        Kinship matrix in the same individual order as ``Y``.
+    K : (n, n) ndarray
+        Kinship matrix in the same individual order as ``Y``.  It must be a
+        numpy ndarray (not a list of lists).
     kva : (n,) array, optional
         Eigenvalues of ``K``, as from ``kva, kve = scipy.linalg.eigh(K)``.
         None (or empty) computes them.  Ignored (recomputed) if ``Y`` has
@@ -446,7 +458,11 @@ def gwas(
         Matching eigenvectors (columns), see ``kva``.
     X0 : (n, q) array, optional
         Covariates, full column rank.  Default: one column of ones (an
-        intercept).
+        intercept).  If you pass ``X0`` it is used exactly as given, with NO
+        intercept added: covariates from ``PlinkReader.get_covariates`` have
+        no intercept column, so passing them alone silently fits a model
+        without one (the test statistics can change a lot).  Add the
+        intercept yourself: ``X0 = np.column_stack([np.ones(n), cov])``.
     reml : bool, default True
         REML for the null fit, every refit and the Wald test; False uses ML
         throughout (``sigma2 = Q / n`` in the test).
@@ -459,7 +475,8 @@ def gwas(
     Returns
     -------
     t_stats : list of length m
-        Wald t statistic of each SNP (numpy float64; ``nan`` for a SNP that
+        Wald t statistic of each SNP (``t = beta / se``; numpy float64 items;
+        ``nan`` for a SNP that
         cannot be tested: all missing, constant, collinear with ``X0``, or
         with too few called individuals).
     p_values : list of length m
@@ -467,6 +484,15 @@ def gwas(
         is the number of individuals used for that SNP; ``nan`` where
         ``t_stats`` is.  If no individual has a phenotype, both lists are
         all ``nan``.
+
+    The effect scale is that of ``X``: ``beta`` is the change in ``Y`` per
+    one-unit increase of the column.  For genotypes read with
+    ``PlinkReader(..., norm_genotype=True)`` (the default) that is per SD of
+    the standardised genotype.  With ``norm_genotype=False`` it is per 0 -> 1
+    step of the A2-allele fraction, i.e. two copies of A2, so the sign and
+    scale differ from PLINK's per-A1-copy convention.  (`gwas` returns only
+    ``t`` and ``p``; use `LMM.association` with ``return_beta=True`` for
+    ``beta``.)
 
     Raises
     ------
@@ -658,7 +684,11 @@ class LMM:
         Eigenvectors of ``K`` (columns), matching ``kva``.
     X0 : (n, q) array, optional
         Covariates, full column rank.  Default: a single column of ones, the
-        mean.  The SNP is *not* part of ``X0``.
+        mean.  The SNP is *not* part of ``X0``.  A given ``X0`` is used
+        exactly as passed, with NO intercept added: covariates from
+        ``PlinkReader.get_covariates`` have no intercept column, so passing
+        them alone silently fits a model without one.  Use
+        ``X0 = np.column_stack([np.ones(n), cov])``.
     verbose : bool, default False
         Write progress (missing values removed, eigendecomposition, number of
         eigenvalues cleaned, multiple optima) to stderr.
@@ -733,8 +763,9 @@ class LMM:
     * `fit` and `association` default to REML.  `log_likelihood` and
       `ml_solution` are lower-level; `log_likelihood` defaults to ML
       (``reml=False``).
-    * ``sigma2 = Q / (N - p)`` in `ml_solution`, `fit` and the REML test, and
-      ``Q / N`` in the ML Wald test of `association`.
+    * ``sigma2 = Q / (N - p)`` everywhere, including `fit` with
+      ``reml=False``, EXCEPT the ML Wald test of `association` (and
+      `gwas`), which uses ``Q / N``.
     * `fit` searches ``h`` on [0, 0.99] (bugs 2 and 3, deferred to Phase 6.3):
       a true ``h`` of 0.99 or more is reported as 0.99, and the grid point
       0.98 is not refined.
@@ -1004,7 +1035,7 @@ class LMM:
 
     def log_likelihood(
         self, h: float, X: FloatArray | None = None, stack: bool = True, reml: bool = False
-    ) -> tuple[Any, FloatArray, FloatArray, FloatArray]:
+    ) -> tuple[np.float64, FloatArray, FloatArray, FloatArray]:
         """Log-likelihood of the data at heritability ``h``, profiled over ``beta`` and ``sigma2``.
 
         Parameters
@@ -1133,7 +1164,7 @@ class LMM:
 
     def fit(
         self, X: ArrayLike | None = None, ngrids: int = 100, reml: bool = True
-    ) -> tuple[Any, FloatArray, FloatArray, Any]:
+    ) -> tuple[np.float64, FloatArray, FloatArray, np.float64]:
         """Estimate the heritability ``h`` (and ``beta``, ``sigma2``) of the model.
 
         The log-likelihood is evaluated on the grid ``h = 0, 1/ngrids, ...,
@@ -1207,8 +1238,8 @@ class LMM:
             X = self.x0t_stack
 
         H = np.array(range(ngrids)) / float(ngrids)
-        L = np.array([self.log_likelihood(h, X, stack=False, reml=reml)[0] for h in H])
-        self.ll_grid = L
+        grid_ll = np.array([self.log_likelihood(h, X, stack=False, reml=reml)[0] for h in H])
+        self.ll_grid = grid_ll
 
         hmax = self._get_max(H, X, reml)
         L, beta, sigma, beta_stderr = self.log_likelihood(hmax, X, stack=False, reml=reml)
@@ -1221,6 +1252,27 @@ class LMM:
 
         return hmax, beta, sigma, L
 
+    @overload
+    def association(
+        self,
+        X: FloatArray,
+        h: float | None = ...,
+        stack: bool = ...,
+        reml: bool = ...,
+        return_beta: Literal[False] = ...,
+    ) -> tuple[np.float64, np.float64]: ...
+
+    @overload
+    def association(
+        self,
+        X: FloatArray,
+        h: float | None = ...,
+        stack: bool = ...,
+        reml: bool = ...,
+        *,
+        return_beta: Literal[True],
+    ) -> tuple[np.float64, np.float64, np.float64, FloatArray]: ...
+
     def association(
         self,
         X: FloatArray,
@@ -1228,7 +1280,7 @@ class LMM:
         stack: bool = True,
         reml: bool = True,
         return_beta: bool = False,
-    ) -> tuple[Any, ...]:
+    ) -> tuple[np.float64, np.float64] | tuple[np.float64, np.float64, np.float64, FloatArray]:
         """Wald test of one SNP, at a fixed heritability.
 
         The SNP is added to the covariates, ``beta`` is re-estimated by
@@ -1239,9 +1291,10 @@ class LMM:
         Parameters
         ----------
         X : (N, 1) array
-            The SNP as a column (raw, original individual order, no missing
-            values, over the individuals with a phenotype); a 1-d array raises
-            IndexError.  With ``stack=False``, a full
+            The SNP as a column (raw, original individual order, over the
+            individuals with a phenotype); a 1-d array raises IndexError.
+            It must have NO missing values (see Raises); `gwas` handles
+            missing calls.  With ``stack=False``, a full
             already-rotated design matrix (N, q + 1) whose last column is the
             SNP.
         h : float, optional
@@ -1263,10 +1316,27 @@ class LMM:
         p_value : float
             Two-sided p-value (numpy float64).
         beta : float
-            Only if ``return_beta``: SNP effect estimate.
-        beta_var : float
+            Only if ``return_beta``: SNP effect estimate (numpy float64), per
+            unit of the ``X`` column.  For genotypes from ``PlinkReader``:
+            with ``norm_genotype=True`` (default) per SD of the standardised
+            genotype; with ``norm_genotype=False`` per 0 -> 1 step of the
+            A2-allele fraction (two copies of A2), so the sign and scale
+            differ from PLINK's per-A1-copy convention.
+        beta_var : ndarray, shape (1, 1)
             Only if ``return_beta``: its variance, ``xx_inv[-1, -1] * sigma``
-            (with the sigma used for the test).
+            (with the sigma used for the test).  It is a (1, 1) array, not a
+            float (use ``float(beta_var[0, 0])``); a float is planned
+            (TODO(5b)).
+
+        Raises
+        ------
+        IndexError
+            If ``X`` is a 1-d array (``stack=True``).
+        ValueError
+            A SNP containing ``nan`` fails inside scipy ("array must not
+            contain infs or NaNs"); `association` does not handle missing
+            calls.  Use `gwas`, which tests the called individuals only, or
+            impute first.
 
         Notes
         -----
@@ -1309,6 +1379,7 @@ class LMM:
         ts, ps = self.tstat(beta[q - 1], beta_var[q - 1, q - 1], sigma, q)
 
         if return_beta:
+            # TODO(5b): beta_var is a (1, 1) array (sigma is (1, 1)); make it a float.
             return ts, ps, beta[q - 1].sum(), beta_var[q - 1, q - 1].sum() * sigma
         return ts, ps
 
@@ -1319,7 +1390,7 @@ class LMM:
         sigma: float | FloatArray,
         q: int,
         log: bool = False,
-    ) -> tuple[Any, Any]:
+    ) -> tuple[np.float64, np.float64]:
         """t statistic and p-value of one coefficient.
 
         ``t = beta / sqrt(var * sigma)``, referred to ``t(N - q)``.  (It is
@@ -1399,7 +1470,7 @@ class LMM:
         pl.ylabel("Probability of data")
         pl.title(title)
 
-    def mean_and_var(self) -> tuple[Any, Any]:
+    def mean_and_var(self) -> tuple[float, float]:
         """Mean and variance of ``h`` under the normalised grid likelihood.
 
         Uses the same weights as `plot_fit` (a flat prior on the grid), so it

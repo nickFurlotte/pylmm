@@ -39,7 +39,8 @@ def fit_two(
 
     ``w`` runs over the grid ``0, 1/ngrids, ..., (ngrids - 1)/ngrids``. For
     each ``w`` the single-kinship model is fit with :meth:`pylmm.lmm.LMM.fit`
-    (REML, heritability on its own grid of ``ngrids`` points), and the ``w``
+    (REML; the heritability grid inside each fit is always the 100 points
+    0, 0.01, ..., 0.99, whatever ``ngrids`` is), and the ``w``
     with the highest log-likelihood is kept. Ties go to the first (smallest)
     ``w``, with a warning on stderr; progress is also written to stderr.
 
@@ -52,8 +53,8 @@ def fit_two(
     X0 : array_like, shape (n, q), optional
         Covariates. Default: an intercept only.
     ngrids : int, default 100
-        Number of grid points for ``w`` (and for the heritability inside each
-        fit).
+        Number of grid points for ``w`` only.  The heritability grid inside
+        each fit is NOT affected: it is always 100 points covering 0 to 0.99.
 
     Returns
     -------
@@ -71,15 +72,17 @@ def fit_two(
 
     Notes
     -----
-    Cost: one eigendecomposition of an ``n x n`` matrix per grid point, so
-    ``ngrids`` of them (O(``ngrids`` * n**3)), plus ``ngrids`` likelihood
-    evaluations each. This is slow for large ``n``; lower ``ngrids`` for a
-    coarse answer.
+    Cost: one eigendecomposition of an ``n x n`` matrix per ``w`` grid point,
+    so ``ngrids`` of them (O(``ngrids`` * n**3)), plus about 100 likelihood
+    evaluations (the fixed inner heritability grid) and a bounded refinement
+    for each. This is slow for large ``n``; lower ``ngrids`` for a coarse
+    answer (it cuts the number of eigendecompositions, not the inner 100).
 
     Known caveat (bug 3, deferred to Phase 6.3; see
     ``docs/phase4-simulations.md``): the ``w`` grid never includes 1.0 (nor does
-    the heritability grid inside each fit), so a model that is purely ``K1``
-    cannot be returned exactly; the best it can do is ``w = 1 - 1/ngrids``.
+    the heritability grid inside each fit, which stops at 0.99), so a model
+    that is purely ``K1`` cannot be returned exactly; the best it can do is
+    ``w = 1 - 1/ngrids``.
     Behaviour is unchanged here.
 
     Examples
@@ -123,7 +126,7 @@ def fit_two(
 
     i = i[0]
     hmax, beta, sigma, log_likelihood = results[i]
-    w = W[i]
+    w = float(W[i])
 
     h1 = w * hmax
     h2 = (1.0 - w) * hmax
