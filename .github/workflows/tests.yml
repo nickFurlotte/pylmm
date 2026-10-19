@@ -95,6 +95,23 @@ jobs:
           uv run --locked pylmm kinship --help
           uv run --locked python -m pylmm --help
 
+  notebook:
+    # Runs notebooks/pylmm_tour.ipynb top to bottom (not part of the matrix).
+    name: notebook (Python 3.13)
+    runs-on: ubuntu-latest
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Execute the tour notebook
+        run: uv run --locked --group sims --group notebooks pytest -q tests/test_notebook.py
+
   lowest-direct:
     # Checks the numpy/scipy lower bounds in pyproject.toml.  Not --locked:
     # this job resolves the oldest allowed direct dependencies instead.

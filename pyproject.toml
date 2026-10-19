@@ -45,6 +45,12 @@ sims = [
     "pandas>=1.4",
     "statsmodels>=0.13",
 ]
+# Executes notebooks/pylmm_tour.ipynb (tests/test_notebook.py); not installed by default.
+notebooks = [
+    "nbclient>=0.10",
+    "ipykernel>=6.29",
+    "nbformat>=5.10",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pylmm"]
