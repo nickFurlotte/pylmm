@@ -74,6 +74,9 @@ jobs:
       # Slow full-dataset tests are skipped unless --runslow is given.
       # pytest.ini adds --doctest-modules, so the pylmm/ docstring examples
       # run here and in the lowest-direct job too.
+      # tests/test_docs.py runs every code block of AGENTS.md, docs/guide.md and
+      # skills/ (the summary lists executed and skipped blocks), here and in the
+      # lowest-direct job.
       # The py27 Docker baseline (docker/py27/) is kept for reference only
       # and is not run in CI.
       # --group sims adds pandas/matplotlib/statsmodels for the sims/ tests

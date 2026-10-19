@@ -29,6 +29,34 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+# Per-file statistics of tests/test_docs.py, kept in the config stash (not in a
+# module global, whose module name depends on pytest's import mode).
+DOCS_STATS = pytest.StashKey[dict]()
+
+
+@pytest.fixture
+def docs_stats(request) -> dict:
+    """The dict tests/test_docs.py fills with {doc file: executed/skipped statistics}."""
+    return request.config.stash.setdefault(DOCS_STATS, {})
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Report the snippets run and skipped by tests/test_docs.py, if it ran."""
+    stats = terminalreporter.config.stash.get(DOCS_STATS, None)
+    if not stats:
+        return
+    tr = terminalreporter
+    executed = sum(s["executed"] for s in stats.values())
+    skipped = [x for s in stats.values() for x in s["skipped"]]
+    tr.section("docs snippets (tests/test_docs.py)")
+    tr.write_line(
+        "%d executed, %d skipped, in %d files (%.1f s)"
+        % (executed, len(skipped), len(stats), sum(s["seconds"] for s in stats.values()))
+    )
+    for where, reason in skipped:
+        tr.write_line("  skipped %s: %s" % (where, reason))
+
+
 @pytest.fixture(scope="session")
 def hmdp():
     """(Y, K, snps) for the hmdp data, all from text files.

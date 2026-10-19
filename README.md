@@ -5,6 +5,15 @@ pylmm is a fast and lightweight linear mixed-model (LMM) solver for use in genom
 
 pylmm has a command-line program, `pylmm`, for running association studies (`pylmm gwas`) and computing kinship matrices (`pylmm kinship`). It can also be used as a python module to build your own custom programs.  If you want to create your own code, look at [scripts/example.py](scripts/example.py) for some basic usage patterns.  If you want to run a basic GWAS analysis, the commands below, which use the example data, might be a helpful guide.
 
+### For agents (and humans who like recipes)
+
+[AGENTS.md](AGENTS.md) is the entry point for coding agents: the repo map, commands, test rules,
+conventions and known caveats. [docs/guide.md](docs/guide.md) is the user guide for ad-hoc analysis with
+the Python library. [skills/](skills/) holds task recipes in the Agent Skills format (`run-gwas`,
+`estimate-heritability`, `custom-association-analysis`, `simulate-lmm-data`, `convert-genotype-formats`,
+`migrate-from-old-pylmm`, `interpret-gwas-results`); `.claude/skills` links to it so Claude Code finds
+them. Every code block in these files runs in CI (`tests/test_docs.py`, `just docs-test`).
+
 ### Example commands
 
 ```
