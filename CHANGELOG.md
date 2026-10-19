@@ -82,10 +82,6 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 ### Removed
 - `pylmmGWAS --kfile2`.
 
-### Fixed
-- `pylmmGWAS`/`GWAS`: a covariate matrix with nan only for individuals whose phenotype is nan was rejected
-  during the Phase 5.2 work (it worked before); it is accepted again.
-
 ### Internal
 - Goldens `gwas_cli_bed_snps50_refit.out` and `gwas_cli_bed_snps50_removeMissing.out` were regenerated for the
   REML refit (py2 originals in `tests/golden/py2_original/`); `generate_golden.py` now refuses to run under
