@@ -91,7 +91,7 @@ def test_cli_bed_variants(tmp_path, bed50, flags, tag, df):
 
 
 def test_cli_bed_covfile(tmp_path, bed50):
-    """--covfile (input.getCovariates), rows in reverse order: X0 = [1, c1, c2]."""
+    """--covfile (PlinkReader.get_covariates), rows in reverse order: X0 = [1, c1, c2]."""
     out = str(tmp_path / "out")
     args = [*bed_args(bed50), "--covfile", h.write_covfile(tmp_path), out]
     log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
@@ -100,7 +100,7 @@ def test_cli_bed_covfile(tmp_path, bed50):
 
 
 def test_cli_bed_missing_phenotypes(tmp_path, bed50):
-    """'NA' and '-9' phenotypes (input.getPhenos), rows in reverse order;
+    """'NA' and '-9' phenotypes (PlinkReader.get_phenos), rows in reverse order;
     the CLI drops those individuals from Y, X0 and K."""
     out = str(tmp_path / "out")
     args = [*bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)), out]

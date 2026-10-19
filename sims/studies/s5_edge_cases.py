@@ -12,8 +12,8 @@ SNPs, K from 400 other SNPs), run pylmm on it, and record what happens:
                independent dense REML oracle (sims/oracle.py) where defined
 * runtime
 
-Paths:  lib         pylmm.lmm.GWAS on raw genotypes (missing = per-SNP removal)
-        lib_impute  user mean-imputes, then pylmm.lmm.GWAS
+Paths:  lib         pylmm.lmm.gwas on raw genotypes (missing = per-SNP removal)
+        lib_impute  user mean-imputes, then pylmm.lmm.gwas
         cli_impute  pylmm.cli.gwas through subprocess (BED/fam/pheno/kin files
                     written here), default behaviour: mean-impute + standardise
         cli_remove  same with --removeMissingGenotypes
@@ -187,15 +187,15 @@ QUICK_GRID = _build_grid(True)
 
 
 class Problem:
-    def __init__(self, y, Gt, K, cov, ideal="result"):
+    def __init__(self, y, g_test, K, cov, ideal="result"):
         self.y = np.asarray(y, dtype=np.float64)
-        self.Gt = np.asarray(Gt, dtype=np.float64)  # n x m, may contain nan
+        self.g_test = np.asarray(g_test, dtype=np.float64)  # n x m, may contain nan
         self.K = np.asarray(K, dtype=np.float64)
         self.cov = np.asarray(cov, dtype=np.float64).reshape(len(y), -1)  # extra covariates
         self.ideal = ideal
         self.h_ident = True  # False: h not identifiable (skip h check)
         self.cov_ref = None  # full-rank covariates for the oracle
-        self.K_ref = None  # the "right" K (to measure the shift)
+        self.k_ref = None  # the "right" K (to measure the shift)
         self.io = {}  # CLI file-handling mutations
         self.cli_ok = True
         self.skip_oracle = False
@@ -213,11 +213,11 @@ def _geno_split(rng, n, m_kin, m_test):
 
 
 def _base(rng, n=N_BASE, m_kin=M_KIN, m_test=M_TEST, h2=0.5, k=0, pm=0.0):
-    Gk, Gt = _geno_split(rng, n, m_kin, m_test)
-    K = kinship.kinship(Gk)
+    g_kin, g_test = _geno_split(rng, n, m_kin, m_test)
+    K = kinship.kinship(g_kin)
     kin = kinship.from_matrix(K)
     ph = phenotypes.simulate(kin, h2=h2, rng=rng, n_covariates=k, missing_rate=pm)
-    return Problem(ph.y, Gt, K, ph.X0[:, 1:])
+    return Problem(ph.y, g_test, K, ph.X0[:, 1:])
 
 
 def _binary_cov(rng, n):
@@ -231,7 +231,7 @@ def build(params, rng):
 
 def _b_missing(p, var, rng):
     P = _base(rng, pm=p["pm"])
-    P.Gt = genotypes.with_missing(P.Gt, p["gm"], rng)
+    P.g_test = genotypes.with_missing(P.g_test, p["gm"], rng)
     return P
 
 
@@ -239,7 +239,7 @@ def _b_degenerate(p, var, rng):
     n = N_BASE
     P = _base(rng, k=1 if var.startswith("eq_cov") else 0)
     P.cli_ok = var != "mono_dosage"
-    x = P.Gt[:, 0].copy()
+    x = P.g_test[:, 0].copy()
     y = P.y.copy()
     if var == "mono":
         x[:] = 0.0
@@ -269,7 +269,7 @@ def _b_degenerate(p, var, rng):
         x[:] = 1.0
     else:
         raise ValueError(var)
-    P.Gt[:, 0] = x
+    P.g_test[:, 0] = x
     P.y = y
     return P
 
@@ -289,11 +289,11 @@ def _b_smalln(p, var, rng):
 
 def _b_kin(p, var, rng):
     if var == "lowrank":
-        Gk, Gt = _geno_split(rng, N_BASE, p["m_kin"], M_TEST)
-        K = kinship.kinship(Gk)
+        g_kin, g_test = _geno_split(rng, N_BASE, p["m_kin"], M_TEST)
+        K = kinship.kinship(g_kin)
         kin = kinship.from_matrix(K)
         ph = phenotypes.simulate(kin, h2=0.5, rng=rng)
-        P = Problem(ph.y, Gt, K, np.zeros((N_BASE, 0)))
+        P = Problem(ph.y, g_test, K, np.zeros((N_BASE, 0)))
         P.skip_oracle = False
         return P
     P = _base(rng)
@@ -304,27 +304,27 @@ def _b_kin(p, var, rng):
         P.h_ident = False
     elif var in ("dup_pairs", "dup_all"):
         n_unique, reps = (50, 2) if var == "dup_pairs" else (5, 20)
-        Gk, Gt = _geno_split(rng, n_unique, M_KIN, M_TEST)
-        Gk, Gt = np.repeat(Gk, reps, axis=0), np.repeat(Gt, reps, axis=0)
-        K = kinship.kinship(Gk)
+        g_kin, g_test = _geno_split(rng, n_unique, M_KIN, M_TEST)
+        g_kin, g_test = np.repeat(g_kin, reps, axis=0), np.repeat(g_test, reps, axis=0)
+        K = kinship.kinship(g_kin)
         ph = phenotypes.simulate(kinship.from_matrix(K), h2=0.5, rng=rng)
-        P = Problem(ph.y, Gt, K, np.zeros((n, 0)))
+        P = Problem(ph.y, g_test, K, np.zeros((n, 0)))
     elif var == "nonpsd":
         E = rng.standard_normal((n, n)) * p["noise"] / np.sqrt(n) * np.sqrt(2)
         P.K = K0 + 0.5 * (E + E.T)
-        P.K_ref = K0
+        P.k_ref = K0
         P.ideal = "warn_or_error"
         P.skip_oracle = True
     elif var == "wrong_order":
         perm = rng.permutation(n)
         P.K = K0[np.ix_(perm, perm)]
-        P.K_ref = K0
+        P.k_ref = K0
         P.ideal = "warn_or_error"
     elif var == "scale":
         P.K = K0 * p["scale"]
     elif var == "upper_only":
         P.K = np.triu(K0)
-        P.K_ref = K0
+        P.k_ref = K0
         P.ideal = "warn_or_error"
         P.skip_oracle = True
     elif var == "nan_K":
@@ -333,7 +333,7 @@ def _b_kin(p, var, rng):
         P.ideal = "error_or_nan"
     elif var == "asym":
         P.K = K0 + np.triu(rng.standard_normal((n, n)) * 0.05, 1)
-        P.K_ref = K0
+        P.k_ref = K0
         P.ideal = "warn_or_error"
         P.skip_oracle = True
     else:
@@ -463,10 +463,10 @@ def _warn_summary(ws):
 
 
 def run_lib(P, impute):
-    from pylmm.lmm import GWAS, LMM
+    from pylmm.lmm import LMM, gwas
 
     out = {"crash": 0, "crash_err": "", "clean_error": 0}
-    G = _impute(P.Gt) if impute else P.Gt.copy()
+    G = _impute(P.g_test) if impute else P.g_test.copy()
     m = G.shape[1]
     t = np.full(m, np.nan)
     h = np.nan
@@ -475,7 +475,7 @@ def run_lib(P, impute):
         warnings.simplefilter("always")
         try:
             L = LMM(P.y.copy(), P.K.copy(), X0=P.X0.copy())
-            hh, beta, sigma, ll = L.fit(REML=True)
+            hh, beta, sigma, ll = L.fit(reml=True)
             h = float(np.sum(hh))
             out["sigma_hat"] = float(np.sum(sigma))
             out["ll_hat"] = float(np.sum(ll))
@@ -484,7 +484,7 @@ def run_lib(P, impute):
             out["crash"] = 1
             out["crash_err"] = "null fit: " + _err(e)
         try:
-            ts, ps = GWAS(P.y.copy(), G, P.K.copy(), X0=P.X0.copy(), REML=True, refit=False)
+            ts, ps = gwas(P.y.copy(), G, P.K.copy(), X0=P.X0.copy(), reml=True, refit=False)
             out["ret_type"] = type(ts).__name__
             t = np.asarray(ts, dtype=np.float64).reshape(-1)
             if len(t) != m:
@@ -528,14 +528,14 @@ def _fmt(v, na="NA"):
 
 
 def run_cli(P, remove):
-    n, m = len(P.y), P.Gt.shape[1]
+    n, m = len(P.y), P.g_test.shape[1]
     var = P.io.get("variant", "")
     out = {"crash": 0, "crash_err": "", "clean_error": 0}
     t = np.full(m, np.nan)
     h = np.nan
     with tempfile.TemporaryDirectory() as d:
         pre = os.path.join(d, "d")
-        _write_bed(pre, P.Gt / 2.0, n)
+        _write_bed(pre, P.g_test / 2.0, n)
         # phenotype file
         rows = [
             "f%d i%d %s" % (i, i, _fmt(P.y[i], "-9" if var == "pheno_neg9" else "NA"))
@@ -664,12 +664,12 @@ def oracle_compare(P, G, t, h_hat, remove_mode, cli_ml=False):
             res["dh"] = h_hat - f.h
         cand = [i for i in range(G.shape[1]) if _expected_finite(P, G, i, remove_mode)]
         dts, dts_ml = [], []
-        G_raw = P.Gt
+        g_raw = P.g_test
         skipped = 0
         for i in cand[:N_ORACLE_SNPS]:
             ok = ok_y & ~np.isnan(G[:, i])
-            Ki = K[np.ix_(ok, ok)]
-            w = oracle.wald(P.y[ok], Ki, G[ok, i], X0[ok], reml=True)
+            k_ok = K[np.ix_(ok, ok)]
+            w = oracle.wald(P.y[ok], k_ok, G[ok, i], X0[ok], reml=True)
             if w.h >= 0.98:  # h at the upper boundary: pylmm's 0.99 clamp (bugs 2/3)
                 skipped += 1
                 continue
@@ -677,9 +677,9 @@ def oracle_compare(P, G, t, h_hat, remove_mode, cli_ml=False):
                 dts.append(abs(t[i] - w.t) / max(1.0, abs(w.t)))
             else:
                 dts.append(np.inf)
-            if cli_ml and np.isnan(G_raw[:, i]).any() and np.isfinite(t[i]):
+            if cli_ml and np.isnan(g_raw[:, i]).any() and np.isfinite(t[i]):
                 # CLI --removeMissingGenotypes refits the per-SNP null by ML (bug 1)
-                wm = oracle.wald(P.y[ok], Ki, G[ok, i], X0[ok], reml=False)
+                wm = oracle.wald(P.y[ok], k_ok, G[ok, i], X0[ok], reml=False)
                 if wm.h < 0.98:
                     dts_ml.append(abs(t[i] - wm.t) / max(1.0, abs(wm.t)))
         res["n_boundary_skipped"] = skipped
@@ -738,7 +738,7 @@ def run_cell(params, seed):
     remove = path in ("lib", "cli_remove")
     if path.startswith("cli"):
         r, t = run_cli(P, remove=(path == "cli_remove"))
-        G = P.Gt if remove else _impute(P.Gt)
+        G = P.g_test if remove else _impute(P.g_test)
         out["cli"] = 1
     else:
         r, t, G = run_lib(P, impute=(path == "lib_impute"))
@@ -760,8 +760,8 @@ def run_cell(params, seed):
             float(np.abs(t[~exp & finite]).max()) if (~exp & finite).any() else 0.0
         )
     # distance to the "right" K (wrong order / non-PSD / ...)
-    if P.K_ref is not None and not out["crash"] and not path.startswith("cli"):
-        P2 = Problem(P.y, P.Gt, P.K_ref, P.cov)
+    if P.k_ref is not None and not out["crash"] and not path.startswith("cli"):
+        P2 = Problem(P.y, P.g_test, P.k_ref, P.cov)
         r2, t2, _ = run_lib(P2, impute=False)
         out["h_ref"] = r2["h_hat"]
         both = np.isfinite(t) & np.isfinite(t2)

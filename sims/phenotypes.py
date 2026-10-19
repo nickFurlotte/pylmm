@@ -15,7 +15,7 @@ Variance bookkeeping (``var_total`` defaults to 1):
 So ``h2`` is the variance-component parameter an LMM estimates when the
 causal SNPs are fitted as fixed effects; when they are not, they inflate the
 apparent h2.  The scale of sigma_g^2 is relative to K as given: with pylmm's
-``calculateKinship`` the mean diagonal is ~1 for outbred synthetic data but
+``calculate_kinship`` the mean diagonal is ~1 for outbred synthetic data but
 can differ for inbred data or when monomorphic SNPs shrink the scale.
 Covariate effects come on top of var_total.
 
@@ -49,12 +49,12 @@ class Phenotype:
 
 
 def sample_polygenic(
-    Kva: np.ndarray, Kve: np.ndarray, sigma_g2: float, rng: np.random.Generator
+    kva: np.ndarray, kve: np.ndarray, sigma_g2: float, rng: np.random.Generator
 ) -> np.ndarray:
     """One draw of u ~ N(0, sigma_g2 K) from the eigendecomposition of K."""
-    d = np.clip(np.asarray(Kva, dtype=np.float64), 0.0, None)
+    d = np.clip(np.asarray(kva, dtype=np.float64), 0.0, None)
     z = rng.standard_normal(len(d))
-    return np.asarray(Kve) @ (np.sqrt(d) * z) * np.sqrt(sigma_g2)
+    return np.asarray(kve) @ (np.sqrt(d) * z) * np.sqrt(sigma_g2)
 
 
 def _effect_variances(
@@ -94,7 +94,7 @@ def simulate(
 ) -> Phenotype:
     """Simulate one phenotype vector.
 
-    kin            a :class:`sims.kinship.Kinship` (or any object with Kva, Kve)
+    kin            a :class:`sims.kinship.Kinship` (or any object with kva, kve)
     h2             polygenic heritability in [0, 1]
     G, causal_idx  genotype matrix (n x m, complete) and the columns that are
                    causal; ``causal_var`` is their joint variance explained
@@ -107,7 +107,7 @@ def simulate(
     """
     if not 0.0 <= h2 <= 1.0:
         raise ValueError("h2 must be in [0, 1]")
-    n = len(kin.Kva)
+    n = len(kin.kva)
     causal_idx = np.asarray([] if causal_idx is None else causal_idx, dtype=np.int64)
     if np.ndim(causal_var) == 0 and not 0.0 <= causal_var < 1.0:
         raise ValueError("causal_var must be in [0, 1)")
@@ -127,18 +127,18 @@ def simulate(
     if len(causal_idx):
         if G is None:
             raise ValueError("causal SNPs need the genotype matrix G")
-        Gc = np.asarray(G[:, causal_idx], dtype=np.float64)
-        if np.isnan(Gc).any():
+        g_causal = np.asarray(G[:, causal_idx], dtype=np.float64)
+        if np.isnan(g_causal).any():
             raise ValueError("causal genotypes must be complete (add missingness afterwards)")
-        sd = Gc.std(axis=0)
+        sd = g_causal.std(axis=0)
         sign = rng.choice([-1.0, 1.0], size=len(causal_idx))
         with np.errstate(divide="ignore", invalid="ignore"):
             beta = np.where(sd > 0, sign * np.sqrt(v * var_total) / sd, 0.0)
-        y = y + Gc @ beta
+        y = y + g_causal @ beta
 
     rest = (1.0 - total_causal) * var_total
     sigma_g2, sigma_e2 = h2 * rest, (1.0 - h2) * rest
-    u = sample_polygenic(kin.Kva, kin.Kve, sigma_g2, rng)
+    u = sample_polygenic(kin.kva, kin.kve, sigma_g2, rng)
     e = rng.standard_normal(n) * np.sqrt(sigma_e2)
     y = y + u + e
 
@@ -174,11 +174,11 @@ def choose_causal(
     sample MAF is >= min_maf (genotypes assumed 0/1/2 or 0/0.5/1)."""
     pool = np.arange(m)
     if G is not None:
-        Gm = np.asarray(G, dtype=np.float64)
-        top = np.nanmax(Gm)
-        freq = np.nanmean(Gm, axis=0) / (top if top > 0 else 1.0)
+        g_missing = np.asarray(G, dtype=np.float64)
+        top = np.nanmax(g_missing)
+        freq = np.nanmean(g_missing, axis=0) / (top if top > 0 else 1.0)
         maf = np.minimum(freq, 1 - freq)
-        pool = pool[(np.nanstd(Gm, axis=0) > 0) & (maf >= min_maf)]
+        pool = pool[(np.nanstd(g_missing, axis=0) > 0) & (maf >= min_maf)]
     if n_causal > len(pool):
         raise ValueError("only %d eligible causal SNPs" % len(pool))
     return np.sort(rng.choice(pool, size=n_causal, replace=False))

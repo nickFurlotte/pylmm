@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
+"""Readers for PLINK (BED, TPED) and EMMA genotype, phenotype and covariate
+files: PlinkReader.  (This module was pylmm.input before Phase 5.4.)"""
+
 import os
 import sys
 import warnings
@@ -11,80 +14,80 @@ import warnings
 import numpy as np
 
 
-class plink:
+class PlinkReader:
     def __init__(
         self,
         fbase,
-        kFile=None,
-        phenoFile=None,
+        k_file=None,
+        pheno_file=None,
         type="b",
-        normGenotype=True,
-        readKFile=False,
-        fastLMM_kinship=False,
+        norm_genotype=True,
+        read_k_file=False,
+        fastlmm_kinship=False,
     ):
 
         self.fhandle = None
-        self.snpFileHandle = None
+        self.snp_file_handle = None
         self.fbase = fbase
         self.type = type
         if type != "emma":
-            self.indivs = self.getIndivs(self.fbase, type)
+            self.indivs = self._read_fam(self.fbase, type)
         else:
             # Just read a line from the SNP file and see how many individuals we have
             f = open(fbase)
             self.indivs = list(range(len(f.readline().strip().split())))
             f.close()
-        self.kFile = kFile
+        self.k_file = k_file
         self.phenos = None
-        self.normGenotype = normGenotype
-        self.phenoFile = phenoFile
+        self.norm_genotype = norm_genotype
+        self.pheno_file = pheno_file
         # Originally I was using the fastLMM style that has indiv IDs embedded.
         # NOW I want to use this module to just read SNPs so I'm allowing
         # the programmer to turn off the kinship reading.
-        self.readKFile = readKFile
-        self.fastLMM_kinship_style = fastLMM_kinship
+        self.read_k_file = read_k_file
+        self.fastlmm_kinship = fastlmm_kinship
 
-        if self.kFile:
-            self.K = self.readKinship(self.kFile)
+        if self.k_file:
+            self.K = self.read_kinship(self.k_file)
         elif os.path.isfile("%s.kin" % fbase):
-            self.kFile = "%s.kin" % fbase
-            if self.readKFile:
-                self.K = self.readKinship(self.kFile)
+            self.k_file = "%s.kin" % fbase
+            if self.read_k_file:
+                self.K = self.read_kinship(self.k_file)
         else:
-            self.kFile = None
+            self.k_file = None
             self.K = None
 
-        self.getPhenos(self.phenoFile)
+        self.get_phenos(self.pheno_file)
 
         self.fhandle = None
-        self.snpFileHandle = None
+        self.snp_file_handle = None
 
     def __del__(self):
         if self.fhandle:
             self.fhandle.close()
-        if self.snpFileHandle:
-            self.snpFileHandle.close()
+        if self.snp_file_handle:
+            self.snp_file_handle.close()
 
-    def getSNPIterator(self):
+    def get_snp_iterator(self):
         if self.type == "b":
-            return self.getSNPIterator_bed()
+            return self._get_snp_iterator_bed()
         elif self.type == "t":
-            return self.getSNPIterator_tped()
+            return self._get_snp_iterator_tped()
         elif self.type == "emma":
-            return self.getSNPIterator_emma()
+            return self._get_snp_iterator_emma()
         else:
             sys.stderr.write("Please set type to either b or t\n")
             return
 
-    def getSNPIterator_emma(self):
+    def _get_snp_iterator_emma(self):
         self.have_read = 0
-        self.numSNPs = -1
+        self.num_snps = -1
         file = self.fbase
         self.fhandle = open(file)
 
         return self
 
-    def getSNPIterator_tped(self):
+    def _get_snp_iterator_tped(self):
         # get the number of snps
         file = self.fbase + ".bim"
         if not os.path.isfile(file):
@@ -94,16 +97,16 @@ class plink:
         for _ in f:
             i += 1
         f.close()
-        self.numSNPs = i
+        self.num_snps = i
         self.have_read = 0
-        self.snpFileHandle = open(file)
+        self.snp_file_handle = open(file)
 
         file = self.fbase + ".tped"
         self.fhandle = open(file)
 
         return self
 
-    def getSNPIterator_bed(self):
+    def _get_snp_iterator_bed(self):
         # get the number of snps
         file = self.fbase + ".bim"
         i = 0
@@ -111,11 +114,11 @@ class plink:
         for _ in f:
             i += 1
         f.close()
-        self.numSNPs = i
+        self.num_snps = i
         self.have_read = 0
-        self.snpFileHandle = open(file)
+        self.snp_file_handle = open(file)
 
-        self.BytestoRead = self.N // 4 + ((self.N % 4 and 1) or 0)
+        self._bytes_to_read = self.N // 4 + ((self.N % 4 and 1) or 0)
 
         file = self.fbase + ".bed"
         self.fhandle = open(file, "rb")
@@ -129,57 +132,54 @@ class plink:
         return self
 
     def __iter__(self):
-        return self.getSNPIterator()
+        return self.get_snp_iterator()
 
     def __next__(self):
-        if self.have_read == self.numSNPs:
+        if self.have_read == self.num_snps:
             raise StopIteration
         self.have_read += 1
 
         if self.type == "b":
-            X = self.fhandle.read(self.BytestoRead)
-            if len(X) != self.BytestoRead:
+            X = self.fhandle.read(self._bytes_to_read)
+            if len(X) != self._bytes_to_read:
                 raise ValueError(
                     "Truncated BED file %s.bed: expected %d bytes for SNP %d, got %d"
-                    % (self.fbase, self.BytestoRead, self.have_read, len(X))
+                    % (self.fbase, self._bytes_to_read, self.have_read, len(X))
                 )
-            return self.formatBinaryGenotypes(
-                X, self.normGenotype
-            ), self.snpFileHandle.readline().strip().split()[1]
+            return self._format_binary_genotypes(
+                X, self.norm_genotype
+            ), self.snp_file_handle.readline().strip().split()[1]
 
         elif self.type == "t":
             X = self.fhandle.readline()
-            XX = X.strip().split()
-            chrm, rsid, pos1, pos2 = tuple(XX[:4])
-            XX = XX[4:]
-            G = self.getGenos_tped(XX)
-            if self.normGenotype:
-                G = self.normalizeGenotype(G)
-            return G, self.snpFileHandle.readline().strip().split()[1]
+            xx = X.strip().split()
+            chrm, rsid, pos1, pos2 = tuple(xx[:4])
+            xx = xx[4:]
+            G = self._get_genos_tped(xx)
+            if self.norm_genotype:
+                G = self.normalize_genotype(G)
+            return G, self.snp_file_handle.readline().strip().split()[1]
 
         elif self.type == "emma":
             X = self.fhandle.readline()
             if X == "":
                 raise StopIteration
-            XX = X.strip().split()
+            xx = X.strip().split()
             G = []
-            for x in XX:
+            for x in xx:
                 try:
                     G.append(float(x))
                 except Exception:  # noqa: PERF203 - per-value fallback to NaN
                     G.append(np.nan)
             G = np.array(G)
-            if self.normGenotype:
-                G = self.normalizeGenotype(G)
+            if self.norm_genotype:
+                G = self.normalize_genotype(G)
             return G, "SNP_%d" % self.have_read
 
         else:
             sys.stderr.write("Do not understand type %s\n" % (self.type))
 
-    # Python 2 spelling, kept so existing callers of IN.next() keep working.
-    next = __next__
-
-    def getGenos_tped(self, X):
+    def _get_genos_tped(self, X):
         G = []
         for i in range(0, len(X) - 1, 2):
             a = X[i]
@@ -203,17 +203,17 @@ class plink:
     _BED_CODE_VALUES = np.array([0.0, np.nan, 0.5, 1.0])
     _BED_SHIFTS = np.array([0, 2, 4, 6], dtype=np.uint8)
 
-    def formatBinaryGenotypes(self, X, norm=True):
-        # X is the raw bytes for one SNP (self.BytestoRead bytes).
+    def _format_binary_genotypes(self, X, norm=True):
+        # X is the raw bytes for one SNP (self._bytes_to_read bytes).
         B = np.frombuffer(X, dtype=np.uint8)
         codes = (B[:, None] >> self._BED_SHIFTS) & 3
         # only take the leading values because whatever is left should be null
         G = self._BED_CODE_VALUES[codes.reshape(-1)[: self.N]]
         if norm:
-            G = self.normalizeGenotype(G)
+            G = self.normalize_genotype(G)
         return G
 
-    def normalizeGenotype(self, G):
+    def normalize_genotype(self, G):
         x = ~np.isnan(G)
         # All missing: return the all-nan SNP unchanged (length n), which the
         # CLIs then skip.  It used to return an empty array (bug 11).
@@ -238,7 +238,7 @@ class plink:
 
         return G
 
-    def getPhenos(self, phenoFile=None):
+    def get_phenos(self, pheno_file=None):
         """Read a PLINK-style phenotype file (FID IID value...; NA or -9 is
         missing) into self.phenos, one row per individual of self.indivs, in
         that order, matched by (FID, IID).  Individuals absent from the file
@@ -248,20 +248,20 @@ class plink:
         input, which has no IDs, rows are taken in order and their number
         must equal the number of individuals.
         """
-        if not phenoFile:
-            self.phenoFile = phenoFile = self.fbase + ".phenos"
-        if not os.path.isfile(phenoFile):
-            # sys.stderr.write("Could not find phenotype file: %s\n" % (phenoFile))
+        if not pheno_file:
+            self.pheno_file = pheno_file = self.fbase + ".phenos"
+        if not os.path.isfile(pheno_file):
+            # sys.stderr.write("Could not find phenotype file: %s\n" % (pheno_file))
             return
-        keys, P = self._readTable(phenoFile, lambda x: x == "NA" or x == "-9", "phenotype")
-        self.phenos = self._alignRows(keys, P, phenoFile, "phenotype")
+        keys, P = self._read_table(pheno_file, lambda x: x == "NA" or x == "-9", "phenotype")
+        self.phenos = self._align_rows(keys, P, pheno_file, "phenotype")
         return self.phenos
 
-    def getPhenosEMMA(self, emmaFile):
+    def get_phenos_emma(self, emma_file):
         """EMMA phenotypes: one phenotype per row, one column per individual
         (in genotype order); anything that is not a number is missing."""
         P = []
-        with open(emmaFile) as f:
+        with open(emma_file) as f:
             for line in f:
                 v = line.strip().split()
                 if not v:
@@ -273,9 +273,9 @@ class plink:
                     except ValueError:  # noqa: PERF203 - per-value fallback to NaN
                         p.append(np.nan)
                 P.append(p)
-        return self._emmaColumns(P, emmaFile, "phenotype")
+        return self._emma_columns(P, emma_file, "phenotype")
 
-    def _emmaColumns(self, rows, fn, what):
+    def _emma_columns(self, rows, fn, what):
         n = len(self.indivs)
         bad = [i for i, r in enumerate(rows) if len(r) != n]
         if bad or not rows:
@@ -293,7 +293,7 @@ class plink:
         return np.array(rows, dtype=np.float64).T
 
     @staticmethod
-    def _readTable(fn, isMissing, what):
+    def _read_table(fn, is_missing, what):
         """(keys, values) of a FID IID v1 v2 ... file.  A first line whose first two
         fields are FID IID (case-insensitive) is a header and is skipped."""
         keys = []
@@ -315,7 +315,7 @@ class plink:
                         % (what, fn, lineno)
                     )
                 try:
-                    P.append([np.nan if isMissing(x.strip()) else float(x) for x in v[2:]])
+                    P.append([np.nan if is_missing(x.strip()) else float(x) for x in v[2:]])
                 except ValueError:
                     raise ValueError(
                         "%s file %s, line %d: a value is not a number (missing values are "
@@ -330,7 +330,7 @@ class plink:
             )
         return keys, P
 
-    def _alignRows(self, keys, P, fn, what):
+    def _align_rows(self, keys, P, fn, what):
         """Rows of P (keyed by (FID, IID)) in self.indivs order; nan rows for
         absent individuals.  Raises ValueError for duplicate IDs or when no
         individual matches."""
@@ -377,28 +377,28 @@ class plink:
             )
         return out
 
-    def getIndivs(self, base, type="b"):
+    def _read_fam(self, base, type="b"):
         if type == "t":
-            famFile = "%s.tfam" % base
+            fam_file = "%s.tfam" % base
         else:
-            famFile = "%s.fam" % base
+            fam_file = "%s.fam" % base
 
         keys = []
-        f = open(famFile)
+        f = open(fam_file)
         for line in f:
             v = line.strip().split()
-            famId = v[0]
-            indivId = v[1]
-            k = (famId.strip(), indivId.strip())
+            fam_id = v[0]
+            indiv_id = v[1]
+            k = (fam_id.strip(), indiv_id.strip())
             keys.append(k)
         f.close()
 
         self.N = len(keys)
-        sys.stderr.write("Read %d individuals from %s\n" % (self.N, famFile))
+        sys.stderr.write("Read %d individuals from %s\n" % (self.N, fam_file))
 
         return keys
 
-    def readKinship(self, kFile):
+    def read_kinship(self, k_file):
         # Assume the fastLMM style
         # This will read in the kinship matrix and then reorder it
         # according to self.indivs - additionally throwing out individuals
@@ -407,11 +407,11 @@ class plink:
             sys.stderr.write("Did not read any individuals so can't load kinship\n")
             return
 
-        sys.stderr.write("Reading kinship matrix from %s\n" % (kFile))
+        sys.stderr.write("Reading kinship matrix from %s\n" % (k_file))
 
-        f = open(kFile)
+        f = open(k_file)
         # read indivs
-        if self.fastLMM_kinship_style:
+        if self.fastlmm_kinship:
             v = f.readline().strip().split("\t")[1:]
             keys = [tuple(y.split()) for y in v]
             D = {}
@@ -420,7 +420,7 @@ class plink:
 
         # read matrix
         K = []
-        if self.fastLMM_kinship_style:
+        if self.fastlmm_kinship:
             for line in f:
                 K.append([float(x) for x in line.strip().split("\t")[1:]])
         else:
@@ -429,19 +429,19 @@ class plink:
         f.close()
         K = np.array(K)
 
-        if self.fastLMM_kinship_style:
+        if self.fastlmm_kinship:
             # reorder to match self.indivs
             L = []
-            KK = []
+            kept = []
             X = []
             for i in range(len(self.indivs)):
                 if self.indivs[i] not in D:
                     X.append(self.indivs[i])
                 else:
-                    KK.append(self.indivs[i])
+                    kept.append(self.indivs[i])
                     L.append(D[self.indivs[i]])
             K = K[L, :][:, L]
-            self.indivs = KK
+            self.indivs = kept
             self.indivs_removed = X
             if len(self.indivs_removed):
                 sys.stderr.write(
@@ -451,9 +451,9 @@ class plink:
 
         return K
 
-    def getCovariatesEMMA(self, emmaFile):
+    def get_covariates_emma(self, emma_file):
         P = []
-        with open(emmaFile) as f:
+        with open(emma_file) as f:
             for line in f:
                 v = line.strip().split()
                 if not v:
@@ -462,15 +462,16 @@ class plink:
                     P.append([np.nan if x == "NA" else float(x) for x in v])
                 except ValueError:
                     raise ValueError(
-                        "EMMA covariate file %s: a value is not a number (missing is NA)" % emmaFile
+                        "EMMA covariate file %s: a value is not a number (missing is NA)"
+                        % emma_file
                     ) from None
-        return self._emmaColumns(P, emmaFile, "covariate")
+        return self._emma_columns(P, emma_file, "covariate")
 
-    def getCovariates(self, covFile=None):
+    def get_covariates(self, cov_file=None):
         """A PLINK-style covariate file (FID IID c1 c2 ...; NA is missing),
-        matched to self.indivs by (FID, IID) like getPhenos; absent
+        matched to self.indivs by (FID, IID) like get_phenos; absent
         individuals get nan rows."""
-        if not os.path.isfile(covFile):
-            raise ValueError("Could not find covariate file: %s" % (covFile))
-        keys, P = self._readTable(covFile, lambda x: x == "NA", "covariate")
-        return self._alignRows(keys, P, covFile, "covariate")
+        if not os.path.isfile(cov_file):
+            raise ValueError("Could not find covariate file: %s" % (cov_file))
+        keys, P = self._read_table(cov_file, lambda x: x == "NA", "covariate")
+        return self._align_rows(keys, P, cov_file, "covariate")

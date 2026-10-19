@@ -254,7 +254,7 @@ def _pylmm_fit_or_none(y, kin, reml):
     from sims import methods
 
     try:
-        return methods.pylmm_null(y, kin, REML=reml)
+        return methods.pylmm_null(y, kin, reml=reml)
     except Exception as ex:
         if "BracketError" in type(ex).__name__:
             return None
@@ -264,9 +264,9 @@ def _pylmm_fit_or_none(y, kin, reml):
 def _lmm_at_h(y, kin):
     from pylmm.lmm import LMM
 
-    Kva, Kve = kin.eig_for_pylmm()
+    kva, kve = kin.eig_for_pylmm()
     with _quiet():
-        return LMM(np.asarray(y, float), np.asarray(kin.K), Kva, Kve)
+        return LMM(np.asarray(y, float), np.asarray(kin.K), kva, kve)
 
 
 def _assoc_scan(L, G, h):
@@ -276,7 +276,7 @@ def _assoc_scan(L, G, h):
             x = G[:, j : j + 1]
             if x.var() == 0:
                 continue
-            _, p[j] = L.association(x, h=h, REML=True)
+            _, p[j] = L.association(x, h=h, reml=True)
     return p
 
 
@@ -289,23 +289,23 @@ def crash_bias_s1():
     rows = []
     for k, (cid, rep, params, seed, _) in enumerate(crashed):
         rng = np.random.default_rng(seed)
-        kin, G_dis, G_in = s1._setup(params)
+        kin, g_dis, g_in = s1._setup(params)
         y = phenotypes.simulate(kin, h2=params["h2"], rng=rng).y
         if _pylmm_fit_or_none(y, kin, True) is not None:
             raise RuntimeError(
                 "S1 replay: pylmm no longer crashes on cell %s rep %d "
                 "(replay or software stack differs from the run)" % (cid, rep)
             )
-        fT = oracle.fit(y, np.asarray(kin.K), reml=True)
-        h = min(fT.h, H_CAP)
-        p = _assoc_scan(_lmm_at_h(y, kin), G_dis, h)
+        f_t = oracle.fit(y, np.asarray(kin.K), reml=True)
+        h = min(f_t.h, H_CAP)
+        p = _assoc_scan(_lmm_at_h(y, kin), g_dis, h)
         ok = ~np.isnan(p)
         r = {
             "cell_id": cid,
             "rep": rep,
             "pop": params["pop"],
             "h2": params["h2"],
-            "h_oracle": fT.h,
+            "h_oracle": f_t.h,
             "h_used": h,
             "n_reml": int(ok.sum()),
             "lam_reml": metrics.lambda_gc(p),
@@ -316,7 +316,7 @@ def crash_bias_s1():
         rows.append(r)
         _log(
             "s1 crashed rep %d/%d: %s h2=%g oracle h=%.4f"
-            % (k + 1, len(crashed), params["pop"], params["h2"], fT.h)
+            % (k + 1, len(crashed), params["pop"], params["h2"], f_t.h)
         )
     cr = pd.DataFrame(rows)
     # per affected cell: pooled t1e excluding (reported) vs including the refit replicates
@@ -383,8 +383,8 @@ def crash_bias_s2():
             f = _pylmm_fit_or_none(y, kin, reml)
             r[pre + "pylmm_crash"] = int(f is None)
             r[pre + "h_pylmm"] = np.nan if f is None else f["h"]
-            fT = oracle.fit(y, K, reml=reml)
-            r[pre + "h_T"] = fT.h
+            f_t = oracle.fit(y, K, reml=reml)
+            r[pre + "h_T"] = f_t.h
         rows.append(r)
         _log(
             "s2 crashed rep %d/%d: %s n=%d %s h2=%g REML crash=%d oracle REML h=%.4f"
@@ -459,14 +459,14 @@ def _refit_scan(L, y, K, G, h_cap=H_CAP):
         try:
             with _quiet():
                 L.fit(X=x)
-            h = L.optH
+            h = L.opt_h
         except Exception as ex:
             if "BracketError" not in type(ex).__name__:
                 raise
             n_crash += 1
             h = min(oracle.fit(y, K, np.c_[np.ones(len(y)), x], reml=True).h, h_cap)
         with _quiet():
-            _, p[j] = L.association(x, h=h, REML=True)
+            _, p[j] = L.association(x, h=h, reml=True)
     return p, n_crash
 
 
@@ -482,14 +482,14 @@ def crash_bias_s3():
     rows = []
     for k, (cid, rep, p, seed, txt) in enumerate(crashed):
         rng = np.random.default_rng(seed)
-        Gk, Gt, kin = s3._design(p)
+        g_kin, g_test, kin = s3._design(p)
         if p["contam"]:
             raise NotImplementedError("crash in a contamination cell: replay not implemented")
-        m = Gt.shape[1]
+        m = g_test.shape[1]
         kc = p["n_causal"]
-        cidx = phenotypes.choose_causal(m, kc, rng, G=Gt, min_maf=s3.MIN_MAF)
+        cidx = phenotypes.choose_causal(m, kc, rng, G=g_test, min_maf=s3.MIN_MAF)
         ph = phenotypes.simulate(
-            kin, p["h2"], rng, G=Gt, causal_idx=cidx, causal_var=[p["vpe"]] * kc
+            kin, p["h2"], rng, G=g_test, causal_idx=cidx, causal_var=[p["vpe"]] * kc
         )
         nulls = np.setdiff1d(np.arange(m), cidx)
         samp = rng.choice(nulls, size=s3.N_NULL_SAMPLE, replace=False)
@@ -506,9 +506,9 @@ def crash_bias_s3():
         else:
             h, src_h = f["h"], "pylmm"
         L = _lmm_at_h(ph.y, kin)
-        pc = _assoc_scan(L, Gt[:, cidx], h)
+        pc = _assoc_scan(L, g_test[:, cidx], h)
         # refit, exactly the SNPs the study refits (causal + the null sample), in its order
-        pr, n_crash = _refit_scan(L, ph.y, K, Gt[:, np.r_[cidx, samp]])
+        pr, n_crash = _refit_scan(L, ph.y, K, g_test[:, np.r_[cidx, samp]])
         if stage.startswith("per-SNP") and n_crash == 0:
             raise RuntimeError(
                 "S3 replay of cell %s rep %d: no refit crash reproduced" % (cid, rep)
@@ -681,23 +681,23 @@ def s2_lostmode():
         p, m = r["params"], r["metrics"]
         sim = s2.simulate_probe if p.get("kind") == "probe" else s2.simulate_main
         kin, y = sim(p, r["seed"])
-        Kva, Kve = kin.eig_for_pylmm()
+        kva, kve = kin.eig_for_pylmm()
         with _quiet():
-            L = LMM(np.asarray(y, float), np.asarray(kin.K), Kva, Kve)
+            L = LMM(np.asarray(y, float), np.asarray(kin.K), kva, kve)
         for pre, reml in (("r_", True), ("m_", False)):
 
             def ll(h, reml=reml, L=L):  # bind loop variables
-                return float(np.sum(L.LL(h, L.X0t, stack=False, REML=reml)[0]))
+                return float(np.sum(L.log_likelihood(h, L.x0t, stack=False, reml=reml)[0]))
 
             with np.errstate(all="ignore"):
-                L201 = np.array([ll(h) for h in s2.LL_GRID])
-                L099 = np.array([ll(h) for h in LL_GRID_099])
+                ll_201 = np.array([ll(h) for h in s2.LL_GRID])
+                ll_099 = np.array([ll(h) for h in LL_GRID_099])
                 ll_hat = ll(m[pre + "h_pylmm"])
-            d201 = max(0.0, np.nanmax(L201) - ll_hat)
-            lost201 = int(d201 > 1e-3 and s2.n_modes(L201) > 1)
-            if lost201 != m[pre + "lostmode"] or s2.n_modes(L201) != m[pre + "n_modes"]:
+            d201 = max(0.0, np.nanmax(ll_201) - ll_hat)
+            lost201 = int(d201 > 1e-3 and s2.n_modes(ll_201) > 1)
+            if lost201 != m[pre + "lostmode"] or s2.n_modes(ll_201) != m[pre + "n_modes"]:
                 mismatch += 1
-            d099 = max(0.0, np.nanmax(L099) - ll_hat)
+            d099 = max(0.0, np.nanmax(ll_099) - ll_hat)
             recs.append(
                 {
                     "cell_id": r["cell_id"],
@@ -712,11 +712,11 @@ def s2_lostmode():
                     "h_pylmm": m[pre + "h_pylmm"],
                     "lostmode_201": lost201,
                     "stored_lostmode_201": m[pre + "lostmode"],
-                    "n_modes_099": s2.n_modes(L099),
+                    "n_modes_099": s2.n_modes(ll_099),
                     "ll_deficit_099": d099,
                     "nonglobal_099": int(d099 > 1e-3),
-                    "lostmode_099": int(d099 > 1e-3 and s2.n_modes(L099) > 1),
-                    "h_gridmax_099": float(LL_GRID_099[int(np.nanargmax(L099))]),
+                    "lostmode_099": int(d099 > 1e-3 and s2.n_modes(ll_099) > 1),
+                    "h_gridmax_099": float(LL_GRID_099[int(np.nanargmax(ll_099))]),
                 }
             )
         if (i + 1) % 500 == 0:
@@ -868,9 +868,9 @@ def s3_calibrated(check_reps=1):
     out, checked = [], 0
     for cid, rs in by_cell.items():
         p = rs[0]["params"]
-        Gk, Gt, kin = s3._design(p)
-        m = Gt.shape[1]
-        Gs = (Gt - Gt.mean(0)) / Gt.std(0)
+        g_kin, g_test, kin = s3._design(p)
+        m = g_test.shape[1]
+        g_std = (g_test - g_test.mean(0)) / g_test.std(0)
         kc = p["n_causal"]
         pooled = {
             meth: {"null": [], "null_pruned": [], "causal": []} for meth in ("lmm", "lmmr", "ols")
@@ -878,9 +878,9 @@ def s3_calibrated(check_reps=1):
         n_kept = []
         for i, r in enumerate(sorted(rs, key=lambda r: r["rep"])):
             rng = np.random.default_rng(r["seed"])
-            cidx = phenotypes.choose_causal(m, kc, rng, G=Gt, min_maf=s3.MIN_MAF)
+            cidx = phenotypes.choose_causal(m, kc, rng, G=g_test, min_maf=s3.MIN_MAF)
             ph = phenotypes.simulate(
-                kin, p["h2"], rng, G=Gt, causal_idx=cidx, causal_var=[p["vpe"]] * kc
+                kin, p["h2"], rng, G=g_test, causal_idx=cidx, causal_var=[p["vpe"]] * kc
             )
             nulls = np.setdiff1d(np.arange(m), cidx)
             samp = rng.choice(nulls, size=s3.N_NULL_SAMPLE, replace=False)
@@ -888,12 +888,12 @@ def s3_calibrated(check_reps=1):
                 L = _lmm_at_h(ph.y, kin)
                 with _quiet():
                     L.fit()
-                pc = _assoc_scan(L, Gt[:, cidx], L.optH)
+                pc = _assoc_scan(L, g_test[:, cidx], L.opt_h)
                 stored = np.asarray(r["metrics"]["p_c_lmm"], float)
                 if not np.allclose(pc, stored, rtol=1e-6, atol=1e-300):
                     raise RuntimeError("S3 replay mismatch in cell %s rep %d" % (cid, r["rep"]))
                 checked += 1
-            r2 = ((Gs[:, samp].T @ Gs[:, cidx]) / Gt.shape[0]) ** 2
+            r2 = ((g_std[:, samp].T @ g_std[:, cidx]) / g_test.shape[0]) ** 2
             keep = r2.max(axis=1) < R2_MAX
             n_kept.append(int(keep.sum()))
             for meth in pooled:

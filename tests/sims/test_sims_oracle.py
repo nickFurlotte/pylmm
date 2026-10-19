@@ -35,7 +35,7 @@ def _ols(y, X):
 
 
 @pytest.mark.parametrize("reml", [True, False])
-def test_identity_K_flat_profile_reduces_to_ols(reml):
+def test_identity_k_flat_profile_reduces_to_ols(reml):
     rng = np.random.default_rng(0)
     n = 40
     X = np.c_[np.ones(n), rng.standard_normal(n)]
@@ -88,7 +88,7 @@ def test_boundary_h0_when_msb_below_msw():
     assert f.h == 0.0 and f.at_boundary
 
 
-def test_boundary_h1_with_pd_K():
+def test_boundary_h1_with_pd_k():
     """y drawn from N(0, K) exactly (no noise), K positive definite: h -> 1."""
     rng = np.random.default_rng(0)
     n = 60
@@ -99,9 +99,9 @@ def test_boundary_h1_with_pd_K():
     assert f.h > 0.97
     # singular K: likelihood at h = 1 is -inf, never selected
     g = genotypes.unrelated(n, 20, seed=0)
-    Ks = kinship.kinship(g.G)
-    assert oracle.profile_loglik(1.0, y, Ks)[0] == -np.inf
-    assert oracle.fit(y, Ks).h < 1.0
+    ks = kinship.kinship(g.G)
+    assert oracle.profile_loglik(1.0, y, ks)[0] == -np.inf
+    assert oracle.fit(y, ks).h < 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +132,8 @@ def test_reml_loglik_equals_error_contrast_likelihood():
     h = 0.42
     ll, beta, s2 = oracle.profile_loglik(h, y, K, X, reml=True)
     # orthonormal basis of the complement of col(X)
-    Qf, _ = np.linalg.qr(X, mode="complete")
-    A = Qf[:, p:]
+    qf, _ = np.linalg.qr(X, mode="complete")
+    A = qf[:, p:]
     V = s2 * (h * K + (1 - h) * np.eye(n))
     ref = stats.multivariate_normal(np.zeros(n - p), A.T @ V @ A).logpdf(A.T @ y)
     np.testing.assert_allclose(ll, ref, rtol=1e-10)
@@ -172,13 +172,13 @@ def test_wald_matches_direct_gls_at_fixed_h(h):
     x = np.random.default_rng(9).binomial(2, 0.3, n).astype(float)
     d, U = np.linalg.eigh(h * K + (1 - h) * np.eye(n))
     W = U / np.sqrt(d)  # V^-1/2 = U diag(d^-1/2) U'
-    Xa = np.c_[X, x]
-    yw, Xw = W.T @ y, W.T @ Xa
-    beta, *_ = np.linalg.lstsq(Xw, yw, rcond=None)
-    p = Xa.shape[1]
-    resid = yw - Xw @ beta
+    xa = np.c_[X, x]
+    yw, xw = W.T @ y, W.T @ xa
+    beta, *_ = np.linalg.lstsq(xw, yw, rcond=None)
+    p = xa.shape[1]
+    resid = yw - xw @ beta
     for test_reml, s2 in ((True, resid @ resid / (n - p)), (False, resid @ resid / n)):
-        se = np.sqrt(s2 * np.linalg.inv(Xw.T @ Xw)[-1, -1])
+        se = np.sqrt(s2 * np.linalg.inv(xw.T @ xw)[-1, -1])
         t = beta[-1] / se
         w = oracle.wald(y, K, x, X0=X, h=h, null_reml=test_reml)
         np.testing.assert_allclose(w.beta, beta[-1], rtol=1e-9)
@@ -191,7 +191,7 @@ def test_wald_matches_direct_gls_at_fixed_h(h):
         import statsmodels.api as sm
     except ImportError:  # pragma: no cover
         return
-    r = sm.GLS(y, Xa, sigma=h * K + (1 - h) * np.eye(n)).fit()
+    r = sm.GLS(y, xa, sigma=h * K + (1 - h) * np.eye(n)).fit()
     np.testing.assert_allclose(oracle.wald(y, K, x, X0=X, h=h).t, r.tvalues[-1], rtol=1e-8)
 
 
@@ -241,32 +241,32 @@ def test_pylmm_matches_oracle_on_easy_problem():
     kin = kinship.from_matrix(kinship.kinship(g.G))
     # ML on the raw (centred, singular) GRM is unbounded (see next test), so
     # the ML comparison uses a positive definite kinship
-    Ks = {True: np.asarray(kin.K), False: 0.8 * np.asarray(kin.K) + 0.2 * np.eye(n)}
+    ks = {True: np.asarray(kin.K), False: 0.8 * np.asarray(kin.K) + 0.2 * np.eye(n)}
     # numpy's Generator streams may change between numpy versions, so pick
     # the first seed whose fits are interior (pylmm's grid stops at 0.99, bug 3)
     for seed in range(50):
         rng = np.random.default_rng(seed)
         y = phenotypes.simulate(kin, 0.5, rng).y
-        fits = {r: oracle.fit(y, Ks[r], reml=r) for r in (True, False)}
+        fits = {r: oracle.fit(y, ks[r], reml=r) for r in (True, False)}
         if all(0.02 < f.h < 0.95 for f in fits.values()):
             break
     x = rng.binomial(2, 0.3, n).astype(float)
     for reml in (True, False):
-        K, f = Ks[reml], fits[reml]
+        K, f = ks[reml], fits[reml]
         L = LMM(y, K, *linalg.eigh(K))
-        h, beta, sigma, ll = L.fit(REML=reml)
+        h, beta, sigma, ll = L.fit(reml=reml)
         np.testing.assert_allclose(float(h), f.h, atol=1e-6)
         off = oracle.pylmm_reml_offset(n, 1) if reml else 0.0
         # at a common h the log-likelihoods agree up to the known constant
-        ll_p = L.LL(f.h, REML=reml)[0]
+        ll_p = L.log_likelihood(f.h, reml=reml)[0]
         np.testing.assert_allclose(ll_p, f.ll + off, rtol=1e-9)
-        t_p, _ = L.association(x.reshape(-1, 1), h=f.h, REML=reml)
-        # association(REML=False) is the ML Wald test, sigma^2 = Q/n (Phase 5.2)
+        t_p, _ = L.association(x.reshape(-1, 1), h=f.h, reml=reml)
+        # association(reml=False) is the ML Wald test, sigma^2 = Q/n (Phase 5.2)
         np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, null_reml=reml).t, rtol=1e-8)
 
 
 def test_ml_unbounded_with_centred_grm_and_intercept():
-    """calculateKinship's GRM has K 1 = 0, so with an intercept the ML profile
+    """calculate_kinship's GRM has K 1 = 0, so with an intercept the ML profile
     diverges as h -> 1 (the MLE does not exist); REML stays bounded."""
     n = 120
     g = genotypes.unrelated(n, 600, seed=4)
@@ -312,25 +312,28 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
 
     y, kin, X0, _ = _rank_deficient_problem()
     n, p = X0.shape
-    assert (kin.Kva < 1e-6).sum() > 80
+    assert (kin.kva < 1e-6).sum() > 80
     L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm(), X0=X0)
-    Kc = oracle.clamp_kinship(kin.K)
+    k_clamped = oracle.clamp_kinship(kin.K)
     hs = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999]
     for reml in (True, False):
-        d = [L.LL(h, REML=reml)[0] - oracle.profile_loglik(h, y, Kc, X0, reml)[0] for h in hs]
+        d = [
+            L.log_likelihood(h, reml=reml)[0] - oracle.profile_loglik(h, y, k_clamped, X0, reml)[0]
+            for h in hs
+        ]
         np.testing.assert_allclose(d, oracle.pylmm_reml_offset(n, p) if reml else 0.0, atol=1e-8)
     # LL differences agree without any offset
     for reml in (True, False):
-        dp = L.LL(0.7, REML=reml)[0] - L.LL(0.0, REML=reml)[0]
+        dp = L.log_likelihood(0.7, reml=reml)[0] - L.log_likelihood(0.0, reml=reml)[0]
         do = (
-            oracle.profile_loglik(0.7, y, Kc, X0, reml)[0]
-            - oracle.profile_loglik(0.0, y, Kc, X0, reml)[0]
+            oracle.profile_loglik(0.7, y, k_clamped, X0, reml)[0]
+            - oracle.profile_loglik(0.0, y, k_clamped, X0, reml)[0]
         )
         np.testing.assert_allclose(dp, do, rtol=1e-10)
     # the clamp itself is a measurable effect, growing towards h = 1
     gap = [
         abs(
-            L.LL(h, REML=True)[0]
+            L.log_likelihood(h, reml=True)[0]
             - oracle.pylmm_reml_offset(n, p)
             - oracle.profile_loglik(h, y, kin.K, X0)[0]
         )
@@ -341,7 +344,7 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
 
 def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
     """Oracle with all pylmm switches vs pylmm: null fit (REML and ML) and
-    GWAS t (REML, and REML=False, which since Phase 5.2 is ML throughout:
+    GWAS t (REML, and reml=False, which since Phase 5.2 is ML throughout:
     ML null fit and ML Wald test with sigma^2 = Q/n)."""
     from pylmm.lmm import LMM
     from sims import methods
@@ -349,14 +352,14 @@ def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
     K = np.asarray(kin.K)
     for reml in (True, False):
         L = LMM(y, K, *kin.eig_for_pylmm(), X0=X0)
-        h, beta, sigma, ll = L.fit(REML=reml)
+        h, beta, sigma, ll = L.fit(reml=reml)
         f = oracle.fit(y, K, X0, reml=reml, **PYLMM)
         np.testing.assert_allclose(float(np.sum(h)), f.h, atol=tol_h)
         np.testing.assert_allclose(float(np.sum(ll)), f.ll_pylmm, atol=1e-6)
         np.testing.assert_allclose(float(np.sum(sigma)), f.sigma2_reml, rtol=1e-5)
         np.testing.assert_allclose(np.ravel(beta), f.beta, rtol=1e-5, atol=1e-7)
     for reml in (True, False):
-        t_p, p_p = methods.pylmm_gwas(y, xs, kin, X0=X0, REML=reml)
+        t_p, p_p = methods.pylmm_gwas(y, xs, kin, X0=X0, reml=reml)
         w = [
             oracle.wald(y, K, xs[:, j], X0=X0, null_reml=reml, **PYLMM) for j in range(xs.shape[1])
         ]
@@ -433,7 +436,7 @@ def test_pylmm_convention_reproduces_example_null_failures():
     assert grid.h == pytest.approx(0.99)
     with contextlib.redirect_stderr(io.StringIO()):
         L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm())
-        h = float(np.sum(L.fit(REML=True)[0]))
+        h = float(np.sum(L.fit(reml=True)[0]))
     assert h == pytest.approx(0.99)
 
 

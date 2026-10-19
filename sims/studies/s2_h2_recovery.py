@@ -105,11 +105,13 @@ def n_modes(L, prom=0.1):
 def pylmm_profile(lmm, reml):
     """pylmm's own LL (clamped eigenvalues) on LL_GRID; REML includes pylmm's
     constant, irrelevant for deficits."""
-    return np.array([float(np.sum(lmm.LL(h, lmm.X0t, stack=False, REML=reml)[0])) for h in LL_GRID])
+    return np.array(
+        [float(np.sum(lmm.log_likelihood(h, lmm.x0t, stack=False, reml=reml)[0])) for h in LL_GRID]
+    )
 
 
 def pylmm_block(prefix, y, kin, reml, n):
-    r = methods.pylmm_null(y, kin, REML=reml)
+    r = methods.pylmm_null(y, kin, reml=reml)
     L = pylmm_profile(r["lmm"], reml)
     ll_hat = float(r["ll"])
     h = r["h"]
@@ -137,29 +139,29 @@ def pylmm_block(prefix, y, kin, reml, n):
 
 def oracle_block(prefix, y, K, reml):
     """Four oracle variants for one likelihood."""
-    fT = oracle.fit(y, K, reml=reml)
-    fG = oracle.fit(y, K, reml=reml, h_grid="pylmm")
-    fC = oracle.fit(y, K, reml=reml, eig_clamp=CLAMP)
-    fB = oracle.fit(y, K, reml=reml, eig_clamp=CLAMP, h_grid="pylmm")
+    f_t = oracle.fit(y, K, reml=reml)
+    f_g = oracle.fit(y, K, reml=reml, h_grid="pylmm")
+    f_c = oracle.fit(y, K, reml=reml, eig_clamp=CLAMP)
+    f_b = oracle.fit(y, K, reml=reml, eig_clamp=CLAMP, h_grid="pylmm")
     out = {
-        prefix + "h_T": fT.h,
-        prefix + "h_G": fG.h,
-        prefix + "h_C": fC.h,
-        prefix + "h_B": fB.h,
-        prefix + "beta_T": float(fT.beta[0]),
-        prefix + "sigma2_T": fT.sigma2,
-        prefix + "hit1_T": int(fT.h >= 1 - 1e-6),
-        prefix + "n_modes_T": n_modes(fT.ll_grid),
+        prefix + "h_T": f_t.h,
+        prefix + "h_G": f_g.h,
+        prefix + "h_C": f_c.h,
+        prefix + "h_B": f_b.h,
+        prefix + "beta_T": float(f_t.beta[0]),
+        prefix + "sigma2_T": f_t.sigma2,
+        prefix + "hit1_T": int(f_t.h >= 1 - 1e-6),
+        prefix + "n_modes_T": n_modes(f_t.ll_grid),
         # LL (textbook, unclamped) of pylmm-optimizer answer vs the global answer
         prefix + "ll_deficit_G": float(
-            max(0.0, fT.ll - oracle.profile_loglik(fG.h, y, K, None, reml)[0])
+            max(0.0, f_t.ll - oracle.profile_loglik(f_g.h, y, K, None, reml)[0])
         ),
-        prefix + "ll_deficit_B": float(max(0.0, fC.ll - fB.ll)),
+        prefix + "ll_deficit_B": float(max(0.0, f_c.ll - f_b.ll)),
     }
     if not reml:
-        out["ml_unbounded"] = int(fT.ml_unbounded)
-        out["sigma2_ml_T"] = fT.sigma2_ml
-        out["sigma2_reml_T"] = fT.sigma2_reml
+        out["ml_unbounded"] = int(f_t.ml_unbounded)
+        out["sigma2_ml_T"] = f_t.sigma2_ml
+        out["sigma2_reml_T"] = f_t.sigma2_reml
     return out
 
 
@@ -188,22 +190,22 @@ def simulate_probe(params, seed):
     y = ph.y.copy()
     if kind == "mix_family":  # extra family component not in K (K is balding_nichols)
         k2 = kinship.get(geno_spec("family", n, 5 * n, params["geno_seed"]))
-        y = y + np.sqrt(1.0) * phenotypes.sample_polygenic(k2.Kva, k2.Kve, 1.0, rng)
+        y = y + np.sqrt(1.0) * phenotypes.sample_polygenic(k2.kva, k2.kve, 1.0, rng)
     elif kind == "mix_bn":
         # despite the name, NOT a Balding-Nichols component: a second *family*
         # kinship from another genotype draw (geno_seed + 1), also not in K
         k2 = kinship.get(geno_spec("family", n, 5 * n, params["geno_seed"] + 1))
-        y = y + phenotypes.sample_polygenic(k2.Kva, k2.Kve, 1.0, rng)
+        y = y + phenotypes.sample_polygenic(k2.kva, k2.kve, 1.0, rng)
     elif kind == "mix_rank":  # signal on a few top eigenvectors only (low-rank, spiky)
-        top = np.argsort(kin.Kva)[-3:]
-        y = y + 3.0 * np.asarray(kin.Kve)[:, top] @ rng.standard_normal(3)
+        top = np.argsort(kin.kva)[-3:]
+        y = y + 3.0 * np.asarray(kin.kve)[:, top] @ rng.standard_normal(3)
     return kin, y
 
 
 def run_main(params, seed):
     n = params["n"]
     kin, y = simulate_main(params, seed)
-    out = {"rank_K": int((kin.Kva > 1e-6).sum()), "frac_clamped": float((kin.Kva < CLAMP).mean())}
+    out = {"rank_K": int((kin.kva > 1e-6).sum()), "frac_clamped": float((kin.kva < CLAMP).mean())}
     out.update(pylmm_block("r_", y, kin, True, n))
     out.update(pylmm_block("m_", y, kin, False, n))
     do_oracle = n <= 200 or seed % ORACLE_MOD_600 == 0

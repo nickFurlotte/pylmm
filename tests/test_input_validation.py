@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from pylmm.cli import gwas as cli_gwas
-from pylmm.lmm import GWAS, LMM, calculateKinship, check_covariates, snp_estimable
+from pylmm.lmm import LMM, calculate_kinship, check_covariates, gwas, snp_estimable
 
 
 def quiet():
@@ -26,7 +26,7 @@ def prob():
     """The S5 reproducer prelude: n = 40, K from 200 SNPs, 5 test SNPs."""
     rng = np.random.default_rng(0)
     n = 40
-    K = calculateKinship(rng.binomial(2, 0.3, (n, 200)).astype(float))
+    K = calculate_kinship(rng.binomial(2, 0.3, (n, 200)).astype(float))
     y = rng.standard_normal(n)
     X = rng.binomial(2, 0.4, (n, 5)).astype(float)
     return rng, n, K, y, X
@@ -40,7 +40,7 @@ def prob():
 def test_constant_dosage_snp_is_nan(prob):
     rng, n, K, y, X = prob
     X[:, 2] = 0.37  # var() is ~1e-33, not exactly 0
-    t, p = GWAS(y, X, K)
+    t, p = gwas(y, X, K)
     assert np.isnan(t[2]) and np.isnan(p[2])
     assert np.isfinite(np.delete(t, 2)).all()
 
@@ -52,7 +52,7 @@ def test_snp_equal_to_covariate_is_nan(prob):
     X[:, 3] = 2 * c + 1  # in the span of [1, c]
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # no LinAlgWarning any more
-        t, p = GWAS(y, X, K, X0=np.column_stack([np.ones(n), c]))
+        t, p = gwas(y, X, K, X0=np.column_stack([np.ones(n), c]))
     assert np.isnan(t[1]) and np.isnan(t[3])
     assert np.isfinite([t[0], t[2], t[4]]).all()
 
@@ -62,7 +62,7 @@ def test_snp_constant_after_dropping_missing_is_nan(prob):
     X[:, 0] = 1.0
     X[:3, 0] = np.nan
     X[3, 0] = 1.0 + 1e-14  # one rounding-level difference
-    t, p = GWAS(y, X, K)
+    t, p = gwas(y, X, K)
     assert np.isnan(t[0])
 
 
@@ -141,7 +141,7 @@ def test_saturated_design_raises(prob, q_minus_n):
     X0 = np.column_stack([np.ones(n), rng.standard_normal((n, n + q_minus_n - 1))])
     assert n <= X0.shape[1] + 1
     with pytest.raises(ValueError, match="observations"):
-        GWAS(y, X, K, X0=X0)
+        gwas(y, X, K, X0=X0)
     with pytest.raises(ValueError, match="observations"):
         LMM(y, K, X0=X0)
 
@@ -151,7 +151,7 @@ def test_design_with_one_residual_df_is_fine(prob):
     X0 = np.column_stack([np.ones(n), rng.standard_normal((n, n - 3))])  # q + 1 = n - 1
     with quiet(), np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        GWAS(y, X[:, :1], K, X0=X0)
+        gwas(y, X[:, :1], K, X0=X0)
 
 
 def test_saturated_after_dropping_missing_y_raises(prob):
@@ -160,7 +160,7 @@ def test_saturated_after_dropping_missing_y_raises(prob):
     y[5:] = np.nan  # 5 observations
     X0 = np.column_stack([np.ones(n), rng.standard_normal((n, 3))])
     with pytest.raises(ValueError, match="n=5 observations"):
-        GWAS(y, X, K, X0=X0)
+        gwas(y, X, K, X0=X0)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ def test_kinship_nan_raises(prob):
     ):
         LMM(y, K)
     with pytest.raises(ValueError, match="kinship"):
-        GWAS(y, X, K)
+        gwas(y, X, K)
 
 
 def test_kinship_wrong_shape_raises(prob):
@@ -195,32 +195,32 @@ def test_kinship_asymmetric_warns(prob):
 def test_kinship_non_psd_warns_with_most_negative_eigenvalue(prob):
     rng, n, K, y, X = prob
     E = rng.standard_normal((n, n)) * 0.3
-    Kn = K + (E + E.T) / 2
-    emin = np.linalg.eigvalsh(Kn)[0]
+    k_noisy = K + (E + E.T) / 2
+    emin = np.linalg.eigvalsh(k_noisy)[0]
     assert emin < -0.1
     with quiet(), pytest.warns(UserWarning, match="not positive semi-definite") as rec:
-        LMM(y, Kn)
+        LMM(y, k_noisy)
     assert ("%g" % emin) in str(rec[0].message)
 
 
 def test_valid_rank_deficient_kinship_does_not_warn(prob):
     """Round-off eigenvalues of a rank-deficient GRM are not reported."""
     rng, n, K, y, X = prob
-    Klow = calculateKinship(rng.binomial(2, 0.3, (n, 5)).astype(float))  # rank <= 5
+    k_low = calculate_kinship(rng.binomial(2, 0.3, (n, 5)).astype(float))  # rank <= 5
     with quiet(), warnings.catch_warnings():
         warnings.simplefilter("error")
-        LMM(y, Klow).fit()
+        LMM(y, k_low).fit()
 
 
 def test_individual_ids_checked(prob):
     rng, n, K, y, X = prob
     ids = ["i%d" % i for i in range(n)]
     perm = list(reversed(ids))
-    GWAS(y, X[:, :1], K, ids=ids, K_ids=ids)
+    gwas(y, X[:, :1], K, ids=ids, kinship_ids=ids)
     with pytest.raises(ValueError, match="different order"):
-        GWAS(y, X[:, :1], K, ids=ids, K_ids=perm)
+        gwas(y, X[:, :1], K, ids=ids, kinship_ids=perm)
     with pytest.raises(ValueError, match="not in the kinship"):
-        LMM(y, K, ids=ids, K_ids=[*ids[:-1], "other"])
+        LMM(y, K, ids=ids, kinship_ids=[*ids[:-1], "other"])
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ def test_constant_phenotype_raises(prob):
     yc = np.full(n, 2.5)
     yc[:3] = np.nan
     with pytest.raises(ValueError, match="zero variance"):
-        GWAS(yc, X, K)
+        gwas(yc, X, K)
 
 
 def test_infinite_phenotype_raises(prob):
@@ -243,14 +243,14 @@ def test_infinite_phenotype_raises(prob):
     y = y.copy()
     y[4] = np.inf
     with pytest.raises(ValueError, match="infinite"):
-        GWAS(y, X, K)
+        gwas(y, X, K)
 
 
 def test_all_missing_phenotype(prob):
     rng, n, K, y, X = prob
     with pytest.raises(ValueError, match="no non-missing"):
         LMM(np.full(n, np.nan), K)
-    t, p = GWAS(np.full(n, np.nan), X, K)
+    t, p = gwas(np.full(n, np.nan), X, K)
     assert np.isnan(t).all() and isinstance(t, list)
 
 
@@ -290,7 +290,7 @@ def test_bad_covariates_raise_naming_the_column(prob, case, match):
     with pytest.raises(ValueError, match=match):
         check_covariates(X0)
     with pytest.raises(ValueError, match=match):
-        GWAS(y, X, K, X0=X0)
+        gwas(y, X, K, X0=X0)
     if case != "nan":
         with pytest.raises(ValueError, match=match):
             LMM(y, K, X0=X0)
@@ -311,7 +311,7 @@ def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
     rng = np.random.default_rng(3)
     n = 30
     G = rng.binomial(2, 0.4, (n, 3)).astype(float)
-    snps, ph, kf = _write_emma(tmp_path, G.T, rng.standard_normal(n), calculateKinship(G))
+    snps, ph, kf = _write_emma(tmp_path, G.T, rng.standard_normal(n), calculate_kinship(G))
     cov = str(tmp_path / "c.txt")
     with open(cov, "w") as f:
         f.write(" ".join(["1"] * n) + "\n")
@@ -347,16 +347,16 @@ def test_gwas_and_lmm_do_not_modify_inputs(prob):
     y = y.copy()
     y[2] = np.nan
     X[5, 1] = np.nan
-    Kva, Kve = np.linalg.eigh(K)
-    Kva[0] = -1e-3  # gets clamped inside LMM
+    kva, kve = np.linalg.eigh(K)
+    kva[0] = -1e-3  # gets clamped inside LMM
     X0 = np.column_stack([np.ones(n), rng.standard_normal(n)])
-    before = [a.copy() for a in (y, X, K, Kva, Kve, X0)]
+    before = [a.copy() for a in (y, X, K, kva, kve, X0)]
     with quiet(), warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        GWAS(y, X, K, X0=X0, refit=True)
+        gwas(y, X, K, X0=X0, refit=True)
         LMM(y[~np.isnan(y)], K[np.ix_(~np.isnan(y), ~np.isnan(y))], X0=X0[~np.isnan(y)])
-        LMM(np.nan_to_num(y), K, Kva, Kve, X0=X0)
-    for a, b in zip((y, X, K, Kva, Kve, X0), before):
+        LMM(np.nan_to_num(y), K, kva, kve, X0=X0)
+    for a, b in zip((y, X, K, kva, kve, X0), before):
         np.testing.assert_array_equal(a, b)
 
 
@@ -374,16 +374,16 @@ def test_covariate_nan_only_where_y_is_nan_is_accepted(prob):
     c = rng.standard_normal(n)
     X0 = np.column_stack([np.ones(n), c])
     X0[[3, 9], 1] = np.nan
-    t, p = GWAS(y, X, K, X0=X0)
+    t, p = gwas(y, X, K, X0=X0)
     keep = ~np.isnan(y)
-    t2, p2 = GWAS(y[keep], X[keep], K[keep][:, keep], X0=X0[keep])
+    t2, p2 = gwas(y[keep], X[keep], K[keep][:, keep], X0=X0[keep])
     np.testing.assert_allclose(t, t2, rtol=1e-10)
     L = LMM(y, K, X0=X0)
     assert keep.sum() == L.N
     # a nan on an individual that has a phenotype is still an error
     X0[5, 1] = np.nan
     with pytest.raises(ValueError, match="nan/inf"):
-        GWAS(y, X, K, X0=X0)
+        gwas(y, X, K, X0=X0)
     with pytest.raises(ValueError, match="nan/inf"):
         LMM(y, K, X0=X0)
 
@@ -414,6 +414,6 @@ def test_collinear_on_subset_gives_nan_and_one_summary_warning(prob):
     X[:3, 2] = np.nan
     X[0, 3] = np.nan  # b stays non-constant
     with pytest.warns(UserWarning, match=r"3 of 5 SNPs are nan") as rec:
-        t, p = GWAS(y, X, K, X0=X0)
+        t, p = gwas(y, X, K, X0=X0)
     assert len([w for w in rec if "SNPs are nan" in str(w.message)]) == 1
     assert np.isnan(t[:3]).all() and np.isfinite(t[3:]).all()

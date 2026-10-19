@@ -21,7 +21,7 @@ snps = np.load("data/hmdp.liver.snps.1000.npdump", allow_pickle=True, encoding="
 # calculate the kinship
 # snps = np.genfromtxt('data/hmdp.liver.snps').T
 # snps = np.load('data/hmdp.liver.snps.npdump', allow_pickle=True, encoding='latin1').T
-# K = lmm.calculateKinship(snps)
+# K = lmm.calculate_kinship(snps)
 
 # Instantiate a LMM object for the phentoype Y and fit the null model
 L = lmm.LMM(Y, K)
@@ -41,11 +41,11 @@ L.fit(X=X)
 ts, ps = L.association(X)
 
 # If I want to do a genome-wide scan over the 1000 SNPs.
-# This call will use REML (REML = False means use ML).
+# This call will use REML (reml=False means use ML).
 # It will also refit the variance components for each SNP.
 # Setting refit = False will cause the program to fit the model once
 # and hold those variance component estimates for each SNP.
 begin = time.time()
-TS, PS = lmm.GWAS(Y, snps, K, REML=True, refit=True)
+t_stats, p_values = lmm.gwas(Y, snps, K, reml=True, refit=True)
 end = time.time()
 sys.stderr.write("Total time for 1000 SNPs: %0.3f\n" % (end - begin))

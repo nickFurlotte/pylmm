@@ -11,13 +11,13 @@ the "K SNPs"; every tested SNP is null):
 * test set A: a subset of the K SNPs themselves (tested SNPs are in K);
 * methods on each test set:
     ols      per-SNP OLS t-test (no kinship)
-    reml     pylmm GWAS(REML=True):  null h by REML, SNP test by REML Wald
+    reml     pylmm gwas(reml=True):  null h by REML, SNP test by REML Wald
     cli      what `pylmmGWAS` did by default before Phase 5.2 (no --REML, no
              --refit): null h by REML (bug 1), SNP test labelled ML but with
              sigma^2 = Q/(n-q) (bug 9), i.e. exactly the REML Wald test.
-             Since Phase 5.2 GWAS(REML=False) is a real ML scan, so this is
-             computed as GWAS(REML=True), which gives the same numbers as
-             the pre-5.2 GWAS(REML=False) that produced the results.
+             Since Phase 5.2 gwas(reml=False) is a real ML scan, so this is
+             computed as gwas(reml=True), which gives the same numbers as
+             the pre-5.2 gwas(reml=False) that produced the results.
   Suffix _in marks test set A (tested SNPs in K).
 * metrics per replicate: lambda_GC, and *counts* k (p <= alpha) and n (SNPs
   tested) so that report() can pool exact rates over replicates and give
@@ -121,9 +121,9 @@ def _setup(params):
         geno = genotypes.get(spec)
         mk, mt = params["m_kin"], params["m_test"]
         kin = kinship.get(spec, snps=slice(0, mk))  # K from SNPs [0, mk)
-        G_dis = _impute_filter(geno.G, np.arange(mk, geno.G.shape[1]), mt)  # disjoint from K
-        G_in = _impute_filter(geno.G, np.arange(0, mk), mt)  # inside K
-        _SETUP[key] = (kin, G_dis, G_in)
+        g_dis = _impute_filter(geno.G, np.arange(mk, geno.G.shape[1]), mt)  # disjoint from K
+        g_in = _impute_filter(geno.G, np.arange(0, mk), mt)  # inside K
+        _SETUP[key] = (kin, g_dis, g_in)
     return _SETUP[key]
 
 
@@ -136,21 +136,21 @@ def _tail_and_random(p, rng):
 
 def run_cell(params, seed):
     rng = np.random.default_rng(seed)
-    kin, G_dis, G_in = _setup(params)
+    kin, g_dis, g_in = _setup(params)
     ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng)
     y = ph.y
 
     out = {
-        "h_hat": methods.pylmm_null(y, kin, REML=True)["h"],
-        "m_dis": G_dis.shape[1],
-        "m_in": G_in.shape[1],
+        "h_hat": methods.pylmm_null(y, kin, reml=True)["h"],
+        "m_dis": g_dis.shape[1],
+        "m_in": g_in.shape[1],
     }
     pv = {}
-    for suffix, G in (("", G_dis), ("_in", G_in)):
+    for suffix, G in (("", g_dis), ("_in", g_in)):
         pv["ols" + suffix] = methods.ols_gwas(y, G)[1]
-        pv["reml" + suffix] = methods.pylmm_gwas(y, G, kin, REML=True)[1]
+        pv["reml" + suffix] = methods.pylmm_gwas(y, G, kin, reml=True)[1]
         # pre-5.2 CLI default == REML Wald (bugs 1 and 9); see the docstring
-        pv["cli" + suffix] = methods.pylmm_gwas(y, G, kin, REML=True)[1]
+        pv["cli" + suffix] = methods.pylmm_gwas(y, G, kin, reml=True)[1]
 
     for meth in METHODS:
         p = np.asarray(pv[meth], dtype=np.float64)

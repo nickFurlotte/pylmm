@@ -1,13 +1,13 @@
 """Kinship matrices the way pylmm builds them, plus cached eigendecompositions.
 
-``kinship(G)`` is ``pylmm.lmm.calculateKinship`` on a *copy* of G (the pylmm
+``kinship(G)`` is ``pylmm.lmm.calculate_kinship`` on a *copy* of G (the pylmm
 function mean-imputes and standardises its argument in place).  Note its
 known quirks, which simulations inherit on purpose because they are what
 pylmm users get (docs/phase1-baseline.md, bug 8): monomorphic SNPs are
 dropped but still counted in the 1/m scale factor, and missing calls are
 mean-imputed before the variance is taken.
 
-``get(geno_spec, snps=...)`` caches (K, Kva, Kve) per process, keyed by the
+``get(geno_spec, snps=...)`` caches (K, kva, kve) per process, keyed by the
 genotype spec and the SNP subset, so replicates reuse one O(n^3) eigh.
 """
 
@@ -25,8 +25,8 @@ from sims import genotypes as _geno
 @dataclasses.dataclass
 class Kinship:
     K: np.ndarray  # n x n, read-only
-    Kva: np.ndarray  # eigenvalues (ascending), read-only, NOT clamped
-    Kve: np.ndarray  # eigenvectors (columns), read-only
+    kva: np.ndarray  # eigenvalues (ascending), read-only, NOT clamped
+    kve: np.ndarray  # eigenvectors (columns), read-only
     meta: dict = dataclasses.field(default_factory=dict)
 
     @property
@@ -34,14 +34,14 @@ class Kinship:
         return self.K.shape[0]
 
     def eig_for_pylmm(self):
-        """(Kva, Kve) safe to hand to ``pylmm.lmm.LMM``.
+        """(kva, kve) safe to hand to ``pylmm.lmm.LMM``.
 
         LMM clamps eigenvalues < 1e-6 *in place* in the array it is given
         (docs/phase1-baseline.md bug 12), which would corrupt the cache (and
-        fails on the read-only cached array), so Kva is copied.  Kve is only
+        fails on the read-only cached array), so kva is copied.  kve is only
         read by pylmm and is passed as is.
         """
-        return self.Kva.copy(), self.Kve
+        return self.kva.copy(), self.kve
 
     def subset(self, keep: np.ndarray) -> Kinship:
         """Kinship for a subset of individuals (recomputes the eigh)."""
@@ -49,20 +49,20 @@ class Kinship:
 
 
 def kinship(G: np.ndarray, center: bool = False) -> np.ndarray:
-    """``pylmm.lmm.calculateKinship`` on a copy of G (G is left untouched)."""
-    from pylmm.lmm import calculateKinship
+    """``pylmm.lmm.calculate_kinship`` on a copy of G (G is left untouched)."""
+    from pylmm.lmm import calculate_kinship
 
-    return calculateKinship(np.array(G, dtype=np.float64), center=center)
+    return calculate_kinship(np.array(G, dtype=np.float64), center=center)
 
 
 def from_matrix(K: np.ndarray, **meta) -> Kinship:
     """Wrap an existing kinship matrix (symmetrised) with its eigh."""
     K = np.array(K, dtype=np.float64)
     K = 0.5 * (K + K.T)
-    Kva, Kve = linalg.eigh(K)
-    for a in (K, Kva, Kve):
+    kva, kve = linalg.eigh(K)
+    for a in (K, kva, kve):
         a.setflags(write=False)
-    return Kinship(K, Kva, Kve, dict(meta))
+    return Kinship(K, kva, kve, dict(meta))
 
 
 def _snps_key(snps) -> str:

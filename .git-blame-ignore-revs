@@ -1,2 +1,4 @@
 # Pure `ruff format` commit (Phase 5.3)
 660a42791c2b42a72cb3d618e481c21e11003d1c
+# Phase 5.4 mechanical snake_case rename (docs/migration/rename_5_4.py output)
+b6c5a458d2352578f7a6127d219a875a4f6e918b

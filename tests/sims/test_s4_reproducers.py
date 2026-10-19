@@ -26,12 +26,11 @@ import numpy as np
 import pytest
 from scipy import linalg
 
-from pylmm import input as pinput
 from pylmm import lmm as pylmm_lmm
-from pylmm import misc
+from pylmm import misc, plink_io
 from pylmm.cli import gwas as cli_gwas
 from pylmm.cli import kinship as cli_kinship
-from pylmm.lmm import GWAS, LMM, calculateKinship
+from pylmm.lmm import LMM, calculate_kinship, gwas
 from sims import oracle
 
 try:  # scipy >= 1.11 (not exported publicly)
@@ -56,7 +55,7 @@ def toy(n=60, m=30, seed=0, maf=0.3):
     """Unrelated 0/1/2 genotypes, a GRM from m SNPs and a phenotype."""
     rng = np.random.default_rng(seed)
     G = rng.binomial(2, maf, size=(n, m)).astype(float)
-    K = calculateKinship(G.copy())
+    K = calculate_kinship(G.copy())
     y = rng.standard_normal(n) + 0.8 * (K @ rng.standard_normal(n)) / np.sqrt(m)
     return G, K, y, rng
 
@@ -130,11 +129,11 @@ def read_out(fn):
 
 
 def fake_lmm(ll):
-    """An LMM whose likelihood is the given function of h (for getMax logic)."""
+    """An LMM whose likelihood is the given function of h (for _get_max logic)."""
     G, K, y, _ = toy(n=20, m=10)
 
     class Fake(LMM):
-        def LL(self, h, X=None, stack=True, REML=False):
+        def log_likelihood(self, h, X=None, stack=True, reml=False):
             return (np.float64(ll(h)), np.zeros((1, 1)), np.ones((1, 1)), np.eye(1))
 
     with quiet():
@@ -149,17 +148,17 @@ def fake_lmm(ll):
 def _ml_bounded_case():
     # m < n - 1: K's null space is larger than span(1), so the ML profile is bounded
     G, K, y, rng = toy(n=80, m=25, seed=3)
-    Gt = rng.binomial(2, 0.3, size=(80, 6)).astype(float)
-    return Gt, K, y
+    g_test = rng.binomial(2, 0.3, size=(80, 6)).astype(float)
+    return g_test, K, y
 
 
 def test_bug1_gwas_reml_flag_changes_t():
-    """Regression (bug 1, fixed in Phase 5.2): REML=False used to give the
+    """Regression (bug 1, fixed in Phase 5.2): reml=False used to give the
     REML t and p exactly; it is now an ML scan."""
-    Gt, K, y = _ml_bounded_case()
+    g_test, K, y = _ml_bounded_case()
     with quiet():
-        t1, p1 = GWAS(y, Gt, K, REML=True)
-        t0, p0 = GWAS(y, Gt, K, REML=False)
+        t1, p1 = gwas(y, g_test, K, reml=True)
+        t0, p0 = gwas(y, g_test, K, reml=False)
     assert np.max(np.abs(np.subtract(t0, t1))) > 1e-3
 
 
@@ -217,8 +216,8 @@ def test_bug1_remove_missing_follows_reml_choice(bed_toy):
     d = bed_toy["dir"]
     G = bed_toy["G"]
     with quiet():
-        lib_reml = GWAS(bed_toy["y"], G, np.loadtxt(bed_toy["kin"]), REML=True)[0]
-        lib_ml = GWAS(bed_toy["y"], G, np.loadtxt(bed_toy["kin"]), REML=False)[0]
+        lib_reml = gwas(bed_toy["y"], G, np.loadtxt(bed_toy["kin"]), reml=True)[0]
+        lib_ml = gwas(bed_toy["y"], G, np.loadtxt(bed_toy["kin"]), reml=False)[0]
     for flags, lib in (([], lib_reml), (["--ML"], lib_ml)):
         a, b = str(d / "rm.out"), str(d / "imp.out")
         run_gwas(
@@ -241,14 +240,14 @@ def test_bug1_remove_missing_follows_reml_choice(bed_toy):
 
 def test_bug1_gwas_ml_equals_textbook_ml_wald():
     """Regression (bug 1 and, under ML only, bug 9; fixed in Phase 5.2):
-    GWAS(REML=False) is an ML null fit plus the textbook ML Wald test,
+    gwas(reml=False) is an ML null fit plus the textbook ML Wald test,
     sigma^2 = Q/n."""
-    Gt, K, y = _ml_bounded_case()
+    g_test, K, y = _ml_bounded_case()
     with quiet():
-        t0, _ = GWAS(y, Gt, K, REML=False)
+        t0, _ = gwas(y, g_test, K, reml=False)
     w = [
-        oracle.wald(y, K, Gt[:, j], null_reml=False, sigma_convention="textbook").t
-        for j in range(Gt.shape[1])
+        oracle.wald(y, K, g_test[:, j], null_reml=False, sigma_convention="textbook").t
+        for j in range(g_test.shape[1])
     ]
     np.testing.assert_allclose(t0, w, atol=1e-4)
 
@@ -273,7 +272,7 @@ def test_bug2_getmax_finds_peak_at_098():
 def test_bug3_current_h_grid_stops_at_099():
     L = fake_lmm(lambda h: h)  # increasing: maximum at h = 1
     assert L.fit()[0] == 0.99
-    assert L.H.max() == 0.99
+    assert L.h_grid.max() == 0.99
 
 
 @pytest.mark.xfail(strict=True, reason="bug 3: the h grid excludes 1.0")
@@ -282,19 +281,19 @@ def test_bug3_h_search_reaches_one():
     assert L.fit()[0] == 1.0
 
 
-@pytest.mark.xfail(strict=True, reason="bug 3: misc.fitTwo's w grid excludes 1.0 (K1 alone)")
+@pytest.mark.xfail(strict=True, reason="bug 3: misc.fit_two's w grid excludes 1.0 (K1 alone)")
 def test_bug3_fittwo_can_select_k1_alone():
     rng = np.random.default_rng(5)
     n = 50
     G1 = rng.binomial(2, 0.4, size=(n, 200)).astype(float)
     G2 = rng.binomial(2, 0.4, size=(n, 200)).astype(float)
-    K1, K2 = calculateKinship(G1), calculateKinship(G2)
+    K1, K2 = calculate_kinship(G1), calculate_kinship(G2)
     d, V = linalg.eigh(K1)
     y = V @ (np.sqrt(np.clip(d, 0, None)) * rng.standard_normal(n)) * 3 + 0.1 * rng.standard_normal(
         n
     )
     with quiet():
-        h1, h2, e, beta, sigma, LL = misc.fitTwo(y, K1, K2, wgrids=20)
+        h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(y, K1, K2, ngrids=20)
     assert h2 == 0.0
 
 
@@ -303,9 +302,9 @@ def test_bug4_ll_is_nan_above_one_but_ll_brent_guards_both_ends():
     with quiet():
         L = LMM(y, K)
     with np.errstate(invalid="ignore"):
-        assert np.isnan(L.LL(1.02)[0])  # log(h*Kva + 1 - h) of a negative number
-    assert L.LL_brent(-0.1) == 1e6
-    assert L.LL_brent(1.02) == 1e6  # fixed in Phase 5.1: h > 1 guarded too
+        assert np.isnan(L.log_likelihood(1.02)[0])  # log(h*kva + 1 - h) of a negative number
+    assert L._neg_log_likelihood(-0.1) == 1e6
+    assert L._neg_log_likelihood(1.02) == 1e6  # fixed in Phase 5.1: h > 1 guarded too
 
 
 def _peak_0972(h):
@@ -339,7 +338,7 @@ def _simulate_high_h2(seed):
     rng = np.random.default_rng(seed)
     n, m = 60, 30
     G = rng.binomial(2, 0.3, size=(n, m)).astype(float)
-    K = calculateKinship(G.copy())
+    K = calculate_kinship(G.copy())
     d, V = linalg.eigh(K)
     u = V @ (np.sqrt(np.clip(d, 0, None)) * rng.standard_normal(n))
     y = np.sqrt(0.97) * u + np.sqrt(0.03) * rng.standard_normal(n)
@@ -349,7 +348,7 @@ def _simulate_high_h2(seed):
 def _reml_grid(y, K):
     with quiet():
         L = LMM(y, K)
-    return L, np.array([L.LL(h, REML=True)[0] for h in np.arange(100) / 100.0])
+    return L, np.array([L.log_likelihood(h, reml=True)[0] for h in np.arange(100) / 100.0])
 
 
 def _high_h2_case():
@@ -360,8 +359,8 @@ def _high_h2_case():
     searched for here rather than hard-coded."""
     for seed in range(500):
         y, K = _simulate_high_h2(seed)
-        _, LLs = _reml_grid(y, K)
-        if LLs[96] < LLs[97] > LLs[98] and LLs[98] > LLs[96]:
+        _, ll_grid = _reml_grid(y, K)
+        if ll_grid[96] < ll_grid[97] > ll_grid[98] and ll_grid[98] > ll_grid[96]:
             return y, K
     pytest.fail("no seed in range(500) gives a REML peak at grid index 97")
 
@@ -378,19 +377,19 @@ def test_bug4_high_h2_case_matches_oracle():
     y, K = _high_h2_case()
     L, _ = _reml_grid(y, K)
     if SCIPY_HAS_BRACKETERROR:
-        old = lambda h: 1e6 if h < 0 else -L.LL(h, stack=False, REML=True)[0]  # noqa: E731
+        old = lambda h: 1e6 if h < 0 else -L.log_likelihood(h, stack=False, reml=True)[0]  # noqa: E731
         with pytest.raises(BracketError), np.errstate(all="ignore"):
             optimize.brent(old, brack=(0.96, 0.98))
     f = oracle.fit(y, K, reml=True, eig_clamp=1e-6, h_grid="pylmm")
     assert 0.96 < f.h < 0.98
-    h = float(np.sum(L.fit(REML=True)[0]))
+    h = float(np.sum(L.fit(reml=True)[0]))
     assert abs(h - f.h) < 1e-6
     # the 0.99 cap does not bind: the clamped global optimum is the same h
     assert abs(h - oracle.fit(y, K, reml=True, eig_clamp=1e-6).h) < 1e-6
     # per-SNP refit path (fit(X=x)) on the same data: no crash, h in [0, 1]
     x = np.random.default_rng(3).binomial(2, 0.3, size=(len(y), 1)).astype(float)
     with quiet():
-        hx = float(np.sum(L.fit(X=x, REML=True)[0]))
+        hx = float(np.sum(L.fit(X=x, reml=True)[0]))
     fx = oracle.fit(y, K, X=np.c_[np.ones(len(y)), x], reml=True, eig_clamp=1e-6, h_grid="pylmm")
     assert 0.0 <= hx <= 1.0 and abs(hx - fx.h) < 1e-6
 
@@ -510,18 +509,20 @@ def test_bug14_no_pheno_file_is_a_usage_error(bed_toy):
 
 def test_bug8_current_monomorphic_snps_shrink_k():
     G, _, _, _ = toy(n=30, m=40)
-    K = calculateKinship(G.copy())
-    K_mono = calculateKinship(np.hstack([G, np.zeros((30, 10))]))
-    np.testing.assert_allclose(K_mono, K * 40 / 50, rtol=1e-12)
+    K = calculate_kinship(G.copy())
+    k_mono = calculate_kinship(np.hstack([G, np.zeros((30, 10))]))
+    np.testing.assert_allclose(k_mono, K * 40 / 50, rtol=1e-12)
 
 
 @pytest.mark.xfail(
-    strict=True, reason="bug 8: calculateKinship divides by m including dropped monomorphic SNPs"
+    strict=True, reason="bug 8: calculate_kinship divides by m including dropped monomorphic SNPs"
 )
 def test_bug8_monomorphic_snps_do_not_change_k():
     G, _, _, _ = toy(n=30, m=40)
     np.testing.assert_allclose(
-        calculateKinship(np.hstack([G, np.zeros((30, 10))])), calculateKinship(G.copy()), rtol=1e-12
+        calculate_kinship(np.hstack([G, np.zeros((30, 10))])),
+        calculate_kinship(G.copy()),
+        rtol=1e-12,
     )
 
 
@@ -532,13 +533,13 @@ def test_bug8_current_kinship_cli_counts_monomorphic_snps(tmp_path):
     write_bed(base, np.hstack([G, np.zeros((24, 4))]))  # 4 monomorphic SNPs
     with quiet():
         cli_kinship.main(["--bfile", base, str(tmp_path / "k")])
-    K_cli = np.loadtxt(str(tmp_path / "k"))
-    np.testing.assert_allclose(K_cli, calculateKinship(G.copy()) * 12 / 16, rtol=1e-10)
+    k_cli = np.loadtxt(str(tmp_path / "k"))
+    np.testing.assert_allclose(k_cli, calculate_kinship(G.copy()) * 12 / 16, rtol=1e-10)
 
 
 @pytest.mark.xfail(
     strict=True,
-    reason="bug 8: lmm.calculateKinship and pylmmKinship normalise missing data differently",
+    reason="bug 8: lmm.calculate_kinship and pylmmKinship normalise missing data differently",
 )
 def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
     rng = np.random.default_rng(3)
@@ -549,7 +550,7 @@ def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
     with quiet():
         cli_kinship.main(["--bfile", base, str(tmp_path / "k")])
     np.testing.assert_allclose(
-        np.loadtxt(str(tmp_path / "k")), calculateKinship(G.copy()), atol=1e-8
+        np.loadtxt(str(tmp_path / "k")), calculate_kinship(G.copy()), atol=1e-8
     )
 
 
@@ -559,17 +560,17 @@ def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
 
 
 def test_bug9_ml_wald_uses_q_over_n():
-    """Phase 5.2: association(REML=False) uses the ML sigma^2 = Q/n (it used
+    """Phase 5.2: association(reml=False) uses the ML sigma^2 = Q/n (it used
     Q/(n-q) in both modes); REML keeps Q/(n-q).  fit()'s reported sigma is
     unchanged (Phase 6.3)."""
-    Gt, K, y = _ml_bounded_case()
+    g_test, K, y = _ml_bounded_case()
     with quiet():
         L = LMM(y, K)
-    L.fit(REML=False)
-    x = Gt[:, :1]
-    t_ml, _ = L.association(x, REML=False)
-    t_r, _ = L.association(x, REML=True)
-    wtb = oracle.wald(y, K, x, h=L.optH, null_reml=False, sigma_convention="textbook")
+    L.fit(reml=False)
+    x = g_test[:, :1]
+    t_ml, _ = L.association(x, reml=False)
+    t_r, _ = L.association(x, reml=True)
+    wtb = oracle.wald(y, K, x, h=L.opt_h, null_reml=False, sigma_convention="textbook")
     assert t_ml == pytest.approx(wtb.t, rel=1e-5)
     n, p = len(y), 2
     assert t_ml / t_r == pytest.approx(np.sqrt(n / (n - p)), rel=1e-10)
@@ -590,11 +591,11 @@ def test_bug10_getphenos_aligns_by_id(bed_toy):
         quiet(),
         pytest.warns(UserWarning, match="2 of 40 individuals are not in the phenotype file"),
     ):
-        IN = pinput.plink(bed_toy["base"], type="b", phenoFile=fn)
-    assert IN.phenos.shape == (bed_toy["n"], 1)
-    assert np.isnan(IN.phenos[[5, 17], 0]).all()
+        reader = plink_io.PlinkReader(bed_toy["base"], type="b", pheno_file=fn)
+    assert reader.phenos.shape == (bed_toy["n"], 1)
+    assert np.isnan(reader.phenos[[5, 17], 0]).all()
     keep = np.setdiff1d(np.arange(bed_toy["n"]), [5, 17])
-    np.testing.assert_allclose(IN.phenos[keep, 0], bed_toy["y"][keep], atol=1e-10)  # %.10f
+    np.testing.assert_allclose(reader.phenos[keep, 0], bed_toy["y"][keep], atol=1e-10)  # %.10f
 
 
 def test_bug10_pheno_file_reordered_or_with_strangers(bed_toy):
@@ -727,7 +728,7 @@ def test_bug10_covariate_file_absent_individuals_dropped(bed_toy):
 
 def test_bug11_normalize_all_missing_keeps_length():
     """Regression (bug 11, fixed in Phase 5.2): used to return an empty array."""
-    g = pinput.plink.normalizeGenotype(None, np.full(5, np.nan))
+    g = plink_io.PlinkReader.normalize_genotype(None, np.full(5, np.nan))
     assert g.shape == (5,) and np.isnan(g).all()
 
 
@@ -741,7 +742,7 @@ def test_bug11_cli_gwas_all_missing_snp(tmp_path, flags):
     base = str(tmp_path / "allmiss")
     write_bed(base, G)
     write_phenos(base + ".phenos", rng.standard_normal(24))
-    np.savetxt(str(tmp_path / "k"), calculateKinship(G[:, [0, 1, 2, 4, 5]].copy()))
+    np.savetxt(str(tmp_path / "k"), calculate_kinship(G[:, [0, 1, 2, 4, 5]].copy()))
     run_gwas(["--bfile", base, "--kfile", str(tmp_path / "k"), *flags, str(tmp_path / "o")])
     r = read_out(str(tmp_path / "o"))
     assert r.shape == (6, 4)
@@ -754,7 +755,7 @@ def test_bug11_library_all_missing_snp():
     X = G[:, :4].copy()
     X[:, 1] = np.nan
     with quiet():
-        t, p = GWAS(y, X, K)
+        t, p = gwas(y, X, K)
     assert np.isnan(t[1]) and np.isnan(p[1]) and np.isfinite(np.delete(t, 1)).all()
 
 
@@ -770,14 +771,14 @@ def test_bug11_cli_kinship_all_missing_snp(tmp_path):
     with quiet(), pytest.warns(UserWarning, match="skipped 1 SNPs with no called genotype"):
         cli_kinship.main(["--bfile", base, str(tmp_path / "k")])
     K = np.loadtxt(str(tmp_path / "k"))
-    np.testing.assert_allclose(K, calculateKinship(G[:, [0, 1, 2, 4, 5]]) * 5 / 6, rtol=1e-10)
+    np.testing.assert_allclose(K, calculate_kinship(G[:, [0, 1, 2, 4, 5]]) * 5 / 6, rtol=1e-10)
 
 
 def test_bug11_calculatekinship_skips_all_missing_snp():
     G, _, _, _ = toy(n=30, m=10)
-    K = calculateKinship(np.hstack([G, np.full((30, 1), np.nan)]))
+    K = calculate_kinship(np.hstack([G, np.full((30, 1), np.nan)]))
     assert np.isfinite(K).all()
-    np.testing.assert_allclose(K, calculateKinship(G) * 10 / 11, rtol=1e-12)
+    np.testing.assert_allclose(K, calculate_kinship(G) * 10 / 11, rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -788,11 +789,11 @@ def test_bug11_calculatekinship_skips_all_missing_snp():
 def test_bug12_lmm_does_not_mutate_kva():
     """Regression (bug 12, fixed in Phase 5.2)."""
     G, K, y, _ = toy()
-    Kva, Kve = linalg.eigh(K)
-    before = Kva.copy()
+    kva, kve = linalg.eigh(K)
+    before = kva.copy()
     with quiet():
-        LMM(y, K, Kva, Kve)
-    np.testing.assert_array_equal(Kva, before)
+        LMM(y, K, kva, kve)
+    np.testing.assert_array_equal(kva, before)
 
 
 def test_bug12_calculatekinship_does_not_mutate_w():
@@ -801,7 +802,7 @@ def test_bug12_calculatekinship_does_not_mutate_w():
     W = G.copy()
     W[0, 0] = np.nan
     before = W.copy()
-    calculateKinship(W)
+    calculate_kinship(W)
     np.testing.assert_array_equal(W, before)
 
 
@@ -829,8 +830,8 @@ def test_bug13_one_filter_for_both_branches(tmp_path):
             f.write(" ".join("NA" if np.isnan(v) else "%g" % v for v in row) + "\n")
     with open(str(tmp_path / "p.txt"), "w") as f:
         f.write(" ".join("%.6f" % v for v in rng.standard_normal(n)) + "\n")
-    Gk = rng.binomial(2, 0.4, size=(n, 60)).astype(float)
-    np.savetxt(str(tmp_path / "k"), calculateKinship(Gk))
+    g_kin = rng.binomial(2, 0.4, size=(n, 60)).astype(float)
+    np.savetxt(str(tmp_path / "k"), calculate_kinship(g_kin))
     out = str(tmp_path / "o")
     run_gwas(
         [
@@ -856,14 +857,14 @@ def test_bug13_one_filter_for_both_branches(tmp_path):
 
 
 def test_bug15_current_fit_return_shapes():
-    """fit and association(returnBeta=True) still return 1x1 / qx1 arrays
+    """fit and association(return_beta=True) still return 1x1 / qx1 arrays
     (the rest of bug 15, open)."""
     G, K, y, _ = toy()
     with quiet():
         L = LMM(y, K)
     h, beta, sigma, ll = L.fit()
     assert np.shape(sigma) == (1, 1) and np.shape(beta) == (1, 1)
-    _, _, b, bvar = L.association(G[:, :1], returnBeta=True)
+    _, _, b, bvar = L.association(G[:, :1], return_beta=True)
     assert np.shape(bvar) == (1, 1) and np.ndim(b) == 0
 
 
@@ -871,8 +872,8 @@ def test_bug15_gwas_return_type_consistent():
     """Regression (bug 15, the GWAS part, fixed in Phase 5.2): always lists."""
     G, K, y, _ = toy()
     with quiet():
-        a = GWAS(np.full(len(y), np.nan), G[:, :3], K)
-        b = GWAS(y, G[:, :3], K)
+        a = gwas(np.full(len(y), np.nan), G[:, :3], K)
+        b = gwas(y, G[:, :3], K)
     assert type(a[0]) is type(b[0]) is list
     assert len(a[0]) == 3 and np.isnan(a[0]).all()
 
@@ -889,7 +890,7 @@ def test_bug16_headered_kinship_rejected(tmp_path):
     with open(fn, "w") as f:
         f.write("# a header line\n1 0\n0 1\n")
     with pytest.raises(ValueError, match="not a number"):
-        cli_gwas.readKinshipFile(fn, 2)
+        cli_gwas.read_kinship_file(fn, 2)
 
 
 def test_bug16_wrong_size_kinship_rejected(tmp_path):
@@ -898,7 +899,7 @@ def test_bug16_wrong_size_kinship_rejected(tmp_path):
     fn = str(tmp_path / "k.txt")
     np.savetxt(fn, np.eye(3))
     with pytest.raises((ValueError, SystemExit)):
-        cli_gwas.readKinshipFile(fn, 4)
+        cli_gwas.read_kinship_file(fn, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -915,7 +916,7 @@ def test_bug17_ml_profile_unbounded_with_centred_grm_m_gt_n():
     # pylmm's clamp turns the divergence into a bounded spike beyond its 0.99 cap
     with quiet():
         L = LMM(y, K)
-    ll = [L.LL(h, REML=False)[0] for h in (0.99, 0.9999, 1 - 1e-9)]
+    ll = [L.log_likelihood(h, reml=False)[0] for h in (0.99, 0.9999, 1 - 1e-9)]
     assert ll[0] < ll[1] < ll[2] < np.inf
     # a larger null space (m < n - 1): bounded
     G2, K2, y2, _ = toy(n=40, m=15, seed=7)
@@ -982,8 +983,8 @@ def test_cli_eigen_ignored_is_reported_unconditionally(bed_toy):
     d = bed_toy["dir"]
     write_phenos(str(d / "na.ph"), bed_toy["y"], na=(5,))
     K = np.loadtxt(bed_toy["kin"])
-    Kva, Kve = linalg.eigh(K)
-    np.savez(str(d / "e.npz"), Kva=Kva, Kve=Kve)
+    kva, kve = linalg.eigh(K)
+    np.savez(str(d / "e.npz"), Kva=kva, Kve=kve)
     err = run_gwas_err(
         [
             "--bfile",

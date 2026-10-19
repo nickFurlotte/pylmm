@@ -3,6 +3,8 @@
 Reference outputs from the original Python 2.7 pylmm code. Later phases (the
 Python 3 port) are regression-tested against these files.
 
+API names here are the original py2 (Phase 1) names; see docs/migration/name-map.csv.
+
 **Exception (Phase 5.2):** `gwas_cli_bed_snps50_refit.out` and
 `gwas_cli_bed_snps50_removeMissing.out` were regenerated with the Python 3
 code, on purpose; see [Phase 5.2 changes](#phase-52-regenerated-refit-and-removemissing-goldens)

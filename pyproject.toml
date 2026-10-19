@@ -66,8 +66,6 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# N (pep8-naming) is deliberately NOT enabled yet: the snake_case rename is
-# Phase 5.4, which enables N at the same time.
 select = [
     "E", "W",  # pycodestyle
     "F",       # pyflakes
@@ -80,6 +78,7 @@ select = [
     "RUF",     # ruff-specific
     "PERF",    # perflint
     "PT",      # pytest style
+    "N",       # pep8-naming (see docs/conventions.md)
 ]
 ignore = [
     # Long lines: `ruff format` wraps code; what is left is argparse/optparse help
@@ -106,11 +105,14 @@ ignore = [
     "PERF401",
 ]
 
+[tool.ruff.lint.pep8-naming]
+# Math symbols (docs/conventions.md): a single capital letter, optionally
+# followed by digits, names a matrix or vector of the model (K, X, Y, X0, K2)
+# and may be used as a parameter, local variable or attribute.  Every other
+# name follows PEP 8.
+ignore-names = ["[A-Z]", "[A-Z][0-9]", "[A-Z][0-9][0-9]"]
+
 [tool.ruff.lint.per-file-ignores]
 # The optparse `usage` text has trailing whitespace inside the triple-quoted
 # string; it is part of the --help output, so leave it.
 "pylmm/cli/gwas.py" = ["W291"]
-# Kva=[] / Kve=[] are public signatures (GWAS, LMM.__init__) meaning "compute
-# the eigendecomposition"; they are only tested for emptiness, never mutated.
-# Changing the defaults to None is an API change, deferred to the 5.4 rename.
-"pylmm/lmm.py" = ["B006"]

@@ -11,12 +11,12 @@ FITS = h.load_kv("null_fits.kv.txt")
 
 def check_fit(L, prefix):
     """Compare an LMM after fit() against null_fits.kv.txt[prefix.*]."""
-    beta = np.asarray(L.optBeta).ravel()
-    mn, vx = L.meanAndVar()
+    beta = np.asarray(L.opt_beta).ravel()
+    mn, vx = L.mean_and_var()
     got = {
-        "h": L.optH,
-        "sigma": L.optSigma,
-        "LL": L.optLL,
+        "h": L.opt_h,
+        "sigma": L.opt_sigma,
+        "LL": L.opt_ll,
         "h_posterior_mean": mn,
         "h_posterior_var": vx,
     }
@@ -29,34 +29,34 @@ def check_fit(L, prefix):
         h.assert_close(
             got[k], FITS[prefix + "." + k], rtol=h.RTOL_FIT, atol=h.ATOL_FIT, what=prefix + "." + k
         )
-    assert 0.0 <= L.optH <= 1.0, "%s: h=%r outside [0, 1]" % (prefix, L.optH)
+    assert 0.0 <= L.opt_h <= 1.0, "%s: h=%r outside [0, 1]" % (prefix, L.opt_h)
 
 
 @pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
 def test_hmdp_null_fit(hmdp, reml):
     Y, K, _ = hmdp
     L = lmm.LMM(Y, K)
-    L.fit(REML=reml)
+    L.fit(reml=reml)
     check_fit(L, "hmdp_%s" % ("reml" if reml else "ml"))
 
 
-def test_hmdp_LL_grid(hmdp):
+def test_hmdp_ll_grid(hmdp):
     """LL over the fixed h grid: no optimiser involved, so tight tolerance."""
     Y, K, _ = hmdp
     grid = h.load_golden_txt("null_fit_hmdp_LLgrid.txt")
     for col, reml in ((1, True), (2, False)):
         L = lmm.LMM(Y, K)
-        L.fit(REML=reml)
-        h.assert_close(L.H, grid[:, 0], what="H grid")
-        h.assert_close(L.LLs, grid[:, col], what="LL grid REML=%s" % reml)
+        L.fit(reml=reml)
+        h.assert_close(L.h_grid, grid[:, 0], what="H grid")
+        h.assert_close(L.ll_grid, grid[:, col], what="LL grid REML=%s" % reml)
 
 
 def test_hmdp_missing_y(hmdp):
     Y, K, _ = hmdp
-    Ym = Y.copy()
-    Ym[h.HMDP_MISSING_Y] = np.nan
-    L = lmm.LMM(Ym, K)
-    L.fit(REML=True)
+    y_missing = Y.copy()
+    y_missing[h.HMDP_MISSING_Y] = np.nan
+    L = lmm.LMM(y_missing, K)
+    L.fit(reml=True)
     check_fit(L, "hmdp_missingY_reml")
 
 
@@ -65,14 +65,14 @@ def test_hmdp_covariate(hmdp):
     c = snps[:, h.HMDP_COV_SNP].copy()
     c[np.isnan(c)] = c[~np.isnan(c)].mean()
     L = lmm.LMM(Y, K, X0=np.column_stack([np.ones(len(Y)), c]))
-    L.fit(REML=True)
+    L.fit(reml=True)
     check_fit(L, "hmdp_cov_reml")
 
 
 @pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
 def test_bed_null_fit(bed_null, reml):
-    """README data; fits at the h=0 boundary (getMax endpoint branch)."""
-    Y, K, Kva, Kve = bed_null
-    L = lmm.LMM(Y, K, Kva.copy(), Kve)
-    L.fit(REML=reml)
+    """README data; fits at the h=0 boundary (_get_max endpoint branch)."""
+    Y, K, kva, kve = bed_null
+    L = lmm.LMM(Y, K, kva.copy(), kve)
+    L.fit(reml=reml)
     check_fit(L, "bed_%s" % ("reml" if reml else "ml"))

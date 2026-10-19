@@ -42,10 +42,10 @@ The py2.7 image gives the same result on the ported code.
 |---|---|
 | `helpers.py` | paths, **all tolerances**, golden readers, input writers (BED/TPED/EMMA subsets, covariate and missing-phenotype files, header-less and gzipped kinship), CLI runner with timeout and `#`-header guard, the one npdump loader |
 | `conftest.py` | `--runslow`, session data fixtures (`hmdp`, `bed_null`) |
-| `test_kinship.py` | `calculateKinship` (hmdp, centered, BED), `pylmmKinship.py` BED and EMMA paths, eigenvalues, symmetry/PSD, npdump = text. 1219×1219 kinships are checked through the leading and trailing 100×100 blocks, the diagonal and `K.dot(cos(arange(n)))` |
+| `test_kinship.py` | `calculate_kinship` (hmdp, centered, BED), `pylmmKinship.py` BED and EMMA paths, eigenvalues, symmetry/PSD, npdump = text. 1219×1219 kinships are checked through the leading and trailing 100×100 blocks, the diagonal and `K.dot(cos(arange(n)))` |
 | `test_null_fit.py` | `LMM.fit` REML/ML, LL grid, missing Y, covariate, BED h=0 boundary, h in [0,1] |
-| `test_association.py` | `lmm.GWAS` REML/ML × refit with missing genotypes, `association(returnBeta=True)` on imputed SNPs, p-value vs t-stat/df |
-| `test_misc.py` | `misc.fitTwo` |
+| `test_association.py` | `lmm.gwas` REML/ML × refit with missing genotypes, `association(return_beta=True)` on imputed SNPs, p-value vs t-stat/df |
+| `test_misc.py` | `misc.fit_two` |
 | `test_cli_gwas.py` | `pylmmGWAS.py`: BED (default, `--REML`, `--refit`, `--REML --refit`, `--removeMissingGenotypes`, `--covfile`, `NA`/`-9` phenotypes), `--tfile`, EMMA (with/without `--emmaCOV`, gzipped `--kfile`, `NA` phenotypes). Each run also checks the null fit printed by `-v` against `gwas_cli_nullfit.kv.txt` and, where the same model exists, against the API fit in `null_fits.kv.txt`; the EMMA t-stats are also checked against the API's `assoc_hmdp_imputed.txt` |
 | `test_example_script.py` | `scripts/example.py` end to end, via `runpy`; `LMM.fit`/`association` are wrapped to record the intermediate null fit and first association |
 
@@ -62,7 +62,7 @@ All of them are defined in `helpers.py`, with the measurements behind them.
   (fitted h, sigma, beta, LL, t-statistics). `RTOL_FIT=1e-5`, `ATOL_FIT=5e-6`.
   Measured by perturbing the hmdp kinship as `K*(1 + eps*N)` (N symmetric
   standard normal; 200 seeds at eps=1e-15 and 100 at 1e-14) and rerunning
-  the null fit, `lmm.GWAS` (with and without refit) and the imputed
+  the null fit, `lmm.gwas` (with and without refit) and the imputed
   association. The worst changes were 5.7e-8 in h, 5.0e-7 absolute in a
   t-stat (a per-SNP refit; up to 1.6e-5 relative for |t| near 1e-3) and
   1.1e-8 in beta. `ATOL_FIT` is 10x the worst absolute t-stat change. The
@@ -103,7 +103,7 @@ generator's `run_cli`) refuse any input file that starts with `#`.
   columns, because of known bugs (`docs/phase1-baseline.md` #1 and #9). That
   test therefore does not exercise ML. ML fitting is covered directly by
   `test_null_fit.py` (`hmdp_ml`, `bed_ml`).
-- REML refit through `lmm.GWAS` is checked on the first 200 SNPs only. All
+- REML refit through `lmm.gwas` is checked on the first 200 SNPs only. All
   1000 are covered through `example.py`.
 - `--removeMissingGenotypes` gets no p-value/df check, because its per-SNP N
   isn't in the output.
@@ -114,11 +114,11 @@ generator's `run_cli`) refuse any input file that starts with `#`.
 - Not covered: `--kfile2` (broken, bug 6), `--eigen` (cannot read what
   pylmmKinship writes, bug 7), `--noMean`, `-p` (phenotype index > 0),
   `--covfile` with missing values (the CLI refuses them), the fastLMM-style
-  kinship reader in `input.readKinship` (unreachable from the CLIs),
+  kinship reader in `plink_io.PlinkReader.read_kinship` (unreachable from the CLIs),
   `pylmmKinship.py --tfile`, and `.kin` auto-discovery next to the genotype
   files.
 - The TPED and covariate inputs are synthetic (derived from the BED subset);
   TPED uses only allele codes `1`/`2`/`0`, the only ones
-  `input.getGenos_tped` understands.
+  `plink_io.PlinkReader._get_genos_tped` understands.
 - The only test that reads `data/*.npdump` pickles goes through
   `helpers.load_npdump`. `scripts/example.py` also loads them itself.
