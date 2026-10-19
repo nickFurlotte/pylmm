@@ -252,7 +252,8 @@ def test_pylmm_matches_oracle_on_easy_problem():
         ll_p = L.LL(f.h, REML=reml)[0]
         np.testing.assert_allclose(ll_p, f.ll + off, rtol=1e-9)
         t_p, _ = L.association(x.reshape(-1, 1), h=f.h, REML=reml)
-        np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, sigma_convention="pylmm").t,
+        # association(REML=False) is the ML Wald test, sigma^2 = Q/n (Phase 5.2)
+        np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, null_reml=reml).t,
                                    rtol=1e-8)
 
 
@@ -324,7 +325,8 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
 
 def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
     """Oracle with all pylmm switches vs pylmm: null fit (REML and ML) and
-    GWAS t (REML, and REML=False, which pylmm fits with a REML null)."""
+    GWAS t (REML, and REML=False, which since Phase 5.2 is ML throughout:
+    ML null fit and ML Wald test with sigma^2 = Q/n)."""
     from pylmm.lmm import LMM
     from sims import methods
     K = np.asarray(kin.K)
@@ -338,8 +340,8 @@ def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
         np.testing.assert_allclose(np.ravel(beta), f.beta, rtol=1e-5, atol=1e-7)
     for reml in (True, False):
         t_p, p_p = methods.pylmm_gwas(y, xs, kin, X0=X0, REML=reml)
-        w = [oracle.wald(y, K, xs[:, j], X0=X0, null_reml=True, test_reml=reml,
-                         sigma_convention="pylmm", **PYLMM) for j in range(xs.shape[1])]
+        w = [oracle.wald(y, K, xs[:, j], X0=X0, null_reml=reml, **PYLMM)
+             for j in range(xs.shape[1])]
         np.testing.assert_allclose(t_p, [v.t for v in w], atol=tol_t, rtol=tol_t)
         np.testing.assert_allclose(p_p, [v.p for v in w], rtol=1e-4)
 

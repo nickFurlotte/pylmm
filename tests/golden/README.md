@@ -3,6 +3,11 @@
 Reference outputs from the original Python 2.7 pylmm code. Later phases (the
 Python 3 port) are regression-tested against these files.
 
+**Exception (Phase 5.2):** `gwas_cli_bed_snps50_refit.out` and
+`gwas_cli_bed_snps50_removeMissing.out` were regenerated with the Python 3
+code, on purpose; see [Phase 5.2 changes](#phase-52-regenerated-refit-and-removemissing-goldens)
+below. Every other file is unchanged.
+
 Regenerate them from the repo root. Generation is deterministic: two runs
 produce byte-identical files.
 
@@ -157,6 +162,42 @@ hmdp_K_npdump.txt`, so K was all zeros (the CLI printed h=0.068 instead of
 the REML 0.454) and they were effectively OLS results.
 
 The generator refuses to pass any text file that starts with `#` to a CLI.
+
+### Phase 5.2: regenerated `--refit` and `--removeMissing` goldens
+
+Bug 1 (docs/phase1-baseline.md) is fixed in Phase 5.2. REML is now the
+explicit default of `pylmmGWAS` for the null fit, every per-SNP fit and the
+test; `--REML` is a no-op, and the new `--ML` switches all of them to ML.
+The Phase 1 CLI fitted the default null model by REML, but `--refit` and
+the missing-genotype branch of `--removeMissingGenotypes` refitted by
+**ML** (`fit(REML=options.REML)`, default False). Those two outputs
+therefore change, and only those two:
+
+| file | before (py2, ML per-SNP fits) → after (py3, REML) |
+|---|---|
+| `gwas_cli_bed_snps50_refit.out` | 8 of 50 SNPs change by more than 1e-5 relative: max \|Δt\| 0.236 (max 84% relative, at a small t), max \|Δlog10 p\| 0.096, max relative Δβ 1.08 and ΔSD 0.14; the nan positions are the same. The new file equals the py2 `gwas_cli_bed_snps50_reml_refit.out` (`--REML --refit`) to 1.6e-6 relative in t (4.9e-8 in log10 p), which is what the fix should give. |
+| `gwas_cli_bed_snps50_removeMissing.out` | 10 of 50 SNPs change, all of them SNPs with missing calls (the only ones refitted per SNP): max \|Δt\| 1.3e-3 (0.41% relative), max \|Δlog10 p\| 9.1e-4, max relative Δβ 3.7e-3; the others agree to ~2e-14 relative, and the nan positions are the same. |
+
+The -v null fits in `gwas_cli_nullfit.kv.txt` were already REML and are
+unchanged. The py2 originals are kept for reference in
+[`py2_original/`](py2_original/). `generate_golden.py` is the Phase 1
+generator: regenerating the original goldens needs the Phase 1 code under
+Python 2.7 (`docker/py27`, numpy 1.16.6). Run on the current code it would
+produce different refit/ML columns, so it refuses to run under Python 3 (the
+numpy/scipy version check was already there). The new files come from
+
+```
+uv run python tests/golden/generate_phase5_2.py      # writes the two files here
+```
+
+which runs exactly the Phase 1 commands on the same 50-SNP BED subset
+(numpy 2.5.4, scipy 1.18.1, Python 3.13, uv.lock).
+
+Also changed in meaning, but not in content: the `ts_ml_norefit` /
+`ps_ml_norefit` columns of `assoc_hmdp_GWAS.txt` are REML numbers (see
+Comparison rules). Since Phase 5.2 `lmm.GWAS(REML=False)` is a real ML scan,
+so `tests/test_association.py` checks it against the oracle instead of those
+columns, and the file is left as it was.
 
 ### Other
 

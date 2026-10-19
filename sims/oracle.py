@@ -327,8 +327,9 @@ def wald(y: np.ndarray, K: np.ndarray, x: np.ndarray,
     * ``sigma_convention='pylmm'``: sigma^2 = Q/(n-p) always (bug 9)
 
     se^2 = sigma^2 [(X'H^-1X)^-1]_xx, p from t with df = n - p (p includes x).
-    pylmm's ``GWAS(REML=False)`` = ``null_reml=True, test_reml=False,
-    sigma_convention='pylmm'`` (bug 1: the null fit ignores REML).
+    Before Phase 5.2, pylmm's ``GWAS(REML=False)`` was ``null_reml=True,
+    test_reml=False, sigma_convention='pylmm'`` (bugs 1 and 9); since 5.2 it
+    is ``null_reml=False`` with the textbook convention.
     """
     if sigma_convention not in ("textbook", "pylmm"):
         raise ValueError("sigma_convention must be 'textbook' or 'pylmm'")

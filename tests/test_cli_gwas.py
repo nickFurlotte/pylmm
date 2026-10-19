@@ -2,8 +2,10 @@
 
 Every run uses -v, and the null-model fit it prints ("heritability=%0.3f,
 sigma=%0.3f") is checked against gwas_cli_nullfit.kv.txt and, where the same
-model is in null_fits.kv.txt, against the Python API fit.  (pylmmGWAS.py's
-L.fit() is REML regardless of --REML: docs/phase1-baseline.md bug #1.)  That
+model is in null_fits.kv.txt, against the Python API fit.  (The null fit is
+REML by default; --REML is a no-op since Phase 5.2, which also made --refit
+and --removeMissingGenotypes REML: bug 1, and their goldens were regenerated,
+see tests/golden/README.md.)  That
 check is what catches a kinship that was read wrongly, e.g. silently
 zero-filled.
 """
@@ -103,7 +105,7 @@ def test_cli_bed_missing_phenotypes(tmp_path, bed50):
     args = bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)) + [out]
     log = h.run_script('pylmmGWAS.py', args, cwd=tmp_path)
     nmiss = len(h.BED_MISSING_PHENO_NA) + len(h.BED_MISSING_PHENO_M9)
-    assert 'removing %d individuals' % nmiss in log
+    assert 'warning: %d of ' % nmiss in log and 'have a missing phenotype and are dropped' in log
     check_out(out, 'gwas_cli_bed_snps50_missingpheno.out', df=BED_N - nmiss - 2)
     check_null_fit(log, 'bed_snps50_missingpheno')
 
@@ -163,7 +165,7 @@ def test_cli_emma_missing_phenotypes(tmp_path):
                      pheno=h.write_emma_missing_pheno(tmp_path)) + [out]
     log = h.run_script('pylmmGWAS.py', args, cwd=tmp_path)
     nmiss = len(h.HMDP_MISSING_Y)
-    assert 'removing %d individuals' % nmiss in log
+    assert 'warning: %d of ' % nmiss in log and 'have a missing phenotype and are dropped' in log
     check_out(out, 'gwas_cli_emma_hmdp_snps100_missingpheno.out',
               df=HMDP_N - nmiss - 2)
     check_null_fit(log, 'emma_hmdp_snps100_missingpheno',

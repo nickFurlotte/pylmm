@@ -7,11 +7,14 @@
 
 import os
 import sys
+import warnings
 import numpy as np
 
 class plink:
     def __init__(self,fbase,kFile=None,phenoFile=None,type='b',normGenotype=True,readKFile=False,fastLMM_kinship=False):
 
+        self.fhandle = None
+        self.snpFileHandle = None
         self.fbase = fbase
         self.type = type
         if not type == 'emma': self.indivs = self.getIndivs(self.fbase,type)
@@ -175,8 +178,16 @@ class plink:
 
     def normalizeGenotype(self,G):
         x = ~np.isnan(G)
-        if not len(G[x]): return G[x]
+        # All missing: return the all-nan SNP unchanged (length n), which the
+        # CLIs then skip.  It used to return an empty array (bug 11).
+        if not x.any(): return G
         m = G[x].mean()
+        # A SNP that is constant up to rounding (e.g. an EMMA dosage) is
+        # returned as zeros, which the CLIs skip: standardising it would blow
+        # its rounding noise up to unit variance (issue 19).
+        if np.ptp(G[x]) <= 1e-12 * max(1.0, abs(m)):
+            G = np.zeros_like(G)
+            return G
         if G[x].var() == 0: s = 1.0
         else: s = np.sqrt(G[x].var())
         G[np.isnan(G)] = m
@@ -186,32 +197,111 @@ class plink:
         return G
 
     def getPhenos(self,phenoFile=None):
+        """Read a PLINK-style phenotype file (FID IID value...; NA or -9 is
+        missing) into self.phenos, one row per individual of self.indivs, in
+        that order, matched by (FID, IID).  Individuals absent from the file
+        get nan (and a warning with the count); the file's extra individuals
+        are ignored.  (Bug 10, fixed in Phase 5.2: absent individuals used to
+        be skipped, which shifted the rows of everyone after them.)  For EMMA
+        input, which has no IDs, rows are taken in order and their number
+        must equal the number of individuals.
+        """
         if not phenoFile: self.phenoFile = phenoFile = self.fbase+".phenos"
         if not os.path.isfile(phenoFile):
         #sys.stderr.write("Could not find phenotype file: %s\n" % (phenoFile))
             return
-        f = open(phenoFile,'r')
+        keys, P = self._readTable(phenoFile, lambda x: x == 'NA' or x == '-9', "phenotype")
+        self.phenos = self._alignRows(keys, P, phenoFile, "phenotype")
+        return self.phenos
+
+    def getPhenosEMMA(self,emmaFile):
+        """EMMA phenotypes: one phenotype per row, one column per individual
+        (in genotype order); anything that is not a number is missing."""
+        P = []
+        with open(emmaFile,'r') as f:
+            for line in f:
+                v = line.strip().split()
+                if not v: continue
+                p = []
+                for x in v:
+                    try:
+                        p.append(float(x))
+                    except ValueError: p.append(np.nan)
+                P.append(p)
+        return self._emmaColumns(P, emmaFile, "phenotype")
+
+    def _emmaColumns(self, rows, fn, what):
+        n = len(self.indivs)
+        bad = [i for i, r in enumerate(rows) if len(r) != n]
+        if bad or not rows:
+            raise ValueError("EMMA %s file %s: expected rows of %d values (one per individual), %s"
+                             % (what, fn, n, "found no rows" if not rows else
+                                "row %d has %d" % (bad[0] + 1, len(rows[bad[0]]))))
+        return np.array(rows, dtype=np.float64).T
+
+    @staticmethod
+    def _readTable(fn, isMissing, what):
+        """(keys, values) of a FID IID v1 v2 ... file.  A first line whose first two
+        fields are FID IID (case-insensitive) is a header and is skipped."""
         keys = []
         P = []
-        for line in f:
-            v = line.strip().split()
-            keys.append((v[0],v[1]))
-            P.append([(x.strip() == 'NA' or x.strip() == '-9') and np.nan or float(x) for x in v[2:]])
-        f.close()
-        P = np.array(P)
+        with open(fn,'r') as f:
+            first = True
+            for lineno, line in enumerate(f, 1):
+                v = line.strip().split()
+                if not v: continue
+                # a header line starting FID IID (any case) is skipped
+                if first and len(v) >= 2 and v[0].upper() == 'FID' and v[1].upper() == 'IID':
+                    first = False
+                    continue
+                first = False
+                if len(v) < 3:
+                    raise ValueError("%s file %s, line %d: expected FID IID and at least one value"
+                                     % (what, fn, lineno))
+                try:
+                    P.append([np.nan if isMissing(x.strip()) else float(x) for x in v[2:]])
+                except ValueError:
+                    raise ValueError("%s file %s, line %d: a value is not a number (missing values are "
+                                     "NA%s)" % (what, fn, lineno, " or -9" if what == "phenotype" else ""))
+                keys.append((v[0],v[1]))
+        widths = set(len(p) for p in P)
+        if len(widths) > 1:
+            raise ValueError("%s file %s: rows have different numbers of values (%s)"
+                             % (what, fn, ", ".join(str(w) for w in sorted(widths))))
+        return keys, P
 
-        # reorder to match self.indivs
-        if not self.type == 'emma':
-            D = {}
-            L = []
-            for i in range(len(keys)): D[keys[i]] = i
-            for i in range(len(self.indivs)):
-                if self.indivs[i] not in D: continue
-                L.append(D[self.indivs[i]])
-            P = P[L,:]
-
-        self.phenos = P
-        return P
+    def _alignRows(self, keys, P, fn, what):
+        """Rows of P (keyed by (FID, IID)) in self.indivs order; nan rows for
+        absent individuals.  Raises ValueError for duplicate IDs or when no
+        individual matches."""
+        if not P:
+            raise ValueError("%s file %s has no data rows" % (what, fn))
+        if self.type == 'emma':
+            if len(P) != len(self.indivs):
+                raise ValueError("%s file %s has %d rows but the EMMA genotypes have %d individuals; "
+                                 "with EMMA input the rows are matched by position"
+                                 % (what, fn, len(P), len(self.indivs)))
+            return np.array(P, dtype=np.float64)
+        D = {}
+        for i, k in enumerate(keys):
+            if k in D:
+                raise ValueError("%s file %s lists individual %s %s twice" % (what, fn, k[0], k[1]))
+            D[k] = i
+        idx = [D.get(k, -1) for k in self.indivs]
+        absent = [k for k, i in zip(self.indivs, idx) if i < 0]
+        if len(absent) == len(self.indivs):
+            raise ValueError("none of the %d individuals of the genotype file appear in the %s file %s "
+                             "(matched on the first two columns, FID and IID; e.g. %s %s)"
+                             % (len(self.indivs), what, fn, self.indivs[0][0], self.indivs[0][1]))
+        ncol = len(P[0])
+        out = np.full((len(self.indivs), ncol), np.nan)
+        for r, i in enumerate(idx):
+            if i >= 0: out[r] = P[i]
+        if absent:
+            warnings.warn("%d of %d individuals are not in the %s file %s and are treated as missing "
+                          "(e.g. %s)" % (len(absent), len(self.indivs), what, fn,
+                                         ", ".join("%s %s" % k for k in absent[:5])), stacklevel=3)
+        return out
 
     def getIndivs(self,base,type='b'):
         if type == 't': famFile = "%s.tfam" % base
@@ -281,36 +371,22 @@ class plink:
         return K
 
     def getCovariatesEMMA(self,emmaFile):
-        f = open(emmaFile,'r')
         P = []
-        for line in f:
-            v = [x == 'NA' and np.nan or float(x) for x in line.strip().split()]
-            P.append(v)
-        f.close()
-        P = np.array(P).T
-        return P
+        with open(emmaFile,'r') as f:
+            for line in f:
+                v = line.strip().split()
+                if not v: continue
+                try:
+                    P.append([np.nan if x == 'NA' else float(x) for x in v])
+                except ValueError:
+                    raise ValueError("EMMA covariate file %s: a value is not a number (missing is NA)" % emmaFile)
+        return self._emmaColumns(P, emmaFile, "covariate")
 
     def getCovariates(self,covFile=None):
+        """A PLINK-style covariate file (FID IID c1 c2 ...; NA is missing),
+        matched to self.indivs by (FID, IID) like getPhenos; absent
+        individuals get nan rows."""
         if not os.path.isfile(covFile):
-            sys.stderr.write("Could not find covariate file: %s\n" % (covFile))
-            return
-        f = open(covFile,'r')
-        keys = []
-        P = []
-        for line in f:
-            v = line.strip().split()
-            keys.append((v[0],v[1]))
-            P.append([x == 'NA' and np.nan or float(x) for x in v[2:]])
-        f.close()
-        P = np.array(P)
-
-        # reorder to match self.indivs
-        D = {}
-        L = []
-        for i in range(len(keys)): D[keys[i]] = i
-        for i in range(len(self.indivs)):
-            if self.indivs[i] not in D: continue
-            L.append(D[self.indivs[i]])
-        P = P[L,:]
-
-        return P
+            raise ValueError("Could not find covariate file: %s" % (covFile))
+        keys, P = self._readTable(covFile, lambda x: x == 'NA', "covariate")
+        return self._alignRows(keys, P, covFile, "covariate")

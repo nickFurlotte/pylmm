@@ -70,6 +70,13 @@ OUT = None
 
 
 def check_versions():
+    # The goldens come from the Phase 1 code under py2.7.  The current code
+    # (Phase 5.2: REML refits, ML sigma^2=Q/n) would write different refit/ML
+    # columns, so refuse to run under py3 even with PYLMM_GOLDEN_ANY_VERSION.
+    if sys.version_info[0] != 2:
+        raise SystemExit('generate_golden.py: this reproduces the Phase 1 goldens and needs the Phase 1 '
+                         'code under Python 2.7 (docker/py27); the current code gives different '
+                         'refit/ML columns. See tests/golden/README.md.')
     found = {'numpy': np.__version__, 'scipy': scipy.__version__}
     if found == EXPECTED_VERSIONS:
         return
