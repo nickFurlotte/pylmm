@@ -63,7 +63,7 @@ uv run pylmm gwas --help > /dev/null   # every option, with examples
 * `tests/sims/` checks the simulation framework and keeps the simulation-study bug reproducers (`xfail(strict=True)`
   for unfixed bugs: fixing one makes it XPASS and fail; then flip the marker).
 * **Docs are executable.** `tests/test_docs.py` runs every `python` and `bash` code block of this file,
-  `docs/guide.md` and `skills/**/*.md`. Blocks of one file share a namespace and a scratch directory; mark a
+  README.md, `docs/guide.md` and `skills/**/*.md`. Blocks of one file share a namespace and a scratch directory; mark a
   block that needs external tools or a network with `skip-ci: <reason>` after the language. If you change
   behaviour, fix the docs in the same change.
 * Docstring examples in `pylmm/` run as doctests.

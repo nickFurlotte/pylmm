@@ -37,7 +37,7 @@ test *args:
 notebook-test:
     uv run --locked --group sims --group notebooks pytest -q tests/test_notebook.py
 
-# Run only the executable docs: every code block of AGENTS.md, docs/guide.md, skills/
+# Run only the executable docs: every code block of README.md, AGENTS.md, docs/guide.md, skills/
 docs-test *args:
     uv run --group sims pytest tests/test_docs.py "$@"
 

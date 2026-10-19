@@ -8,7 +8,7 @@ genetic association studies, individuals may be related or share population stru
 misleading associations if it is ignored. A mixed model accounts for it through a kinship matrix of genetic
 similarity between individuals:
 
-```
+```text
 Y = X0 b + x a + u + e,    u ~ N(0, h s2 K),    e ~ N(0, (1 - h) s2 I)
 ```
 
@@ -33,24 +33,27 @@ documentation whose examples run in CI.
   statistics ([docs/phase3-port.md](docs/phase3-port.md)). Deliberate changes since, such as bug fixes, are
   listed in the [CHANGELOG](CHANGELOG.md).
 - **Simulation studies** with known heritability and causal SNPs, on five genotype structures
-  ([docs/phase4-simulations.md](docs/phase4-simulations.md)). Under a correctly specified model, null
-  p-values are calibrated (type-I error 0.0495–0.0500 at α = 0.05, mean χ² 0.99–1.01 over 1,575
-  replicates), the Wald t matches an independent implementation to 2e-7, and power under population
-  structure is far above ordinary least squares. The bugs the studies found are fixed or listed under
-  *Known caveats* in [AGENTS.md](AGENTS.md).
+  ([docs/phase4-simulations.md](docs/phase4-simulations.md)). Under a correctly specified model, with the
+  REML null fit and the Wald test, null p-values are calibrated when h² > 0 (type-I error 0.0495–0.0500
+  at α = 0.05, mean χ² 0.99–1.01 over 1,575 replicates), and the Wald t matches an independent
+  implementation to 2e-7. Under population structure pylmm has much more power than ordinary least
+  squares, which is badly inflated there; the design partly favours the LMM, since the simulated
+  polygenic effect is drawn from the same kinship that pylmm fits. The bugs the studies found are fixed
+  or listed under *Known caveats* in [AGENTS.md](AGENTS.md).
 - **Published results** ([docs/replication.md](docs/replication.md)). An agent working only from the docs
   reanalysed two published mouse GWAS of the Hybrid Mouse Diversity Panel:
   - *Farber et al. 2011*, bone mineral density: **partially replicated**. All 5 published trait–locus
-    pairs have a nearby signal, 3 at the published position, but significance is systematically lower (by
-    0.47 in −log10 p, median): 1/5 pass Bonferroni and 3/5 the paper's threshold.
+    pairs have a signal in the published ±1.3 Mb interval, 3 at the published position. An interval
+    always has a best SNP, so position alone is not a replication, and significance is systematically
+    lower (by 0.47 in −log10 p, median): 1/5 pass Bonferroni and 3/5 the paper's threshold.
   - *Bennett et al. 2010*, HDL cholesterol: **replicated**, with the same lead SNP (the *Nos1ap* peak on
-    chromosome 1); −log10 p 11.5 with a per-SNP refit vs 9.4 published.
+    chromosome 1); −log10 p 11.5 with a per-SNP refit (7.9–9.0 without the refit) vs 9.4 published.
 
 ## Install
 
 PyLMM needs Python 3.11 or newer, numpy and scipy. It is not on PyPI yet; install it from GitHub:
 
-```bash
+```bash skip-ci: network
 pip install "git+https://github.com/nickFurlotte/pylmm@main"
 ```
 
@@ -58,7 +61,7 @@ This installs the Python library and the `pylmm` command. A git install clones t
 including ~215 MB of example data ([data/README.md](data/README.md)), so it takes a while. To work from a
 source checkout:
 
-```bash
+```bash skip-ci: network
 git clone -b main https://github.com/nickFurlotte/pylmm
 cd pylmm
 uv sync           # then prefix commands with `uv run`
@@ -70,9 +73,10 @@ The `main` branch holds the current code; the older `master` branch keeps the or
 
 ### Command line
 
-From a checkout, with the bundled example data (1,219 mice, 98,740 SNPs, a fake phenotype):
+From a checkout, with the bundled example data (1,219 mice, 98,740 SNPs, a fake phenotype); `pylmm` is
+on the PATH after `pip install`, or prefix it with `uv run` after `uv sync`. It takes about a minute:
 
-```bash
+```bash skip-ci: full dataset, see just readme-example
 pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
 pylmm gwas --bfile data/snps.132k.clean.noX --kinship snps.kin \
   --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv

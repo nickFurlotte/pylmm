@@ -1,15 +1,18 @@
-"""Executable documentation: run every code block of AGENTS.md, docs/guide.md and skills/.
+"""Executable documentation: run every code block of README.md, AGENTS.md, docs/guide.md and skills/.
 
 The docs promise that their snippets run; this test keeps that promise.
 
 Also run: ``docs/replication.md`` and ``data/README.md`` (their network and checksum
 commands are marked ``skip-ci``; the skips are counted).
 
-What is not executed: ``README.md`` and ``docs/research/*.md`` (and the other
-reports under ``docs/``).  The README's example commands scan the full
-bundled dataset (minutes) and are covered instead by ``just readme-example``
-and the CLI tests that compare the same command with the Phase 1 goldens
-(tests/test_cli_gwas.py); the research notes are background surveys of other
+In ``README.md`` the install commands (network) and the command-line quick
+start are ``skip-ci``: the quick start scans the full bundled dataset (about a
+minute) and is covered instead by ``just readme-example`` and the CLI tests
+that compare the same command with the original Python 2 goldens
+(tests/test_cli_gwas.py).  Its Python quick start runs.
+
+What is not executed: ``docs/research/*.md`` (and the other reports under
+``docs/``).  The research notes are background surveys of other
 tools' formats and methods, with sketches of external APIs, not instructions
 that an agent or user is meant to run.
 
@@ -85,6 +88,7 @@ import pytest
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DOC_FILES = sorted(
     [
+        os.path.join(REPO, "README.md"),
         os.path.join(REPO, "AGENTS.md"),
         os.path.join(REPO, "docs", "guide.md"),
         os.path.join(REPO, "docs", "replication.md"),
