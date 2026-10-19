@@ -92,6 +92,21 @@ def test_cli_kinship_emma(tmp_path):
     )
 
 
+def test_cli_kinship_emma_removes_stale_id_file(tmp_path):
+    emma = h.write_emma_subset(tmp_path)
+    out = str(tmp_path / "kin.txt")
+    stale = out + ".id"
+    with open(stale, "w") as f:
+        f.write("1\t1\n")
+    log = h.run_script(
+        "pylmmKinship.py",
+        ["--emmaSNP", emma, "--emmaNumSNPs", h.HMDP_NSNPS, "-n", 300, out],
+        cwd=tmp_path,
+    )
+    assert not os.path.exists(stale)
+    assert "stale ID file" in log
+
+
 def test_readme_kinship_eigenvalues(bed_null):
     _, K, kva, _ = bed_null
     assert_eigenvalues_close(

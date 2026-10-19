@@ -60,7 +60,8 @@ A BED -> genotype matrix ``W`` (n x m) recipe, for the first ``m`` SNPs
 
 >>> import itertools                                          # doctest: +SKIP
 >>> from pylmm.plink_io import PlinkReader                    # doctest: +SKIP
->>> with PlinkReader("data/snps.132k.clean.noX", type="b") as reader:  # doctest: +SKIP
+>>> with PlinkReader("data/snps.132k.clean.noX", type="b",       # doctest: +SKIP
+...                  pheno_file="data/snps.132k.clean.noX.fake.phenos") as reader:
 ...     W = np.column_stack([g for g, _ in itertools.islice(reader, m)])
 ...     Y = reader.phenos[:, 0]
 

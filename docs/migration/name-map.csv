@@ -114,3 +114,4 @@ kve,kve,parameter,pylmm.lmm.LMM.__init__,5b.1,None only: an empty sequence raise
 kve,kve,parameter,pylmm.lmm.gwas,5b.1,None only: an empty sequence raises ValueError; pass both kva and kve or neither
 fit_two,fit_two,signature,pylmm.misc,5b.1,"sigma is a float (was a (1, 1) array)"
 read_kinship,read_kinship,signature,pylmm.plink_io.PlinkReader,5b.1,also stores self.K; a k_file.id sidecar aligns K by ID; a plain K without IDs must be len(indivs) square
+_id_keys,,method,pylmm.plink_io.PlinkReader,5b.1,removed private helper (a typing view of indivs); no replacement

@@ -16,6 +16,7 @@ to align the matrix to its genotype file by ID.  EMMA input has no IDs, so no
 ID file is written for it.
 """
 
+import os
 import sys
 import warnings
 from optparse import OptionGroup, OptionParser
@@ -175,6 +176,13 @@ def main(argv=None):
         samples.write_id_file(samples.kinship_id_path(out_file), reader.indivs)
         if options.verbose:
             sys.stderr.write("Saving kinship IDs to %s\n" % samples.kinship_id_path(out_file))
+    elif os.path.isfile(samples.kinship_id_path(out_file)):
+        # A stale ID file from an earlier run would be taken as the IDs of this K.
+        os.remove(samples.kinship_id_path(out_file))
+        sys.stderr.write(
+            "pylmmKinship: removed the stale ID file %s (EMMA input has no IDs)\n"
+            % samples.kinship_id_path(out_file)
+        )
 
     if options.saveEig or options.eigenNpz:
         if options.verbose:

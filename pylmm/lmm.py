@@ -441,7 +441,7 @@ def _check_eigen_args(kva: ArrayLike | None, kve: ArrayLike | None) -> None:
 
 def _snp_column(X: ArrayLike, n: int) -> FloatArray:
     """One SNP, given as (n,) or (n, 1), as an (n, 1) float64 column."""
-    x = np.asarray(X, dtype=np.float64)
+    x = np.ascontiguousarray(X, dtype=np.float64)
     if x.ndim == 1:
         x = x.reshape(-1, 1)
     if x.shape != (n, 1):

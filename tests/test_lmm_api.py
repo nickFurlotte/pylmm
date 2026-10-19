@@ -57,17 +57,13 @@ def test_one_dimensional_snp_equals_a_column(data):
     W, K, y = data
     L = LMM(y, K)
     L.fit()
-    # A contiguous (n,) vector and the contiguous (n, 1) copy W[:, [j]] are the
-    # same memory layout, so the numbers are bit-identical.  (A strided view
-    # such as W[:, j] can differ in the last bit on some BLAS builds, exactly
-    # as a strided (n, 1) column always could.)
+    # _snp_column makes the SNP a C-contiguous float64 column, so a strided view
+    # W[:, j] gives exactly (bit-identically) the same numbers as W[:, [j]].
     col = [np.ascontiguousarray(W[:, j]) for j in range(4)]
     for j in range(4):
         assert L.association(col[j], return_beta=True) == L.association(W[:, [j]], return_beta=True)
-        np.testing.assert_allclose(
-            L.association(W[:, j], return_beta=True),
-            L.association(W[:, [j]], return_beta=True),
-            rtol=1e-12,
+        assert L.association(W[:, j], return_beta=True) == L.association(
+            W[:, [j]], return_beta=True
         )
     a = L.fit(X=col[2])
     b = L.fit(X=W[:, [2]])

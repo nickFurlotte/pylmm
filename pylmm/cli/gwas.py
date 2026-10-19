@@ -165,7 +165,7 @@ def build_parser():
     basic_group.add_option(
         "--kfile",
         dest="kfile",
-        help="The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.",
+        help='The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.  Individuals are matched to the genotype file by FID and IID, using the ID file KINSHIP.id if it exists (the library can match by IID alone: PlinkReader(id_match="iid"); a CLI option comes later).',
     )
     basic_group.add_option(
         "--covfile",
@@ -510,6 +510,11 @@ def _read_aligned_kinship(k_file, reader):
     K's extra individuals are ignored, each with a warning.  Without one, K's
     rows are assumed to be the genotype individuals in file order, with a
     warning (not for EMMA input, which has no IDs).  Raises ValueError.
+
+    Note: when K drops individuals, genotypes are imputed and standardised
+    over the KEPT individuals, but individuals dropped for a missing phenotype
+    or covariate still count in the mean and SD (max |dt| 0.024 between the
+    two rules; making them consistent is a Phase 6 item).
     """
     id_file = samples.kinship_id_path(k_file)
     if reader.type == "emma":

@@ -104,8 +104,15 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   (FID, IID): genotype individuals that are not in K are dropped (from the phenotype, the covariates and
   every SNP vector) and K's extra individuals are ignored, each with a `pylmmGWAS: warning:` line listing
   them. Without `K.id` it warns once and assumes, as before, that K's rows are the genotype individuals in
-  file order (not for EMMA input, which has no IDs). The README example has no `.id` file, so it prints
-  that warning; its output file is unchanged.
+  file order (not for EMMA input, which has no IDs). The shipped example kinship has a `.id` file, so the
+  README example prints no such warning; its output file is unchanged.
+- When K drops individuals, genotypes are imputed and standardised over the kept individuals, but
+  individuals dropped for a missing phenotype or covariate still count in the mean and SD (max |dt| 0.024
+  between the two rules; making them consistent is a Phase 6 item).
+- Individuals are matched by FID and IID; matching by IID alone is available in the library
+  (`PlinkReader(id_match="iid")`), and a CLI option comes with the 5b.2 CLI rewrite.
+- `PlinkReader.read_kinship` ignores, with a warning, a `.id` next to a kinship for EMMA genotypes, as
+  pylmmGWAS does. `pylmmKinship` on EMMA input removes a stale `OUT.id` (with a note on stderr).
 - `--eigen` is ignored (with a warning) when K was reordered or subset by its IDs, as when individuals are
   dropped for a missing phenotype.
 - The kinship is read before the covariates (only the order of the `-v` messages changes).

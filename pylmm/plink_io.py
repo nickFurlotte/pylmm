@@ -956,7 +956,9 @@ class PlinkReader:
         Plain format: ``n`` lines of ``n`` whitespace-separated numbers.  The
         rows are named by the ID sidecar ``k_file + ".id"`` (one ``FID IID``
         per line, as ``pylmmKinship`` writes it) if it exists; otherwise they
-        must be the individuals of `indivs`, in that order.  FaSTLMM format
+        must be the individuals of `indivs`, in that order.  For EMMA
+        genotypes, which have no IDs, a sidecar is ignored with a warning
+        (as in ``pylmmGWAS``) and the rows are in genotype order.  FaSTLMM format
         (``fastlmm_kinship=True``): the first line is a tab-separated header
         whose first field is ignored and whose others are ``FID IID`` labels,
         and each following line starts with a label field that is ignored.
@@ -984,8 +986,8 @@ class PlinkReader:
         ValueError
             If a plain matrix without IDs is not ``len(indivs)`` square, the
             IDs do not match the size of the matrix, an ID is listed twice,
-            no individual is in both, or IDs are given for EMMA genotypes
-            (which have none).
+            no individual is in both, or FaSTLMM labels are given for EMMA
+            genotypes (which have none).
         """
         if self.indivs is None or len(self.indivs) == 0:
             sys.stderr.write("Did not read any individuals so can't load kinship\n")
@@ -1013,7 +1015,15 @@ class PlinkReader:
                     rows.append([float(x) for x in line.strip().split()])
         K = np.array(rows)
         if not self.fastlmm_kinship:
-            kin_ids = samples.read_kinship_ids(k_file)
+            if self.type == "emma" and os.path.isfile(samples.kinship_id_path(k_file)):
+                # As in pylmmGWAS: EMMA genotypes have no IDs, so K is in genotype order.
+                warnings.warn(
+                    "%s is ignored: EMMA genotypes have no IDs, so K is in genotype order"
+                    % samples.kinship_id_path(k_file),
+                    stacklevel=2,
+                )
+            else:
+                kin_ids = samples.read_kinship_ids(k_file)
 
         if kin_ids is None:
             n = len(self.indivs)
