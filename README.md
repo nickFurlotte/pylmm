@@ -33,7 +33,7 @@ In this rewrite, we aimed to be agent friendly and optimized for code that is ea
 
 ## Installation
 
-PyLMM requires Python 3.10 or newer.
+PyLMM requires Python 3.11 or newer.
 
 Install directly from GitHub:
 

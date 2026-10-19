@@ -28,16 +28,15 @@ jobs:
         run: uv run --locked ruff format --check
 
   typecheck:
-    # mypy on the whole package, the command line (pylmm/cli/) included.  On
-    # Python 3.10, the floor: the numpy stubs that the lock resolves for newer
-    # Pythons (numpy >= 2.3) do not support mypy's python_version = "3.10".
-    # A second run on the newest Python (3.14) catches numpy stub drift.
+    # mypy on the whole package, the command line (pylmm/cli/) included, on
+    # Python 3.11 (the floor) and on the newest Python (3.14), which catches
+    # numpy stub drift.
     name: typecheck (mypy, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
 
@@ -55,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     env:
       # Same single-threaded BLAS setting as the py27 baseline image.
       OPENBLAS_NUM_THREADS: "1"
@@ -115,7 +114,7 @@ jobs:
   lowest-direct:
     # Checks the numpy/scipy lower bounds in pyproject.toml.  Not --locked:
     # this job resolves the oldest allowed direct dependencies instead.
-    name: pytest (Python 3.10, lowest-direct)
+    name: pytest (Python 3.11, lowest-direct)
     runs-on: ubuntu-latest
     env:
       OPENBLAS_NUM_THREADS: "1"
@@ -125,7 +124,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v10.3.0
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Show resolved versions
         run: uv run --resolution lowest-direct python -c "import numpy, scipy; print('numpy', numpy.__version__, 'scipy', scipy.__version__)"

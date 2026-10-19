@@ -2,7 +2,7 @@
 
 **PyLMM: a modern, readable, validated mixed-model toolkit for statistical genetics, built to be used by
 humans and agents.** A linear mixed model (LMM) for GWAS and heritability: `Y = X0 b + x a + u + e`,
-`u ~ N(0, h s2 K)`, `e ~ N(0, (1 - h) s2 I)`, with a Wald t test per SNP. Python ≥ 3.10, numpy + scipy.
+`u ~ N(0, h s2 K)`, `e ~ N(0, (1 - h) s2 I)`, with a Wald t test per SNP. Python ≥ 3.11, numpy + scipy.
 This file is for coding agents working in this repo or with pylmm; humans should start at
 [README.md](README.md) and [docs/guide.md](docs/guide.md).
 
@@ -40,7 +40,7 @@ just test-slow        # + the full-dataset tests (--runslow)
 just docs-test        # only the docs snippets (tests/test_docs.py)
 just lint             # ruff check + ruff format --check (CI runs the same)
 just fmt              # apply ruff fixes and formatting
-just typecheck        # mypy on pylmm/, Python 3.10 and 3.14
+just typecheck        # mypy on pylmm/, Python 3.11 and 3.14
 just sim example_null --quick   # a simulation study
 ```
 
@@ -78,7 +78,7 @@ uv run pylmm gwas --help > /dev/null   # every option, with examples
 * Samples are matched by ID `(FID, IID)`, never by row position (except EMMA input, which has no IDs).
 * Type hints on all library code (`py.typed`), checked by mypy; numpydoc docstrings with runnable examples.
 * ruff (line length 100) for lint and format; CI runs `ruff check`, `ruff format --check`, mypy, pytest on
-  Python 3.10–3.14 and a lowest-direct (numpy 1.22, scipy 1.9) job.
+  Python 3.11–3.14 and a lowest-direct (numpy 1.23.2, scipy 1.9.2) job.
 * CLI: kebab-case flags named after PLINK's, 1-based column numbers, exit codes 0 / 2 (usage or input
   error) / 1 (unexpected), messages via the `pylmm` logger.
 

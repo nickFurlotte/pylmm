@@ -16,7 +16,7 @@ Contents: 1 install · 2 the model · 3 loading data · 4 kinship · 5 the null 
 
 ## 1. Install
 
-pylmm needs Python 3.10+, numpy and scipy. Install the Python 3 branch, `main` (the repository's default
+pylmm needs Python 3.11+, numpy and scipy. Install the Python 3 branch, `main` (the repository's default
 branch still holds the old Python 2 code):
 
 ```bash skip-ci: network install

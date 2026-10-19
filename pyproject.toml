@@ -11,17 +11,15 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Nick Furlotte", email = "nick.furlotte@gmail.com" }]
-requires-python = ">=3.10"
-# Lower bounds are the oldest versions that are tested: CI runs
-# `uv run --python 3.10 --resolution lowest-direct pytest` on ubuntu, which
-# installs numpy 1.22.0 + scipy 1.9.0; the same pins also pass on macOS arm64.
-# scipy 1.8.0 and 1.8.1 have py3.10 macOS arm64 wheels but segfault in the
-# suite there, hence scipy>=1.9.  numpy 1.22.0 passes on both platforms; older
-# numpy is untested.  Only py3.10 has wheels this old, so newer Pythons
-# resolve newer releases anyway.
+requires-python = ">=3.11"
+# Lower bounds are the oldest releases with Python 3.11 wheels, and they are
+# tested: CI runs `uv run --python 3.11 --resolution lowest-direct pytest` on
+# ubuntu, which installs numpy 1.23.2 + scipy 1.9.2; the same pins also pass on
+# macOS arm64.  Only py3.11 has wheels this old, so newer Pythons resolve newer
+# releases anyway.
 dependencies = [
-    "numpy>=1.22",
-    "scipy>=1.9",
+    "numpy>=1.23.2",
+    "scipy>=1.9.2",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -63,11 +61,10 @@ exclude = ["/data", "/docker", "/docs", "/tests", "/scripts", "/.github"]
 [tool.mypy]
 # The whole package, including the command line (pylmm/cli/).  numpy ships its own stubs; scipy has none (the
 # third-party scipy-stubs package requires a newer numpy than the
-# numpy>=1.22 floor), so its imports are untyped.  Run it under Python 3.10
-# (`just typecheck`): numpy >= 2.3, which the lock resolves for newer
-# Pythons, ships stubs that do not support python_version = "3.10".
+# numpy>=1.23.2 floor), so its imports are untyped.  Run it under Python 3.11
+# (`just typecheck`), the floor, and 3.14.
 files = ["pylmm"]
-python_version = "3.10"
+python_version = "3.11"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
@@ -83,8 +80,7 @@ ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
-# Moves to py311 at the 3.11 cutover; keep py310 until then.
-target-version = "py310"
+target-version = "py311"
 extend-exclude = [
     # Runs under the Python 2.7 baseline image (docker/py27/); must stay py2-valid.
     "tests/golden/generate_golden.py",
