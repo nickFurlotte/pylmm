@@ -343,8 +343,9 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Docs
 - `docs/replication.md`: the Phase R reanalysis of two published HMDP mouse GWAS by an agent working from
-  the docs alone (Farber 2011: 5/5 loci in their published intervals, −log10 p about 0.5 lower; Bennett
-  2010: the same lead SNP, −log10 p 11.5 vs 9.4), method choices and caveats; linked from the guide
+  the docs alone (Farber 2011 BMD: partially replicated, all 5 published loci have a nearby signal (median −log10 p
+  0.47 below published), 1/5 pass Bonferroni and 3/5 the paper's threshold; Bennett 2010 HDL:
+  replicated, same lead SNP, −log10 p 11.5 vs 9.4), method choices and caveats; linked from the guide
   (section 13) and the README.
 - Kinship without a `.id` file, stated exactly (AGENTS.md, guide, `run-gwas`, `migrate-from-old-pylmm`,
   `pylmm gwas --help`): `pylmm gwas --bfile/--tfile` warns and assumes genotype order; `--emma-geno` does

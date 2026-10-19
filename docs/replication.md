@@ -10,10 +10,11 @@ build 37) and thresholds were written down before the scans.
 ## Results
 
 **Farber et al. 2011** (*PLoS Genet* 7:e1002038), bone mineral density, 94 of 97 strains, 831–844
-animals, 105,130 SNPs. All five published trait–locus pairs show a signal inside the published
-interval: **5/5 positional**, three at the published position (to the 0.01 Mb the paper reports). Significance is
-**systematically lower, by 0.47 in −log10 p (median; range 0.13–0.58)**; 1/5 passes Bonferroni
-(4.76e-7) and 3/5 the paper's threshold (4.1e-6). Closest method (IBS-style K, per-SNP refit):
+animals, 105,130 SNPs. **Partially replicated.** All five published trait–locus pairs have a nearby
+signal (the best SNP in each published interval; an interval always has a best SNP, so this alone is not
+a replication), three at the published position (to the 0.01 Mb the paper reports). Significance is
+**systematically lower, by 0.47 in −log10 p (median; range 0.13–0.58)**; **1/5 pass Bonferroni**
+(4.76e-7) and **3/5 the paper's threshold** (4.1e-6). Closest method (IBS-style K, per-SNP refit):
 
 | trait, published lead | published chr:Mb | published −log10 p | ours chr:bp (b37) | ours −log10 p |
 |---|---|---:|---|---:|
@@ -28,7 +29,7 @@ Likely causes of the lower p-values (none tested on its own): three strains with
 approximate reconstruction of EMMA's IBS kinship.
 
 **Bennett et al. 2010** (*Genome Res* 20:281), HDL cholesterol, 95 of 99 strains, 660 animals, 105,249
-SNPs. **The lead SNP is the published one**: 1:172,441,271, the *Nos1ap* peak at 172.4 Mb, top of the
+SNPs. **Replicated: the lead SNP is the published one**: 1:172,441,271, the *Nos1ap* peak at 172.4 Mb, top of the
 genome in every analysis mode. −log10 p **11.5** with the per-SNP refit vs **9.4** published (7.9–9.0 in
 the null-fit modes; Bonferroni 6.3). Individual-level SNP h² 0.80 [0.75, 0.85] (the paper reports none).
 

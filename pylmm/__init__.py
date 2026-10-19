@@ -108,7 +108,9 @@ def _source_tree_version(pyproject: Path) -> str:
     Used when pylmm is imported from a source checkout that is not installed
     (e.g. ``PYTHONPATH=/path/to/pylmm``), so there is no distribution
     metadata.  A small line parser, not a TOML parser: ``tomllib`` needs
-    Python 3.11, and the version is a plain ``version = "X"`` line.
+    Python 3.11, and the version is a plain ``version = "X"`` line.  A
+    single-quoted version (``version = 'X'``) or a dynamic one (``dynamic =
+    ["version"]``) is not recognised and returns "unknown".
     """
     try:
         text = pyproject.read_text(encoding="utf-8")

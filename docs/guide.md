@@ -487,6 +487,7 @@ pylmm's default path (REML null fit, Wald test) was checked by simulation in Pha
 
 **Against published results** (Phase R, [replication.md](replication.md)): an agent using only these docs
 and the skills reanalysed two published mouse GWAS from their original phenotypes. Farber et al. 2011
-(bone mineral density): all 5 published loci found in their intervals, −log10 p about 0.5 lower than
-published (median 0.47). Bennett et al. 2010 (HDL): the same lead SNP, −log10 p 11.5 vs 9.4 published.
+(bone mineral density): **partially replicated**. All 5 published loci have a nearby signal (median
+−log10 p 0.47 below published); 1/5 pass Bonferroni and 3/5 the paper's threshold. Bennett et al. 2010
+(HDL): **replicated**, same lead SNP, −log10 p 11.5 vs 9.4 published.
 Closest method: an IBS-style kinship with a per-SNP REML refit. No numerical bug was found.

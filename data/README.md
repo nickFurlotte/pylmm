@@ -93,7 +93,7 @@ bone mineral density; Bennett et al. 2010, HDL cholesterol) from their phenotype
 
 ## Checksums (SHA-256)
 
-`tests/test_data_provenance.py` checks that every file in `data/` is listed here and matches. From the
+`tests/test_data_provenance.py` checks that every file tracked in git under `data/` is listed here and that every listed file exists and matches its hash (untracked local files are ignored; the tests skip when the data files are absent). From the
 repository root:
 
 ```bash skip-ci: shasum is not part of the docs-test environment

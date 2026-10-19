@@ -21,7 +21,7 @@ strains whose names appear in both files (27 classic inbred strains), and writes
              uninformative: the shared strains show one base only (consistent, not a check);
              discordant: the codes and bases disagree (the row join would be wrong)
 
-The script exits 1 if the row counts differ or any row is discordant.  Published result
+The script prints the error to stderr and exits 1 if the row counts differ (either file longer, even by one row) or any row is discordant.  Published result
 (2026-10-19): 132,285 rows, 122,242 concordant, 10,043 uninformative, 0 discordant.
 
 Usage (from the repository root; downloads ~20 MB unless --broad is given)::
@@ -41,6 +41,7 @@ import tempfile
 import urllib.request
 from collections import Counter
 from collections.abc import Iterable, Iterator
+from itertools import zip_longest
 
 BROAD_URL = "https://data.broadinstitute.org/mouse/hapmap/Merged_Hapmap_WT_Genotypes.txt.gz"
 # Last-Modified 2009-02-20, 20,446,478 bytes; checked 2026-10-19.
@@ -131,8 +132,15 @@ def build_map(
     b_idx = [names.index(s) + 2 for s in shared]
     rows = []
     status: Counter[str] = Counter()
-    emma = iter_emma(emma_lines)
-    for j, (codes, line) in enumerate(zip(emma, broad), start=1):
+    end = object()  # sentinel: zip_longest pads the shorter file with it, so +1 row is seen
+    for j, (codes, line) in enumerate(
+        zip_longest(iter_emma(emma_lines), broad, fillvalue=end), start=1
+    ):
+        if codes is end or line is end:
+            raise ValueError(
+                "row counts differ after %d rows: the %s file has more"
+                % (j - 1, "Broad" if codes is end else "EMMA")
+            )
         cells = line.rstrip("\n").split("\t")
         if len(codes) != len(strains):
             raise ValueError(
@@ -143,13 +151,6 @@ def build_map(
         a0, a1, st = classify([codes[i] for i in e_idx], calls)
         status[st] += 1
         rows.append((j, chrom, int(bp), a0, a1, st))
-    extra_emma = next(emma, None) is not None
-    extra_broad = next(broad, None) is not None
-    if extra_emma or extra_broad:
-        raise ValueError(
-            "row counts differ after %d rows: the %s file has more"
-            % (len(rows), "EMMA" if extra_emma else "Broad")
-        )
     return rows, status, shared
 
 
@@ -189,12 +190,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         strains = read_strains(args.strains)
         with open(args.emma) as e, gzip.open(broad, "rt") as b:
-            rows, status, shared = build_map(e, strains, b)
+            try:
+                rows, status, shared = build_map(e, strains, b)
+            except ValueError as err:
+                print("error: %s; not writing %s" % (err, args.out), file=sys.stderr)
+                return 1
 
     print("rows: %d; shared strains: %d" % (len(rows), len(shared)), file=sys.stderr)
     print("status: %s" % dict(sorted(status.items())), file=sys.stderr)
     if status["discordant"]:
-        print("error: %d discordant rows; not writing %s" % (status["discordant"], args.out))
+        print(
+            "error: %d discordant rows; not writing %s" % (status["discordant"], args.out),
+            file=sys.stderr,
+        )
         return 1
     write_map(args.out, rows)
     print("wrote %s" % args.out, file=sys.stderr)

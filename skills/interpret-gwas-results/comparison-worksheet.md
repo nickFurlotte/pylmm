@@ -28,10 +28,16 @@ SNP SET / QC         paper: <n SNPs>, MAF <..>, missing <..>, source <..>
 SAMPLES              paper <n strains, n animals>  ours <..>; strains missing from ours <list, why>
 THRESHOLDS           paper <value, how derived>; ours: Bonferroni 0.05/<m> = <..>, also report paper's
 INTERVALS            pre-registered: <published peak +- X Mb (why X)>, on build <..>
-VERDICT RULES        positional: best SNP in the interval passes <threshold>
+VERDICT RULES        replicated = positional AND significance: the best SNP in the pre-registered interval
+                     passes <threshold>. Positional agreement alone (an interval always has a best SNP)
+                     is necessary but not sufficient; report it as "nearby signal".
+                     Label: replicated (all loci pass) | partially replicated (some pass; give k/n
+                     per threshold) | not replicated | not assessed
                      significance: |our -log10 p - published| <= <margin> (stated before the scan)
                      direction: compared only for the same named allele, else "not assessed"
 RESULT               per locus: our best SNP, chr:bp, -log10 p, threshold met?, difference, verdict
+                     summary: "<k>/<n> pass <threshold 1>, <j>/<n> pass <threshold 2>" - never just
+                     "n/n found in their intervals"
 ```
 
 ## The items, and what pylmm does

@@ -68,15 +68,20 @@ def sanitize_id(name: str) -> str:
 
     Letters, digits, ``.`` and ``-`` are kept; every run of other characters
     (spaces, ``/``, ``+``, ``<``, ``>`` ...) becomes one ``_``, and leading or
-    trailing ``_`` are dropped.  Two names can map to the same token, so use
+    trailing ``_`` are dropped.  A name that sanitizes to ``.`` or ``..`` gets the
+    prefix ``id_``.  Two names can map to the same token, so use
     `sanitize_ids`, which checks for that, for a whole list.
 
     >>> sanitize_id("BTBR T+ tf/J")
     'BTBR_T_tf_J'
     >>> sanitize_id("AXB-19/PgnJ")
     'AXB-19_PgnJ'
+    >>> sanitize_id("..")
+    'id_..'
     """
     token = re.sub(r"[^A-Za-z0-9.\-]+", "_", str(name)).strip("_")
+    if token in (".", ".."):
+        token = "id_" + token  # a bare "." or ".." is a path component / missing-value marker
     if not token:
         raise ValueError("%r has no letters or digits to make an ID from" % (name,))
     return token
@@ -112,6 +117,7 @@ def sanitize_ids(names: Iterable[str]) -> dict[str, str]:
 def _check_ids(what: str, values: Sequence[str]) -> None:
     """Reject IDs that are empty or contain whitespace (they would corrupt a PLINK file)."""
     for i, v in enumerate(values):
+        v = str(v)
         if v == "" or any(c.isspace() for c in v):
             raise ValueError(
                 "%s[%d] = %r: PLINK IDs must be non-empty and contain no whitespace (spaces, "

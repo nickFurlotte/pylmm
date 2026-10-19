@@ -137,6 +137,17 @@ def test_sanitize_ids():
         plink_tools.sanitize_ids(["A/J", "A J"])
     with pytest.raises(ValueError, match="no letters or digits"):
         plink_tools.sanitize_id("/ /")
+    assert plink_tools.sanitize_id(".") == "id_."
+    assert plink_tools.sanitize_id("..") == "id_.."
+    assert plink_tools.sanitize_id(" .. ") == "id_.."
+    assert plink_tools.sanitize_id("a..") == "a.."
+    assert plink_tools.sanitize_ids([".", ".."]) == {".": "id_.", "..": "id_.."}
+
+
+def test_check_ids_accepts_non_string_ids():
+    plink_tools._check_ids("snp_ids", [1, 2, 3])  # int SNP IDs
+    with pytest.raises(ValueError, match="snp_ids"):
+        plink_tools._check_ids("snp_ids", [1, "a b"])
 
 
 def test_sanitized_ids_round_trip_through_pylmm(tmp_path):

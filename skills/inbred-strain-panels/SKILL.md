@@ -1,6 +1,6 @@
 ---
 name: inbred-strain-panels
-description: Prepare and scan inbred-strain panels with replicate animals in pylmm (mouse HMDP, BXD and other recombinant inbred strains, inbred rat or plant lines) - strain-name aliases and duplicate or coisogenic strain labels with a genotype-identity audit before dropping any, joining a published supplement or MPD export to strain genotypes, expanding strain genotypes and the strain kinship to animals, PLINK-safe FIDs for strain names with spaces while keeping a name map, writing a BED for markers without allele letters, imputing missing calls over strains rather than animals, unequal replicates (harmonic-mean r, individual vs strain-mean h2) and the EMMA strain-mean path. Use when phenotypes are measured on several animals per inbred strain, when strain genotypes and animal phenotypes come from different sources, or when reproducing an HMDP-style mouse GWAS.
+description: Data preparation for inbred strain panels with replicate animals (mouse HMDP, BXD, inbred rat or plant lines) - strain aliases and coisogenic labels with a genotype-identity audit, joining a published supplement or MPD export to strain genotypes, expanding genotypes and kinship to animals, PLINK-safe strain IDs, imputing over strains. Use when phenotypes are measured on several animals per strain or when reproducing an HMDP-style mouse GWAS.
 ---
 
 # Inbred strain panels with replicate animals
@@ -168,8 +168,9 @@ print("causal SNP p=%.1e, rank %d" % (ps[50], int((ps < ps[50]).sum()) + 1))
 
 ## 5. The imputation unit: strains vs animals
 
-`pylmm gwas` on a per-animal BED, and `PlinkReader` in general, mean-impute a missing call over the
-**animals** of the file. In an inbred panel the strain is the unit, so the strain-level choice is to
+`PlinkReader` mean-imputes a missing call over the **animals** of the file when `norm_genotype=True`
+(the default, and what `pylmm gwas` uses on a per-animal BED); with `norm_genotype=False` it leaves
+the missing calls as `nan`. In an inbred panel the strain is the unit, so the strain-level choice is to
 impute over strains (section 3) and then expand. The two differ only on SNPs with a missing call, and only
 when replicates are unequal:
 

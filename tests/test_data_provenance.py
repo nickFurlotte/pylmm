@@ -11,6 +11,7 @@ import gzip
 import hashlib
 import os
 import re
+import subprocess
 import sys
 
 import pytest
@@ -21,9 +22,15 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 import build_hmdp_marker_map as bmm  # noqa: E402
 
 MAP = os.path.join(DATA, "hmdp.liver.snps.map.tsv")
+HAVE_DATA = os.path.isfile(os.path.join(DATA, "README.md")) and os.path.isfile(MAP)
+needs_data = pytest.mark.skipif(
+    not HAVE_DATA, reason="the bundled data files are absent (moved out of the repository)"
+)
 
 
 def _readme_checksums() -> dict[str, str]:
+    if not os.path.isfile(os.path.join(DATA, "README.md")):
+        return {}
     with open(os.path.join(DATA, "README.md"), encoding="utf-8") as f:
         text = f.read()
     pairs = re.findall(r"^([0-9a-f]{64})  (\S+)$", text, flags=re.MULTILINE)
@@ -38,17 +45,45 @@ def _sha256(path: str) -> str:
     return h.hexdigest()
 
 
-def test_readme_lists_every_data_file():
+def _tracked_data_files() -> list[str] | None:
+    """Files tracked by git under data/ (relative to data/), or None if git is unavailable."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z", "--", "data/"],
+            cwd=REPO,
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return sorted(p[len("data/") :] for p in out.split("\0") if p)
+
+
+@needs_data
+def test_readme_lists_every_tracked_data_file():
+    tracked = _tracked_data_files()
+    if tracked is None:
+        pytest.skip("git is not available or this is not a git checkout")
     listed = _readme_checksums()
-    present = sorted(f for f in os.listdir(DATA) if f != "README.md" and not f.startswith("."))
-    assert sorted(listed) == present
+    # untracked local files in data/ are ignored; every tracked one must be listed
+    expected = sorted(f for f in tracked if f != "README.md" and not f.startswith("."))
+    missing = [f for f in expected if f not in listed]
+    assert not missing, "tracked but not listed in data/README.md: %s" % missing
+    # everything listed exists and matches its hash
+    for name, digest in listed.items():
+        path = os.path.join(DATA, name)
+        assert os.path.isfile(path), "%s is listed in data/README.md but absent" % name
+        assert _sha256(path) == digest, "%s does not match its README hash" % name
 
 
 @pytest.mark.parametrize("name", sorted(_readme_checksums()))
+@needs_data
 def test_data_checksums(name):
     assert _sha256(os.path.join(DATA, name)) == _readme_checksums()[name]
 
 
+@needs_data
 def test_marker_map_matches_the_bundled_data():
     with open(MAP) as f:
         header = f.readline().rstrip("\n").split("\t")
@@ -124,8 +159,31 @@ def test_build_map_rejects_discordant_rows_and_row_count_mismatch(tiny):
     assert bmm.main([*args, "--strains", str(tmp_path / "strains"), "--out", str(out)]) == 1
     assert not out.exists()
     (tmp_path / "emma").write_text("0 1 1 0\n1 1 1 NA\n")
-    with pytest.raises(ValueError, match="row counts differ after 2 rows: the Broad file has more"):
-        bmm.main([*args, "--strains", str(tmp_path / "strains"), "--out", str(out)])
+    assert bmm.main([*args, "--strains", str(tmp_path / "strains"), "--out", str(out)]) == 1
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("emma", "message"),
+    [
+        ("0 1 1 0\n1 1 1 NA\n0 0 0 1\n1 1 1 1\n", "after 3 rows: the EMMA file has more"),
+        ("0 1 1 0\n1 1 1 NA\n0 0 0 1\n1 1 1 1\n0 0 0 0\n", "after 3 rows: the EMMA file has more"),
+        ("0 1 1 0\n1 1 1 NA\n", "after 2 rows: the Broad file has more"),
+        ("0 0 0 0\n1 1 1 NA\n0 0 0 1\n", "1 discordant rows"),
+    ],
+    ids=["emma+1", "emma+2", "broad+1", "discordant"],
+)
+def test_main_refuses_bad_inputs_on_stderr(tiny, capsys, emma, message):
+    tmp_path, broad = tiny
+    (tmp_path / "emma").write_text(emma)
+    out = tmp_path / "map.tsv"
+    args = ["--broad", broad, "--no-checksum", "--emma", str(tmp_path / "emma")]
+    code = bmm.main([*args, "--strains", str(tmp_path / "strains"), "--out", str(out)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert not out.exists()
+    assert message in captured.err
+    assert captured.out == ""
 
 
 def test_build_map_checks_the_checksum(tiny, capsys):

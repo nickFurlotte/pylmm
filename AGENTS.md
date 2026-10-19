@@ -17,7 +17,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
 | `tests/` | pytest suite; `tests/golden/` = Phase 1 reference outputs; `tests/helpers.py` = all tolerances |
 | `sims/` | Phase 4 simulation framework (genotype/phenotype generators, oracle, studies) |
-| `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reproduced), conventions, Phase 1/3/4 reports, `migration/` maps, `research/` |
+| `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, Phase 1/3/4 reports, `migration/` maps, `research/` |
 | `skills/` | agent skills (below); `.claude/skills` links here |
 | `data/` | example data (~215 MB): 1219 mice BED (fake phenotypes), 94-strain HMDP EMMA text; provenance, marker map and checksums in [data/README.md](data/README.md) |
 | `scripts/example.py` | a short library example |

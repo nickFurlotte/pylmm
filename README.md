@@ -106,7 +106,7 @@ Beyond modern Python conventions, type annotations, and automated testing, the r
 - [AGENTS.md](AGENTS.md) — Repository structure, development conventions, testing requirements, and guidance for coding agents.
 - [Agent Skills](skills/) — Reusable workflows for running GWAS, estimating heritability, simulating data, interpreting results, and building custom association analyses.
 - [User guide](docs/guide.md) — More detailed examples and documentation for the Python library.
-- [Replication](docs/replication.md) — Two published mouse GWAS reanalysed by an agent from the docs alone.
+- [Replication](docs/replication.md) — Two published mouse GWAS reanalysed by an agent from the docs alone (Farber 2011 BMD partially replicated, Bennett 2010 HDL replicated).
 - [Example data](data/README.md) — What the bundled files are, where they come from, and their checksums.
 
 Documentation examples are executed in continuous integration to help keep instructions synchronized with working code.
