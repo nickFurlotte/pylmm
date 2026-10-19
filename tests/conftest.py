@@ -29,6 +29,24 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+def pytest_terminal_summary(terminalreporter):
+    """Report the snippets run and skipped by tests/test_docs.py, if it ran."""
+    mod = sys.modules.get("test_docs")
+    stats = getattr(mod, "STATS", None)
+    if not stats:
+        return
+    tr = terminalreporter
+    executed = sum(s["executed"] for s in stats.values())
+    skipped = [x for s in stats.values() for x in s["skipped"]]
+    tr.section("docs snippets (tests/test_docs.py)")
+    tr.write_line(
+        "%d executed, %d skipped, in %d files (%.1f s)"
+        % (executed, len(skipped), len(stats), sum(s["seconds"] for s in stats.values()))
+    )
+    for where, reason in skipped:
+        tr.write_line("  skipped %s: %s" % (where, reason))
+
+
 @pytest.fixture(scope="session")
 def hmdp():
     """(Y, K, snps) for the hmdp data, all from text files.

@@ -34,6 +34,10 @@ fmt:
 test *args:
     uv run --group sims pytest "$@"
 
+# Run only the executable docs: every code block of AGENTS.md, docs/guide.md, skills/
+docs-test *args:
+    uv run --group sims pytest tests/test_docs.py "$@"
+
 # Run the test suite including the slow full-dataset tests
 test-slow *args:
     uv run --group sims pytest --runslow "$@"
