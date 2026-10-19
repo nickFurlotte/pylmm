@@ -1,6 +1,6 @@
 ---
 name: custom-association-analysis
-description: Write custom association analyses with the pylmm Python library (LMM, gwas, calculate_kinship, PlinkReader) when the pylmm gwas command line is not enough - scans on a subset of individuals, conditional analysis on a lead SNP, leave-one-chromosome-out (LOCO) kinship built by hand, many phenotypes sharing one eigendecomposition, SNP-by-covariate interaction, and inbred-strain panels with replicate animals. Use when asked for an ad-hoc or non-standard mixed-model analysis, a loop over phenotypes or chromosomes, or anything the CLI flags do not cover.
+description: Write custom association analyses with the pylmm Python library (LMM, gwas, calculate_kinship, PlinkReader) when the pylmm gwas command line is not enough - scans on a subset of individuals, conditional analysis on a lead SNP, leave-one-chromosome-out (LOCO) kinship built by hand, many phenotypes sharing one eigendecomposition, SNP-by-covariate interaction, and scans of inbred-strain panels with replicate animals. Use when asked for an ad-hoc or non-standard mixed-model analysis, a loop over phenotypes or chromosomes, or anything the CLI flags do not cover.
 ---
 
 # Custom association analyses with the pylmm library
@@ -129,24 +129,11 @@ print("SNP x sex: t=%.2f p=%.2f" % (t_gxe, p_gxe))
 
 ## Inbred strains with replicate animals
 
-In a panel of inbred strains, animals of one strain share a genotype. Two common set-ups:
-
-* **Individual level** (EMMA-style): one row per animal; expand the strain kinship with the incidence
-  matrix `Z` (animal × strain): `K_animals = Z K_strains Z'`. K is singular (rank = number of strains);
-  pylmm handles that (eigenvalues below 1e-6 are floored).
-* **Strain means**: average the phenotype per strain and fit one row per strain; h² is then on the
-  strain-mean scale (higher than the individual-level h²).
-
-```python
-K_strains = K[:10, :10]                    # pretend the first 10 individuals are 10 strains
-strain_of_animal = np.repeat(np.arange(10), 4)                     # 4 animals per strain
-Z = np.eye(10)[strain_of_animal]
-K_animals = Z @ K_strains @ Z.T
-print(K_animals.shape, "rank", np.linalg.matrix_rank(K_animals))
-```
-
-Genotype rows must then be expanded the same way (`W_animals = Z @ W_strains`), and the IDs written for
-the animals, not the strains.
+The set-up (individual level with `K_animals = Z K_strains Z'` vs strain means, the strain-mean
+heritability, what to expect in small panels) is in one place: `estimate-heritability` section 7. For a
+scan at the individual level, expand the genotypes the same way as K (`W_animals = Z @ W_strains`) and
+write the IDs of the animals, not the strains. With few distinct strains, prefer LOCO (above): a K from
+the tested SNPs absorbs much of the signal (`simulate-lmm-data` section 6).
 
 ## Checks for any custom loop
 

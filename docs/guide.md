@@ -449,7 +449,8 @@ pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.phen
 8. **K scale.** `h` depends on how K is scaled (section 5); test statistics do not.
 9. **Inbred panels.** Replicate animals of one strain share a genotype: K is rank-deficient (the example
    K has rank about 110 for 1219 mice), the effective number of independent tests is small, and λ_GC from
-   one scan is noisy.
+   one scan is noisy. Individual-level vs strain-mean heritability and what to expect: the
+   `estimate-heritability` skill, section 7.
 10. **`association` with `nan`** fails; `gwas` handles missing calls.
 11. **Imputation set.** When K drops individuals, genotypes are standardised over the kept individuals, but
     individuals dropped for a missing phenotype or covariate still count in the mean and SD (|Δt| ≤ 0.024

@@ -164,7 +164,8 @@ assert 0.8 < lam_gc < 1.25
 * **Near-singular K**: few distinct genotypes (inbred strains, replicates) give a K of low rank; pylmm
   floors eigenvalues at 1e-6. Fine for the LMM, but the effective sample size for a SNP is the number of
   distinct genotypes. Check `np.linalg.matrix_rank(K)` and the number of strains carrying the minor allele;
-  a hit driven by one or two strains is fragile.
+  a hit driven by one or two strains is fragile. Inbred panels with replicates: `estimate-heritability`
+  section 7.
 * **Small n** (< ~100) or **n close to the number of covariates**: few residual df, unstable h.
 * **Low minor-allele count**, high missingness (mean imputation pulls toward 0), SNPs with t far above
   their LD neighbours (genotyping error).
@@ -203,4 +204,4 @@ interval around the lead), compute `r²` with the lead SNP over the window from 
   REML vs ML, refit, LOCO vs not, sample QC). A sign flip at the same allele, or no signal anywhere in the
   window, needs explaining.
 * Compare h² only after matching the kinship scale and the unit (individual vs strain mean), see
-  `estimate-heritability`.
+  `estimate-heritability` sections 3 and 7.

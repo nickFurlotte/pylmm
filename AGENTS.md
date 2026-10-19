@@ -85,10 +85,14 @@ uv run pylmm gwas --help > /dev/null   # every option, with examples
 
 ## Skills (`skills/<name>/SKILL.md`)
 
+`.claude/skills` is a relative symlink to `skills/`, so Claude Code finds them. A symlink may not
+survive a zip download or a Windows checkout without symlink support (it becomes a small text file); then
+use `skills/` directly, or copy it to `.claude/skills`.
+
 | skill | use it to |
 |---|---|
-| `run-gwas` | run a GWAS end to end (CLI or library), check it, fix common errors |
-| `estimate-heritability` | fit the null model, interpret h², SE / profile-likelihood intervals, K scaling |
+| `run-gwas` | run a GWAS end to end (CLI or library), check it, fix common errors; `reference.md`: phenotype QC/transforms, SNP QC, loci |
+| `estimate-heritability` | fit the null model, interpret h², SE / profile-likelihood intervals, K scale vs other tools, inbred panels (strain-mean h²) |
 | `custom-association-analysis` | write ad-hoc loops: subsets, conditional analysis, LOCO kinship, many phenotypes |
 | `simulate-lmm-data` | simulate genotypes/phenotypes with known h² and causal SNPs; sanity-check a pipeline |
 | `convert-genotype-formats` | VCF/BCF, BGEN, PGEN, VCF Zarr, Hail → PLINK BED; phenotype and `.id` files |
