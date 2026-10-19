@@ -131,6 +131,28 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Added
 
+#### Phase R follow-ups: data provenance, inbred panels, comparison with published GWAS
+- `data/README.md`: what each bundled file is, its origin (the HMDP EMMA rows are, in order, the rows of the
+  Broad merged mouse HapMap/WT file, build 37 / mm9; verified: same 132,285 rows, 122,242 informative rows
+  with 0 discordances across 27 shared strains), the strain list (`AXB-19/PgnJ` three times, identical
+  columns = the MPD sublines AXB19a/19/19b), the fake phenotypes of the BED demo set, and SHA-256
+  checksums of every file (checked by `tests/test_data_provenance.py`).
+- `data/hmdp.liver.snps.map.tsv` (4.4 MB): a validated marker map for `data/hmdp.liver.snps` (row,
+  chromosome, build-37 position, the bases coded 0 and 1, validation status), and
+  `scripts/build_hmdp_marker_map.py`, which downloads the Broad file, checks its SHA-256 and the row count,
+  and refuses to write a map with a discordant row.
+- Skill `inbred-strain-panels`: strain aliases and a genotype-identity audit of duplicate strain labels,
+  joining phenotype sources to strain genotypes, strain → animal expansion, imputing over strains vs
+  animals, PLINK-safe IDs, placeholder alleles, unequal replicates, the EMMA strain-mean path, and a sketch
+  of the Farber 2011 / Bennett 2010 reanalyses.
+- `skills/interpret-gwas-results/comparison-worksheet.md`: a template for comparing a pylmm scan with a
+  published GWAS (kinship formula and scale, unit, transform, null-only vs per-SNP refit, build, named
+  allele, SNP set, thresholds, a pre-registered rule for "replicated"), with an IBS-style kinship recipe.
+- `plink_tools.sanitize_id` / `sanitize_ids`: PLINK-safe tokens for names such as `BTBR T+ tf/J`, checked
+  for collisions, with the map back to the original names.
+- `plink_tools.write_bed`: `None` (or `""`) in `a1`/`a2` for a marker without allele letters -> the
+  placeholders `1` (A1) / `2` (A2, the counted allele).
+
 #### Agent-facing docs (Phase 5c)
 - `AGENTS.md` (and a `CLAUDE.md` that imports it): repo map, `just` commands, test and golden rules,
   conventions, commit norms, the skills and the known caveats.
@@ -288,6 +310,13 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Fixed
 
+#### Phase R follow-ups
+- `pylmm.__version__` was `"unknown"` when pylmm was imported from a source checkout on `PYTHONPATH`
+  without being installed -> the `[project] version` of the checkout's `pyproject.toml`.
+- `plink_tools.write_bed` / `write_pheno` / `write_kinship` wrote IDs with whitespace (e.g. a strain name
+  as FID), which corrupts the whitespace-separated PLINK files -> `ValueError` naming the ID and pointing
+  at `sanitize_ids`; empty IDs and equal `a1`/`a2` for a marker are errors too.
+
 #### `PlinkReader` (Phase 5b.1)
 - Silent misalignment: a FaSTLMM kinship (`fastlmm_kinship=True`) that lacked some individuals dropped them
   from `indivs`, `K` and `phenos`, but every SNP vector kept all `N` values, so genotype row `i` no longer
@@ -311,6 +340,26 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - `get_covariates(None)` raised `TypeError` -> `ValueError`; `cov_file` is now a required argument.
 - An unknown genotype `type` wrote a message to stderr and `get_snp_iterator()` returned `None` -> the
   constructor raises `ValueError`.
+
+### Docs
+- `docs/replication.md`: the Phase R reanalysis of two published HMDP mouse GWAS by an agent working from
+  the docs alone (Farber 2011 BMD: partially replicated, all 5 published loci have a nearby signal (median −log10 p
+  0.47 below published), 1/5 pass Bonferroni and 3/5 the paper's threshold; Bennett 2010 HDL:
+  replicated, same lead SNP, −log10 p 11.5 vs 9.4), method choices and caveats; linked from the guide
+  (section 13) and the README.
+- Kinship without a `.id` file, stated exactly (AGENTS.md, guide, `run-gwas`, `migrate-from-old-pylmm`,
+  `pylmm gwas --help`): `pylmm gwas --bfile/--tfile` warns and assumes genotype order; `--emma-geno` does
+  not warn (EMMA input has no IDs; an existing `.id` is ignored with a warning); the library's
+  `PlinkReader.read_kinship` does not warn.
+- AGENTS.md: `uv sync` / `uv run` create and use `.venv/` at the repository root; how to use another
+  environment (`UV_PROJECT_ENVIRONMENT`, or an activated venv with `pip install -e .`).
+- A per-animal BED of an inbred panel is mean-imputed over animals by `pylmm gwas`, not over strains
+  (Δ−log10 p up to 0.28 in the replication); the library recipe to impute over strains is in
+  `inbred-strain-panels`. A strain-aware option is planned (Phase 6).
+- `convert-genotype-formats/reference.md`: a handoff template for downloads a site blocks to scripts
+  (Dryad's landing page loads but `file_stream` returns 403: download in a browser, verify checksums).
+- `estimate-heritability` / `custom-association-analysis`: expand strain genotypes to animals by row
+  indexing, since `Z @ W` spreads a missing call to every animal.
 
 ### Internal
 - Goldens `gwas_cli_bed_snps50_refit.out` and `gwas_cli_bed_snps50_removeMissing.out` were regenerated for the

@@ -2,6 +2,9 @@
 
 The docs promise that their snippets run; this test keeps that promise.
 
+Also run: ``docs/replication.md`` and ``data/README.md`` (their network and checksum
+commands are marked ``skip-ci``; the skips are counted).
+
 What is not executed: ``README.md`` and ``docs/research/*.md`` (and the other
 reports under ``docs/``).  The README's example commands scan the full
 bundled dataset (minutes) and are covered instead by ``just readme-example``
@@ -84,6 +87,8 @@ DOC_FILES = sorted(
     [
         os.path.join(REPO, "AGENTS.md"),
         os.path.join(REPO, "docs", "guide.md"),
+        os.path.join(REPO, "docs", "replication.md"),
+        os.path.join(REPO, "data", "README.md"),
         *glob.glob(os.path.join(REPO, "skills", "**", "*.md"), recursive=True),
     ]
 )

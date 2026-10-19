@@ -97,11 +97,45 @@ Where to read more
 
 from __future__ import annotations
 
+import re
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+
+
+def _source_tree_version(pyproject: Path) -> str:
+    """The ``[project] version`` of a pylmm ``pyproject.toml``, or "unknown".
+
+    Used when pylmm is imported from a source checkout that is not installed
+    (e.g. ``PYTHONPATH=/path/to/pylmm``), so there is no distribution
+    metadata.  A small line parser, not a TOML parser: ``tomllib`` needs
+    Python 3.11, and the version is a plain ``version = "X"`` line.  A
+    single-quoted version (``version = 'X'``) or a dynamic one (``dynamic =
+    ["version"]``) is not recognised and returns "unknown".
+    """
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    table = ""
+    name = got = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            table = line
+            continue
+        if table != "[project]":
+            continue
+        m = re.match(r'(name|version)\s*=\s*"([^"]+)"', line)
+        if m and m.group(1) == "name":
+            name = m.group(2)
+        elif m:
+            got = m.group(2)
+    return got if name == "pylmm" and got else "unknown"
+
 
 try:
     __version__: str = version("pylmm")
-except PackageNotFoundError:  # not installed (running from a source tree)
-    __version__ = "unknown"
+except PackageNotFoundError:  # not installed: a source checkout on PYTHONPATH
+    __version__ = _source_tree_version(Path(__file__).resolve().parent.parent / "pyproject.toml")
 
 __all__ = ["__version__"]

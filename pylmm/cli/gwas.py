@@ -178,8 +178,10 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         required=True,
         help="(required) n x n kinship matrix, whitespace-separated text (or .gz), from "
         "`pylmm kinship`.  "
-        "Its rows are matched to the genotypes by the IDs in FILE.id if that exists; "
-        "otherwise they are assumed to be in genotype order (with a warning)",
+        "With --bfile/--tfile its rows are matched to the genotypes by the IDs in FILE.id if "
+        "that exists; otherwise they are assumed to be in genotype order (with a warning).  "
+        "With --emma-geno, which has no IDs, the rows are always in genotype order: no "
+        "warning without FILE.id, and a FILE.id is ignored (with a warning)",
     )
     kin.add_argument(
         "--eigen",

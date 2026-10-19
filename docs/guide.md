@@ -25,8 +25,10 @@ pip install "git+https://github.com/nickFurlotte/pylmm@main"
 uv add "pylmm @ git+https://github.com/nickFurlotte/pylmm@main"
 ```
 
-A git install clones the whole repository, including ~215 MB of example data, so it takes a while. From a
-clone, `uv sync` (add `--group sims` for the simulation framework) and prefix commands with `uv run`:
+A git install clones the whole repository, including ~215 MB of example data, so it takes a while (what
+the data is, and its checksums: [data/README.md](../data/README.md)). From a clone, `uv sync` (add
+`--group sims` for the simulation framework) and prefix commands with `uv run`, which uses the `.venv/`
+at the repository root (creating it if needed; `UV_PROJECT_ENVIRONMENT` points uv elsewhere):
 
 ```bash
 uv run pylmm --version
@@ -110,7 +112,9 @@ print(bim["chrom"][0], bim["pos"][0], bim["a1"][0], bim["a2"][0])
 * `PlinkReader(prefix, type="t")`: PLINK TPED/TFAM, alleles coded `1`/`2` (`0` missing; make one with
   `plink --bfile X --recode 12 transpose --out Y`).
 * `PlinkReader(path, type="emma")`: an EMMA matrix, one SNP per row, one individual per column, no IDs
-  (individuals are positions `0..n-1`, and every other file is matched by position).
+  (individuals are positions `0..n-1`, and every other file is matched by position) and no SNP names or
+  positions. For the bundled `data/hmdp.liver.snps`, `data/hmdp.liver.snps.map.tsv` gives each row's
+  chromosome, build-37 position and alleles (see `data/README.md`).
 * VCF, BCF, BGEN, PGEN, VCF Zarr, Hail: convert to BED first, see the `convert-genotype-formats` skill.
 * Any genotype matrix you already have in numpy works directly with `calculate_kinship`, `LMM` and `gwas`.
 
@@ -214,9 +218,13 @@ K = np.loadtxt(K_FILE)
 ```
 
 * The `.id` sidecar is what lets `pylmm gwas` (and `PlinkReader(k_file=...)`) align K to the genotype
-  file by ID. Without it K's rows are *assumed* to be in genotype order (with a warning). For a kinship
-  computed elsewhere, write `K.id` yourself: `pylmm.samples.write_id_file("K.id", ids)` or
+  file by ID. Without it K's rows are *assumed* to be in genotype order: `pylmm gwas --bfile`/`--tfile`
+  warns, the library's `read_kinship` does not (it only checks that K is n × n). For a kinship computed
+  elsewhere, write `K.id` yourself: `pylmm.samples.write_id_file("K.id", ids)` or
   `plink_tools.write_kinship("K", K, ids)`.
+* EMMA genotypes have no IDs, so with `--emma-geno` (or `type="emma"`) K's rows are always the genotype
+  columns in order: no `.id` is needed and none is warned about; a `K.id` that exists is ignored, with a
+  warning. Check the order yourself (keep the strain list you wrote the columns from).
 * SNPs that are monomorphic or all missing are skipped but still counted in `m`, so K shrinks if many SNPs
   are monomorphic (a known issue, bug 8). This changes `h` (section 5) but not t or p.
 * `calculate_kinship(W, center=True)` returns a centred K scaled so that `trace(P K P) = n - 1`.
@@ -357,7 +365,8 @@ head -3 trait.tsv
 ```
 
 * `--kinship K` uses `K.id`, if it exists, to align K by ID; without it, it warns and assumes genotype
-  order.
+  order. With `--emma-geno` there are no IDs: K is in genotype order, with no warning (and `K.id`, if
+  present, is ignored with a warning).
 * The intercept is added unless `--no-intercept`; individuals with a missing phenotype or covariate are
   dropped (with a warning).
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
@@ -433,8 +442,9 @@ pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.phen
 ## 12. Pitfalls
 
 1. **No intercept with library covariates.** `X0` is used as given; prepend `np.ones(n)`.
-2. **Kinship order.** A kinship without a `.id` file is assumed to be in genotype order. Write the `.id`
-   file whenever K comes from elsewhere, and check `samples.read_id_file(...) == reader.indivs`.
+2. **Kinship order.** A kinship without a `.id` file is assumed to be in genotype order (the CLI warns
+   for PLINK input; EMMA input and the library do not). Write the `.id` file whenever K comes from
+   elsewhere, and check `samples.read_id_file(...) == reader.indivs`.
 3. **FID mismatches.** Phenotype rows are matched on `(FID, IID)`. If your phenotype file uses other FIDs
    than the `.fam` (e.g. `0`, or plink2's `--double-id`), every individual is "missing"; use
    `--id-match iid` / `id_match="iid"`.
@@ -450,7 +460,9 @@ pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.phen
 9. **Inbred panels.** Replicate animals of one strain share a genotype: K is rank-deficient (the example
    K has rank about 110 for 1219 mice), the effective number of independent tests is small, and λ_GC from
    one scan is noisy. Individual-level vs strain-mean heritability and what to expect: the
-   `estimate-heritability` skill, section 7.
+   `estimate-heritability` skill, section 7. Data preparation (strain aliases, duplicate strain columns,
+   strain → animal expansion, imputing missing calls over strains, not animals): the
+   `inbred-strain-panels` skill.
 10. **`association` with `nan`** fails; `gwas` handles missing calls.
 11. **Imputation set.** When K drops individuals, genotypes are standardised over the kept individuals, but
     individuals dropped for a missing phenotype or covariate still count in the mean and SD (|Δt| ≤ 0.024
@@ -472,3 +484,10 @@ pylmm's default path (REML null fit, Wald test) was checked by simulation in Pha
   SNPs; kinship normalisation (bug 8).
 * The Phase 1 golden tests (`tests/golden/`) pin every number of the original 2013 code: the CLI output is
   byte-identical for the default path.
+
+**Against published results** (Phase R, [replication.md](replication.md)): an agent using only these docs
+and the skills reanalysed two published mouse GWAS from their original phenotypes. Farber et al. 2011
+(bone mineral density): **partially replicated**. All 5 published loci have a nearby signal (median
+−log10 p 0.47 below published); 1/5 pass Bonferroni and 3/5 the paper's threshold. Bennett et al. 2010
+(HDL): **replicated**, same lead SNP, −log10 p 11.5 vs 9.4 published.
+Closest method: an IBS-style kinship with a per-SNP REML refit. No numerical bug was found.

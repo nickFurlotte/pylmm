@@ -212,3 +212,7 @@ interval around the lead), compute `r²` with the lead SNP over the window from 
   window, needs explaining.
 * Compare h² only after matching the kinship scale and the unit (individual vs strain mean), see
   `estimate-heritability` sections 3 and 7.
+* For a written comparison, fill in [comparison-worksheet.md](comparison-worksheet.md) first: kinship
+  formula and scale, observation unit, transform, null-only vs per-SNP refit, build, named allele, SNP
+  set, thresholds and the pre-registered rule for "replicated". In the Phase R replication of two EMMA-era
+  mouse GWAS, an IBS-style K with a per-SNP refit came closest to the published p-values.

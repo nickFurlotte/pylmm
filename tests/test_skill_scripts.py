@@ -81,6 +81,90 @@ def test_write_bed_unknown_coding(tmp_path):
         plink_tools.write_bed(str(tmp_path / "x"), np.zeros((2, 2)), coding="dosage")
 
 
+def test_write_bed_placeholder_alleles(tmp_path):
+    """None / "" alleles become the documented placeholders 1 (A1) and 2 (A2, counted)."""
+    G = np.array([[0, 2, 1], [2, 0, np.nan], [1, 1, 2]], dtype=float)
+    prefix = str(tmp_path / "p")
+    plink_tools.write_bed(prefix, G, a1=["C", None, ""], a2=["T", None, "G"])
+    bim = plink_tools.read_bim(prefix)
+    assert list(bim["a1"]) == ["C", plink_tools.PLACEHOLDER_A1, "1"]
+    assert list(bim["a2"]) == ["T", plink_tools.PLACEHOLDER_A2, "G"]
+    assert (plink_tools.PLACEHOLDER_A1, plink_tools.PLACEHOLDER_A2) == ("1", "2")
+    np.testing.assert_array_equal(_read_raw(prefix), G / 2)  # A2 ("2") is the counted allele
+
+
+def test_write_bed_rejects_equal_alleles(tmp_path):
+    with pytest.raises(ValueError, match=r"a1\[1\] == a2\[1\] == 'A'"):
+        plink_tools.write_bed(str(tmp_path / "x"), np.zeros((2, 2)), a1=["A", "A"], a2=["G", "A"])
+
+
+@pytest.mark.parametrize(
+    ("kw", "what"),
+    [
+        ({"iids": ["a", "b c"]}, "iids"),
+        ({"fids": ["BTBR T+ tf/J", "B6"]}, "fids"),
+        ({"iids": ["a", ""]}, "iids"),
+        ({"fids": ["a\tb", "c"]}, "fids"),
+        ({"snp_ids": ["rs 1", "rs2"]}, "snp_ids"),
+        ({"a1": ["A", "C T"]}, "a1"),
+    ],
+)
+def test_write_bed_rejects_whitespace_ids(tmp_path, kw, what):
+    with pytest.raises(ValueError, match=r"%s\[\d\] = .*sanitize_ids" % what):
+        plink_tools.write_bed(str(tmp_path / "x"), np.zeros((2, 2)), **kw)
+    assert not os.path.exists(str(tmp_path / "x.bed"))
+
+
+def test_write_pheno_and_kinship_reject_whitespace_ids(tmp_path):
+    ids = [("BTBR T+ tf/J", "m1"), ("B6", "m2")]
+    with pytest.raises(ValueError, match=r"FID\[0\] = 'BTBR T\+ tf/J'.*sanitize_ids"):
+        plink_tools.write_pheno(str(tmp_path / "p"), ids, np.zeros(2), ["y"])
+    with pytest.raises(ValueError, match=r"FID\[0\]"):
+        plink_tools.write_kinship(str(tmp_path / "k"), np.eye(2), ids)
+    with pytest.raises(ValueError, match=r"names\[0\]"):
+        plink_tools.write_pheno(str(tmp_path / "p"), [("a", "b")], np.zeros(1), ["body weight"])
+
+
+def test_sanitize_ids():
+    assert plink_tools.sanitize_id("BTBR T+ tf/J") == "BTBR_T_tf_J"
+    assert plink_tools.sanitize_id("BTBR T<+> Itpr3<tf>/J") == "BTBR_T_Itpr3_tf_J"
+    assert plink_tools.sanitize_id("AXB-19/PgnJ") == "AXB-19_PgnJ"
+    assert plink_tools.sanitize_id(" C57BL/6J ") == "C57BL_6J"
+    names = ["BTBR T+ tf/J", "C57BL/6J", "C57BL/6J", "A/J"]
+    m = plink_tools.sanitize_ids(names)
+    assert m == {"BTBR T+ tf/J": "BTBR_T_tf_J", "C57BL/6J": "C57BL_6J", "A/J": "A_J"}
+    with pytest.raises(ValueError, match="both sanitize to 'A_J'"):
+        plink_tools.sanitize_ids(["A/J", "A J"])
+    with pytest.raises(ValueError, match="no letters or digits"):
+        plink_tools.sanitize_id("/ /")
+    assert plink_tools.sanitize_id(".") == "id_."
+    assert plink_tools.sanitize_id("..") == "id_.."
+    assert plink_tools.sanitize_id(" .. ") == "id_.."
+    assert plink_tools.sanitize_id("a..") == "a.."
+    assert plink_tools.sanitize_ids([".", ".."]) == {".": "id_.", "..": "id_.."}
+
+
+def test_check_ids_accepts_non_string_ids():
+    plink_tools._check_ids("snp_ids", [1, 2, 3])  # int SNP IDs
+    with pytest.raises(ValueError, match="snp_ids"):
+        plink_tools._check_ids("snp_ids", [1, "a b"])
+
+
+def test_sanitized_ids_round_trip_through_pylmm(tmp_path):
+    """Strain names with spaces -> safe FIDs -> a BED + phenotype + kinship pylmm aligns by ID."""
+    strains = ["BTBR T+ tf/J", "C57BL/6J", "A/J"]
+    token = plink_tools.sanitize_ids(strains)
+    ids = [(token[s], "%s_%d" % (token[s], k)) for s in strains for k in range(2)]
+    G = np.repeat(np.array([[0, 2], [2, 0], [2, 2]], dtype=float), 2, axis=0)
+    prefix = str(tmp_path / "s")
+    plink_tools.write_bed(prefix, G, fids=[f for f, _ in ids], iids=[i for _, i in ids])
+    plink_tools.write_pheno(prefix + ".pheno", ids, np.arange(6.0), ["y"])
+    plink_tools.write_kinship(prefix + ".kin", np.eye(6), ids[::-1])
+    with PlinkReader(prefix, pheno_file=prefix + ".pheno", k_file=prefix + ".kin") as r:
+        assert r.indivs == ids
+        np.testing.assert_array_equal(r.phenos[:, 0], np.arange(6.0))
+
+
 # -- migrate.py -----------------------------------------------------------------
 
 MIGRATE_REAL = os.path.join(REPO, "skills", "migrate-from-old-pylmm", "scripts", "migrate.py")
