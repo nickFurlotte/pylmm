@@ -25,8 +25,8 @@ requires-python = ">=3.11"
 # Lower bounds are the oldest releases with Python 3.11 wheels, and they are
 # tested: CI runs `uv run --python 3.11 --resolution lowest-direct pytest` on
 # ubuntu, which installs numpy 1.23.2 + scipy 1.9.2; the same pins also pass on
-# macOS arm64.  Only py3.11 has wheels this old, so newer Pythons resolve newer
-# releases anyway.
+# macOS arm64.  Among supported Pythons, only 3.11 can resolve releases this
+# old; newer Pythons resolve newer releases anyway.
 dependencies = [
     "numpy>=1.23.2",
     "scipy>=1.9.2",
@@ -80,8 +80,10 @@ packages = ["pylmm"]
 
 [tool.hatch.build.targets.sdist]
 # The package, its metadata and the sources that need no data: sims/ (code
-# only, not its result tables), skills/ and the notebook.  Not data/ (~215MB),
-# nor tests/, which needs tests/golden and data/.  An explicit list, because
+# only, not its result tables), skills/ and the notebook, plus the docs that
+# skills/ and AGENTS.md link to (docs/migration/ is read by the
+# migrate-from-old-pylmm script).  Not data/ (~215MB), nor tests/, which
+# needs tests/golden and data/.  An explicit list, because
 # hatchling walks the .claude/skills symlink before skills/ and then skips
 # skills/ as already seen.
 only-include = [
@@ -89,6 +91,10 @@ only-include = [
     "sims",
     "skills",
     "notebooks",
+    "docs/migration",
+    "docs/guide.md",
+    "docs/conventions.md",
+    "docs/replication.md",
     "AGENTS.md",
     "CHANGELOG.md",
     "CITATION.cff",
