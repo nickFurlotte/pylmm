@@ -77,7 +77,9 @@ Key caveats (details in reference.md):
 ## Plain genotype tables (numpy → BED)
 
 Many public datasets ship genotypes as text tables (one row per SNP or per sample, allele letters or
-0/1/2). Convert in numpy and write the BED with `plink_tools.write_bed`, which takes **copies of A2**:
+0/1/2). Convert in numpy and write the BED with `plink_tools.write_bed`, which takes **copies of A2**
+(0/1/2, nan = missing). Genotypes read back with `PlinkReader(..., norm_genotype=False)` are fractions
+(0/0.5/1): pass `2 * G`, or `coding="fraction"`. Any other value raises `ValueError` (nothing is rounded).
 
 ```python
 import sys

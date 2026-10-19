@@ -6,8 +6,9 @@ These helpers fill the gap for ad-hoc work:
 
 * `read_bim` -- the ``.bim`` columns (chromosome, ID, cM, position, A1, A2),
   in the order `PlinkReader` iterates the SNPs;
-* `write_bed` -- a genotype matrix (copies of A2, 0/1/2, nan = missing) to
-  ``.bed/.bim/.fam``, e.g. simulated or converted data;
+* `write_bed` -- a genotype matrix (copies of A2, 0/1/2, nan = missing; or
+  fractions 0/0.5/1 with ``coding="fraction"``) to ``.bed/.bim/.fam``, e.g.
+  simulated or converted data;
 * `subset_bed` -- copy some SNPs (e.g. one chromosome) of a BED file set to a
   new one, byte for byte, without decoding;
 * `write_pheno` -- a ``FID IID name ...`` phenotype or covariate file with
@@ -17,8 +18,10 @@ These helpers fill the gap for ad-hoc work:
 
 Coding: pylmm reads a BED genotype as the FRACTION of copies of A2 (the 6th
 ``.bim`` column): BED code 00 -> 0.0, 10 -> 0.5, 11 -> 1.0, 01 -> nan.
-`write_bed` takes COUNTS of A2 (0, 1, 2), so ``PlinkReader(...,
-norm_genotype=False)`` reads back ``G / 2``.
+`write_bed` takes COUNTS of A2 (0, 1, 2) by default, so ``PlinkReader(...,
+norm_genotype=False)`` reads back ``G / 2``; pass ``coding="fraction"`` to
+write what that reader returns.  Any other value raises ValueError (nothing
+is rounded).
 
 Use from the repository root::
 
@@ -75,6 +78,7 @@ def write_bed(
     pos: Sequence[int] | None = None,
     a1: Sequence[str] | None = None,
     a2: Sequence[str] | None = None,
+    coding: str = "count",
 ) -> None:
     """Write ``prefix.bed/.bim/.fam`` from an (n, m) genotype matrix.
 
@@ -83,22 +87,46 @@ def write_bed(
     prefix : str
         Output prefix.
     G : (n, m) array
-        Copies of allele A2 per individual and SNP: 0, 1 or 2 (values are
-        rounded to the nearest of these), nan for a missing call.
+        Copies of allele A2 per individual and SNP: 0, 1 or 2, nan for a
+        missing call (``coding="count"``, the default); or the fraction of
+        A2, 0, 0.5 or 1, as ``PlinkReader(..., norm_genotype=False)`` and the
+        ``bed`` source of ``sims.genotypes`` return it (``coding="fraction"``).
+        Any other value raises ValueError; nothing is rounded.
     iids, fids : sequence of str, optional
         Sample IDs.  Default IIDs ``ind1 .. indn``; default FID = IID (as
         ``plink2 --double-id``).
     snp_ids, chrom, pos, a1, a2 : sequence, optional
         ``.bim`` columns.  Defaults: ``snp1 ..``, chromosome ``1``, positions
         ``1 ..``, alleles ``A``/``G`` (A1/A2).
+    coding : {"count", "fraction"}, default "count"
+        How ``G`` is coded (see ``G``).
     """
     G = np.asarray(G, dtype=np.float64)
     if G.ndim != 2:
         raise ValueError("G must be (n individuals, m SNPs), got shape %s" % (G.shape,))
     n, m = G.shape
-    finite = G[np.isfinite(G)]
-    if finite.size and (finite.min() < -0.5 or finite.max() > 2.5):
-        raise ValueError("G must hold copies of A2 (0, 1, 2) or nan")
+    if coding == "fraction":
+        allowed, G = (0.0, 0.5, 1.0), 2.0 * G
+    elif coding == "count":
+        allowed = (0.0, 1.0, 2.0)
+    else:
+        raise ValueError("coding must be 'count' or 'fraction', got %r" % (coding,))
+    called = ~np.isnan(G)
+    bad = called & ~np.isin(G, (0.0, 1.0, 2.0))
+    if bad.any():
+        i, j = np.argwhere(bad)[0]
+        value = G[i, j] / 2 if coding == "fraction" else G[i, j]
+        if coding == "count":
+            hint = (
+                "pylmm's PlinkReader returns fractions of A2 (0/0.5/1); pass 2*G, "
+                "or coding='fraction'"
+            )
+        else:
+            hint = "fractions must be 0, 0.5 or 1"
+        raise ValueError(
+            "G[%d, %d] = %r: with coding=%r, G must hold %s or nan (%d such values; nothing is "
+            "rounded). %s" % (i, j, float(value), coding, allowed, int(bad.sum()), hint)
+        )
     iids = ["ind%d" % (i + 1) for i in range(n)] if iids is None else [str(x) for x in iids]
     fids = list(iids) if fids is None else [str(x) for x in fids]
     snp_ids = ["snp%d" % (j + 1) for j in range(m)] if snp_ids is None else list(snp_ids)
@@ -120,7 +148,6 @@ def write_bed(
 
     # 2-bit codes: 0 copies of A2 -> 00, 1 -> 10, 2 -> 11, missing -> 01
     codes = np.full((n, m), 1, dtype=np.uint8)
-    called = np.isfinite(G)
     lut = np.array([0, 2, 3], dtype=np.uint8)
     codes[called] = lut[np.rint(G[called]).astype(int)]
     nb = _bytes_per_snp(n)

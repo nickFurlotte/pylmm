@@ -39,7 +39,9 @@ import shlex
 import sys
 import tokenize
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# realpath, not abspath: the script is also reached through the .claude/skills -> ../skills
+# symlink, and ../../.. must climb out of the real skills/ folder to find docs/.
+HERE = os.path.dirname(os.path.realpath(__file__))
 MAP_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "..", "docs", "migration"))
 
 # Notes for patterns whose meaning changed without a name change.
@@ -60,6 +62,16 @@ PY_NOTES = [
     (
         re.compile(r"\bfit_two\("),
         "misc.fit_two: the phenotype parameter is Y (was y) and wgrids is ngrids",
+    ),
+    (
+        re.compile(r"\b_get_max\("),
+        "getMax is private now (_get_max) and may change without notice; call fit() (or "
+        "fit(reml=False)) and read opt_h / opt_ll instead",
+    ),
+    (
+        re.compile(r"\bTrue\s*-\s*(?:np|numpy)\.isnan\("),
+        "Python 2 idiom True - np.isnan(...) (negation by subtraction) raises TypeError on "
+        "current numpy: use ~np.isnan(...)",
     ),
     (
         re.compile(r"\.read_phenos\(|\.read_covariates\("),
@@ -265,6 +277,11 @@ def rewrite_command(cmd: str, cli: CliMap) -> tuple[str, list[str]]:
             i += 1
             value = args[i] if i < len(args) else ""
         i += 1
+        if a in ("--refit", "--removeMissingGenotypes"):
+            notes.append(
+                "%s: each SNP's fit is now by REML, like the null fit (the old program refit by "
+                "ML), so the output changes; see CHANGELOG.md" % a
+            )
         if a == "-p":
             out += ["--pheno-col", str(int(value) + 1)]
             notes.append("-p %s (0-based) -> --pheno-col %d (1-based)" % (value, int(value) + 1))

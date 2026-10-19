@@ -31,6 +31,11 @@ print(geno.G.shape, np.bincount(geno.pops))
 
 `genotypes.with_missing(G, rate, rng)` adds missing calls. Copy before changing (`geno.copy()`).
 
+**Coding.** The synthetic sources give allele counts 0/1/2. The `bed` and `hmdp` sources give what
+`PlinkReader(..., norm_genotype=False)` returns: the **fraction** of A2, 0/0.5/1 (nan = missing). Before
+writing such a `G` with `plink_tools.write_bed`, double it (`2 * G`) or pass `coding="fraction"`;
+`write_bed` raises `ValueError` on 0.5 rather than rounding it.
+
 ## 2. Kinship and a test-SNP split
 
 Use disjoint SNP sets for K and for the null tests (no proximal contamination), or `overlap=True` for the
@@ -99,7 +104,7 @@ import plink_tools
 
 iids = ["ind%d" % i for i in range(geno.n)]
 fid_iid = [(i, i) for i in iids]
-plink_tools.write_bed("sim", G_test, iids=iids)                   # G = copies of A2
+plink_tools.write_bed("sim", G_test, iids=iids)        # counts of A2; for a `bed` source G: 2 * G
 plink_tools.write_pheno("sim.pheno", fid_iid, ph.y, ["y"])
 plink_tools.write_pheno("sim.covar", fid_iid, ph.X0[:, 1:], ["c1"])          # no intercept column
 plink_tools.write_kinship("sim.kin", kin.K, fid_iid)              # K from the kinship SNPs, + .id

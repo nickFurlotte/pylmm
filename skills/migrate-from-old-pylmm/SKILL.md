@@ -94,6 +94,8 @@ A shell script or notes file (any file not ending in `.py`) passed to the script
 | `L.LL(h)` (ML by default) | `L.log_likelihood(h)` (**REML** by default) | pass `reml=False` for the old value; returns `LogLikResult(ll, beta, sigma, xx_inv)` |
 | `GWAS(..., REML=False)` | `gwas(..., reml=False)` | was a REML test in disguise (bug 1); now ML throughout |
 | `--refit`, `--removeMissingGenotypes` | `--refit`, `--remove-missing-genotypes` | refit by REML now (they silently used ML): outputs change |
+| `L.getMax(H, X, REML=...)` | `L._get_max(...)` (private) | call `fit()` and read `opt_h` / `opt_ll`; the script flags it |
+| `True - np.isnan(x)` (py2 negation) | `~np.isnan(x)` | raises `TypeError` on current numpy; the script flags it, it does not rewrite it |
 | `getPhenos`, `getCovariates` | `read_phenos`, `read_covariates` | rows matched by (FID, IID); absent individuals are `nan` rows, not skipped |
 | `plink.getSNPIterator()` | `PlinkReader.iter_snps()` | renamed twice (5.4 `get_snp_iterator`, 5b.1 `iter_snps`) |
 | `misc.fitTwo(y, ..., wgrids=)` | `misc.fit_two(Y, ..., ngrids=)` | |
