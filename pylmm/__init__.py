@@ -44,7 +44,7 @@ Quick start
 >>> bool(0 <= h < 1)
 True
 >>> ts, ps = model.association(W[:, [0]])                   # one SNP (n x 1)
->>> 0 <= ps <= 1
+>>> bool(0 <= ps <= 1)
 True
 >>> ts, ps = gwas(Y, W[:, :10], K)                          # a scan
 >>> len(ps)
