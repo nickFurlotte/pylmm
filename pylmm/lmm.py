@@ -62,6 +62,8 @@ def calculateKinship(W,center=False):
 # the span of the other columns has squared norm <= ESTIMABLE_RTOL times its
 # own squared norm is treated as collinear with them.
 ESTIMABLE_RTOL = 1e-10
+# Floor of the same check, relative to the uncentred squared norm (rounding level).
+_ESTIMABLE_FLOOR = 1e-20
 
 
 def _residualOnSpan(x, X0):
@@ -78,6 +80,7 @@ def snp_estimable(x, X0, rtol=ESTIMABLE_RTOL, Q=None):
     in the span of X0.  Q, if given, is an orthonormal basis of X0's columns
     (linalg.qr(X0, mode='economic')[0]), to save the QR in a scan.  That covers a constant SNP (with an intercept), a SNP
     equal to a covariate, and SNPs with too few non-missing individuals.
+    If X0 spans the intercept, the tolerance is relative to the centred x.
 
     GWAS and both pylmmGWAS branches use this one check, after dropping the
     individuals with a missing genotype.  It replaces the old exact-zero
@@ -88,11 +91,23 @@ def snp_estimable(x, X0, rtol=ESTIMABLE_RTOL, Q=None):
     X0 = np.asarray(X0, dtype=np.float64).reshape(len(x), -1)
     n, q = X0.shape
     if n - q - 1 < 1 or not np.isfinite(x).all(): return False
-    xx = np.dot(x, x)
-    if xx == 0: return False
-    if Q is None: r = _residualOnSpan(x, X0)
-    else: r = x - matrixMult(Q, matrixMult(Q.T, x))
-    return bool(np.dot(r, r) > rtol * xx)
+    if np.dot(x, x) == 0: return False
+    if Q is None:
+        Q = linalg.qr(X0, mode='economic')[0] if q else np.zeros((n,0))
+    r = x - matrixMult(Q, matrixMult(Q.T, x))
+    # The tolerance is relative to the squared norm of x.  When X0 spans the
+    # intercept, that norm is taken after projecting the intercept out (the
+    # centred x), so that a big constant offset does not make a low-variance
+    # SNP look collinear.
+    ref = np.dot(x, x)
+    u = np.full(n, 1.0 / np.sqrt(n))
+    ru = u - matrixMult(Q, matrixMult(Q.T, u))
+    if np.dot(ru, ru) <= ESTIMABLE_RTOL:
+        xc = x - x.mean()
+        ref = np.dot(xc, xc)
+        if ref == 0: return False
+    # ... and not below the rounding noise of the (uncentred) column
+    return bool(np.dot(r, r) > max(rtol * ref, _ESTIMABLE_FLOOR * np.dot(x, x)))
 
 
 def _columnList(cols):
@@ -136,7 +151,8 @@ def check_ids(ids, K_ids):
     if ids is None or K_ids is None: return
     ids, K_ids = list(ids), list(K_ids)
     if ids == K_ids: return
-    missing = [i for i in ids if i not in set(K_ids)]
+    known = set(K_ids)
+    missing = [i for i in ids if i not in known]
     if missing:
         raise ValueError("%d individuals are not in the kinship matrix, e.g. %s"
                          % (len(missing), _columnList(missing[:5])))
@@ -206,7 +222,9 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
     X0 = np.asarray(X0, dtype=np.float64)
     nobs = (~np.isnan(Y)).sum()
     if nobs and X0.ndim == 2: _checkDesignSize(nobs, X0.shape[1])
-    X0 = check_covariates(X0, n)
+    # Shape now; the values (nan, rank) are checked below, on the individuals
+    # that have a phenotype (a covariate may be nan where Y is nan).
+    if X0.ndim != 2 or X0.shape[0] != n: check_covariates(X0, n)
 
     # Remove missing values in Y and adjust associated parameters
     v = np.isnan(Y)
@@ -223,6 +241,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
     if len(Y) == 0:
         return [np.nan]*m, [np.nan]*m
 
+    X0 = check_covariates(X0, len(Y))
     _checkDesignSize(len(Y), X0.shape[1])
     L = LMM(Y,K,Kva,Kve,X0)
     if not refit: L.fit(REML=REML)
@@ -230,6 +249,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
 
     PS = []
     TS = []
+    counts = {}
 
     n = X.shape[0]
     m = X.shape[1]
@@ -242,7 +262,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
             xs = x[keep,:]
             Ys = Y[keep]
             X0s = X0[keep,:]
-            if not _subsetTestable(xs, Ys, X0s):
+            if not subset_testable(xs, Ys, X0s, counts):
                 PS.append(np.nan)
                 TS.append(np.nan)
                 continue
@@ -267,16 +287,23 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
         PS.append(ps)
         TS.append(ts)
 
+    if counts.get('collinear'):
+        warnings.warn("%d of %d SNPs are nan because, on the individuals with a called genotype, "
+                      "the covariates are no longer of full rank" % (counts['collinear'], m), stacklevel=2)
     return TS,PS
 
 
-def _subsetTestable(xs, Ys, X0s):
+def subset_testable(xs, Ys, X0s, counts=None):
     """For a SNP with missing calls, on the individuals that have one: the
-    SNP is estimable, X0 is still of full rank and Y is not constant."""
+    SNP is estimable, X0 is still of full rank and Y is not constant.  If
+    counts (a dict) is given, the SNPs rejected because the covariates lost
+    rank on the subset are counted in counts['collinear'], so that the caller
+    can report them once."""
     if len(Ys) < 2 or np.ptp(Ys) == 0: return False
     try:
         check_covariates(X0s)
     except ValueError:
+        if counts is not None: counts['collinear'] = counts.get('collinear', 0) + 1
         return False
     return snp_estimable(xs, X0s)
 
@@ -322,7 +349,8 @@ class LMM:
             X0 = np.asarray(X0, dtype=np.float64)
             nobs = (~np.isnan(Y)).sum()
             if nobs and X0.ndim == 2: _checkDesignSize(nobs, X0.shape[1])
-            X0 = check_covariates(X0, len(Y))
+            # shape only here; nan/rank are checked below, after dropping the missing-Y rows
+            if X0.ndim != 2 or X0.shape[0] != len(Y): check_covariates(X0, len(Y))
             check_ids(ids, K_ids)
         else:
             Y = np.asarray(Y, dtype=np.float64).reshape(-1)
@@ -340,7 +368,7 @@ class LMM:
         if validate:
             if len(Y) == 0: raise ValueError("phenotype has no non-missing values")
             _checkDesignSize(len(Y), X0.shape[1])
-            if x.sum() < len(x): check_covariates(X0, what="covariate matrix X0 (individuals with a phenotype)")
+            X0 = check_covariates(X0, what="covariate matrix X0" + (" (individuals with a phenotype)" if x.sum() < len(x) else ""))
 
         if len(Kva) == 0 or len(Kve) == 0:
             if self.verbose: sys.stderr.write("Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0],K.shape[1]) )

@@ -180,8 +180,11 @@ therefore change, and only those two:
 
 The -v null fits in `gwas_cli_nullfit.kv.txt` were already REML and are
 unchanged. The py2 originals are kept for reference in
-[`py2_original/`](py2_original/); `generate_golden.py` still produces them
-(it is the Phase 1 generator). The new files come from
+[`py2_original/`](py2_original/). `generate_golden.py` is the Phase 1
+generator: regenerating the original goldens needs the Phase 1 code under
+Python 2.7 (`docker/py27`, numpy 1.16.6). Run on the current code it would
+produce different refit/ML columns, so it refuses to run under Python 3 (the
+numpy/scipy version check was already there). The new files come from
 
 ```
 uv run python tests/golden/generate_phase5_2.py      # writes the two files here

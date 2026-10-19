@@ -332,3 +332,61 @@ def test_gwas_and_lmm_do_not_modify_inputs(prob):
         LMM(np.nan_to_num(y), K, Kva, Kve, X0=X0)
     for a, b in zip((y, X, K, Kva, Kve, X0), before):
         np.testing.assert_array_equal(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.2 review fixes
+# ---------------------------------------------------------------------------
+
+def test_covariate_nan_only_where_y_is_nan_is_accepted(prob):
+    """A covariate that is nan only for individuals without a phenotype is
+    fine (it was on main): those rows are dropped before X0 is checked."""
+    rng, n, K, y, X = prob
+    y = y.copy()
+    y[[3, 9]] = np.nan
+    c = rng.standard_normal(n)
+    X0 = np.column_stack([np.ones(n), c])
+    X0[[3, 9], 1] = np.nan
+    t, p = GWAS(y, X, K, X0=X0)
+    keep = ~np.isnan(y)
+    t2, p2 = GWAS(y[keep], X[keep], K[keep][:, keep], X0=X0[keep])
+    np.testing.assert_allclose(t, t2, rtol=1e-10)
+    L = LMM(y, K, X0=X0)
+    assert L.N == keep.sum()
+    # a nan on an individual that has a phenotype is still an error
+    X0[5, 1] = np.nan
+    with pytest.raises(ValueError, match="nan/inf"):
+        GWAS(y, X, K, X0=X0)
+    with pytest.raises(ValueError, match="nan/inf"):
+        LMM(y, K, X0=X0)
+
+
+def test_snp_estimable_with_big_offset():
+    """The tolerance is relative to the centred x when X0 has an intercept:
+    a rare SNP (MAF 0.002, n = 1000) plus a big offset is estimable."""
+    n = 1000
+    one = np.ones((n, 1))
+    x = np.zeros(n)
+    x[:4] = 1.0
+    assert snp_estimable(x, one)
+    for off in (1e2, 1e4, 1e6):
+        assert snp_estimable(x + off, one)
+        assert not snp_estimable(np.full(n, off), one)
+        assert not snp_estimable(np.full(n, off) + 1e-12 * np.arange(n), one)
+    # without an intercept in X0 the offset is part of the signal
+    assert snp_estimable(x + 1e4, np.zeros((n, 0)))
+
+
+def test_collinear_on_subset_gives_nan_and_one_summary_warning(prob):
+    rng, n, K, y, X = prob
+    b = np.zeros(n)
+    b[:3] = 1.0                           # an indicator of three individuals
+    X0 = np.column_stack([np.ones(n), b])
+    X[:3, 0] = np.nan                     # ... all missing: b is 0 on the subset
+    X[:3, 1] = np.nan
+    X[:3, 2] = np.nan
+    X[0, 3] = np.nan                      # b stays non-constant
+    with pytest.warns(UserWarning, match=r"3 of 5 SNPs are nan") as rec:
+        t, p = GWAS(y, X, K, X0=X0)
+    assert len([w for w in rec if "SNPs are nan" in str(w.message)]) == 1
+    assert np.isnan(t[:3]).all() and np.isfinite(t[3:]).all()

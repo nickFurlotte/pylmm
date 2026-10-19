@@ -22,7 +22,7 @@ import numpy as np
 
 from scipy import linalg
 
-from pylmm.lmm import LMM, snp_estimable, check_covariates, _subsetTestable
+from pylmm.lmm import LMM, snp_estimable, check_covariates, subset_testable
 from pylmm import input
 
 usage = """usage: %prog [options] --kfile kinshipFile --[tfile | bfile] plinkFileBase outfileBase
@@ -164,7 +164,23 @@ def buildParser():
     return parser
 
 
+def _plainWarning(message, category, filename, lineno, file=None, line=None):
+    sys.stderr.write("pylmmGWAS: warning: %s\n" % message)
+
+
 def main(argv=None):
+    # Warnings of the library (input, lmm) are printed as one plain line, not
+    # as a UserWarning with a source line.
+    with warnings.catch_warnings():
+        warnings.showwarning = _plainWarning
+        _main(argv)
+
+
+def _warn(msg):
+    sys.stderr.write("pylmmGWAS: warning: %s\n" % msg)
+
+
+def _main(argv=None):
     parser = buildParser()
     (options, args) = parser.parse_args(argv)
 
@@ -251,11 +267,11 @@ def main(argv=None):
     missingCov = np.isnan(X0).any(axis=1)
     v = np.isnan(Y) | missingCov
     keep = ~v
-    if missingCov.sum():
-        warnings.warn("dropping %d individuals with a missing covariate value (%d of them also lack the phenotype)"
-                      % (missingCov.sum(), (missingCov & np.isnan(Y)).sum()))
+    if np.isnan(Y).sum():
+        _warn("%d of %d individuals have a missing phenotype and are dropped" % (np.isnan(Y).sum(), len(Y)))
+    if (missingCov & ~np.isnan(Y)).sum():
+        _warn("%d individuals with a phenotype have a missing covariate value and are dropped" % (missingCov & ~np.isnan(Y)).sum())
     if v.sum():
-        if options.verbose: sys.stderr.write("Cleaning the phenotype vector by removing %d individuals...\n" % (v.sum()))
         Y = Y[keep]
         X0 = X0[keep,:]
         K = K[keep,:][:,keep]
@@ -276,8 +292,8 @@ def main(argv=None):
         except ValueError as e:
             parser.error(str(e))
     else:
-        if options.eigenfile and options.verbose:
-            sys.stderr.write("Not using --eigen: %d individuals were removed\n" % v.sum())
+        if options.eigenfile:
+            _warn("--eigen is ignored: %d individuals were dropped, so the decomposition is recomputed" % v.sum())
         Kva = []
         Kve = []
 
@@ -301,6 +317,7 @@ def main(argv=None):
     PS = []
     TS = []
     count = 0
+    counts = {}
     with open(outFile,'w') as out:
         printOutHead(out)
 
@@ -318,7 +335,7 @@ def main(argv=None):
                 Ys = Y[keeps]
                 X0s = X0[keeps,:]
                 # One estimability check for both branches (bug 13, issue 19)
-                if not _subsetTestable(xs, Ys, X0s):
+                if not subset_testable(xs, Ys, X0s, counts):
                     PS.append(np.nan)
                     TS.append(np.nan)
                     outputResult(out,id,np.nan,np.nan,np.nan,np.nan)
@@ -346,6 +363,10 @@ def main(argv=None):
             outputResult(out,id,beta,np.sqrt(betaVar).sum(),ts,ps)
             PS.append(ps)
             TS.append(ts)
+
+    if options.verbose and counts.get('collinear'):
+        sys.stderr.write("%d of %d SNPs are nan because, on the individuals with a called genotype, "
+                         "the covariates are no longer of full rank\n" % (counts['collinear'], count))
 
 
 def readEigenFile(fn, K):

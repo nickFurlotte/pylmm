@@ -105,7 +105,7 @@ def test_cli_bed_missing_phenotypes(tmp_path, bed50):
     args = bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)) + [out]
     log = h.run_script('pylmmGWAS.py', args, cwd=tmp_path)
     nmiss = len(h.BED_MISSING_PHENO_NA) + len(h.BED_MISSING_PHENO_M9)
-    assert 'removing %d individuals' % nmiss in log
+    assert 'warning: %d of ' % nmiss in log and 'have a missing phenotype and are dropped' in log
     check_out(out, 'gwas_cli_bed_snps50_missingpheno.out', df=BED_N - nmiss - 2)
     check_null_fit(log, 'bed_snps50_missingpheno')
 
@@ -165,7 +165,7 @@ def test_cli_emma_missing_phenotypes(tmp_path):
                      pheno=h.write_emma_missing_pheno(tmp_path)) + [out]
     log = h.run_script('pylmmGWAS.py', args, cwd=tmp_path)
     nmiss = len(h.HMDP_MISSING_Y)
-    assert 'removing %d individuals' % nmiss in log
+    assert 'warning: %d of ' % nmiss in log and 'have a missing phenotype and are dropped' in log
     check_out(out, 'gwas_cli_emma_hmdp_snps100_missingpheno.out',
               df=HMDP_N - nmiss - 2)
     check_null_fit(log, 'emma_hmdp_snps100_missingpheno',

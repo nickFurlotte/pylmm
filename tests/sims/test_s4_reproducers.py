@@ -110,6 +110,14 @@ def run_gwas(argv):
         cli_gwas.main(argv)
 
 
+def run_gwas_err(argv):
+    """run_gwas, returning what the CLI wrote to stderr."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        cli_gwas.main(argv)
+    return err.getvalue()
+
+
 def read_out(fn):
     rows = [line.rstrip("\n").split("\t") for line in open(fn)][1:]
     return np.array([[float(x) for x in r[1:]] for r in rows])
@@ -558,9 +566,12 @@ def test_bug10_absent_individuals_treated_as_missing(bed_toy):
     write_phenos(str(d / "skip.ph"), bed_toy["y"], skip=(5, 17))
     run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "na.ph"),
               str(d / "na.out")])
-    with pytest.warns(UserWarning, match="not in the phenotype file"):
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "skip.ph"),
-                  str(d / "skip.out")])
+    err = run_gwas_err(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--phenofile", str(d / "skip.ph"),
+                        str(d / "skip.out")])
+    # a plain stderr line, not a UserWarning with a source line
+    assert "pylmmGWAS: warning: 2 of 40 individuals are not in the phenotype file" in err
+    assert "UserWarning" not in err
+    assert "2 of 40 individuals have a missing phenotype and are dropped" in err
     np.testing.assert_allclose(read_out(str(d / "skip.out")), read_out(str(d / "na.out")))
 
 
@@ -579,12 +590,11 @@ def test_bug10_covariate_file_absent_individuals_dropped(bed_toy):
         for i in range(bed_toy["n"]):
             f.write("F%d I%d %.10f\n" % (i, i, c[i]))
     write_phenos(str(d / "na.ph"), bed_toy["y"], na=(5, 17))
-    with pytest.warns(UserWarning) as rec:
-        run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--covfile", str(d / "cov.txt"),
-                  str(d / "a.out")])
-    msgs = " | ".join(str(w.message) for w in rec)
-    assert "1 of 40 individuals are not in the covariate file" in msgs
-    assert "dropping 2 individuals with a missing covariate" in msgs
+    msgs = run_gwas_err(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--covfile", str(d / "cov.txt"),
+                         str(d / "a.out")])
+    assert "pylmmGWAS: warning: 1 of 40 individuals are not in the covariate file" in msgs
+    assert "2 individuals with a phenotype have a missing covariate value and are dropped" in msgs
+    assert "UserWarning" not in msgs
     run_gwas(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--covfile", str(d / "cov_full.txt"),
               "--phenofile", str(d / "na.ph"), str(d / "b.out")])
     np.testing.assert_allclose(read_out(str(d / "a.out")), read_out(str(d / "b.out")))
@@ -774,3 +784,47 @@ def test_bug17_ml_profile_unbounded_with_centred_grm_m_gt_n():
     # a larger null space (m < n - 1): bounded
     G2, K2, y2, _ = toy(n=40, m=15, seed=7)
     assert not oracle.fit(y2, K2, reml=False, n_grid=51).ml_unbounded
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.2 review fixes
+# ---------------------------------------------------------------------------
+
+def test_pheno_and_covariate_files_accept_fid_iid_header(bed_toy):
+    """A first line starting FID IID (any case) is skipped."""
+    d = bed_toy["dir"]
+    n, y = bed_toy["n"], bed_toy["y"]
+    c = np.cos(np.arange(n))
+    write_phenos(str(d / "plain.ph"), y)
+    with open(str(d / "head.ph"), "w") as f:
+        f.write("fid IID pheno\n" + open(str(d / "plain.ph")).read())
+    with open(str(d / "head.cov"), "w") as f:
+        f.write("FID\tIID\tc1\n")
+        for i in range(n):
+            f.write("F%d I%d %.10f\n" % (i, i, c[i]))
+    with open(str(d / "plain.cov"), "w") as f:
+        for i in range(n):
+            f.write("F%d I%d %.10f\n" % (i, i, c[i]))
+    base, kin = bed_toy["base"], bed_toy["kin"]
+    run_gwas(["--bfile", base, "--kfile", kin, "--phenofile", str(d / "plain.ph"), "--covfile", str(d / "plain.cov"),
+              str(d / "a.out")])
+    err = run_gwas_err(["--bfile", base, "--kfile", kin, "--phenofile", str(d / "head.ph"),
+                        "--covfile", str(d / "head.cov"), str(d / "b.out")])
+    assert err.count("warning") == 0
+    np.testing.assert_allclose(read_out(str(d / "b.out")), read_out(str(d / "a.out")), rtol=1e-12)
+    # a non-numeric first line that is not a FID IID header is still an error
+    with open(str(d / "bad.ph"), "w") as f:
+        f.write("ID1 ID2 pheno\n" + open(str(d / "plain.ph")).read())
+    with pytest.raises(SystemExit):
+        run_gwas(["--bfile", base, "--kfile", kin, "--phenofile", str(d / "bad.ph"), str(d / "x")])
+
+
+def test_cli_eigen_ignored_is_reported_unconditionally(bed_toy):
+    d = bed_toy["dir"]
+    write_phenos(str(d / "na.ph"), bed_toy["y"], na=(5,))
+    K = np.loadtxt(bed_toy["kin"])
+    Kva, Kve = linalg.eigh(K)
+    np.savez(str(d / "e.npz"), Kva=Kva, Kve=Kve)
+    err = run_gwas_err(["--bfile", bed_toy["base"], "--kfile", bed_toy["kin"], "--eigen", str(d / "e.npz"),
+                        "--phenofile", str(d / "na.ph"), str(d / "o")])
+    assert "pylmmGWAS: warning: --eigen is ignored: 1 individuals were dropped" in err

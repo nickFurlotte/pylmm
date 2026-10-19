@@ -241,13 +241,20 @@ class plink:
 
     @staticmethod
     def _readTable(fn, isMissing, what):
-        """(keys, values) of a FID IID v1 v2 ... file."""
+        """(keys, values) of a FID IID v1 v2 ... file.  A first line whose first two
+        fields are FID IID (case-insensitive) is a header and is skipped."""
         keys = []
         P = []
         with open(fn,'r') as f:
+            first = True
             for lineno, line in enumerate(f, 1):
                 v = line.strip().split()
                 if not v: continue
+                # a header line starting FID IID (any case) is skipped
+                if first and len(v) >= 2 and v[0].upper() == 'FID' and v[1].upper() == 'IID':
+                    first = False
+                    continue
+                first = False
                 if len(v) < 3:
                     raise ValueError("%s file %s, line %d: expected FID IID and at least one value"
                                      % (what, fn, lineno))
