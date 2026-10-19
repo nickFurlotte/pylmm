@@ -44,7 +44,7 @@ are plain numeric matrices (see :meth:`PlinkReader.read_phenos_emma` and
 whitespace-separated square matrix, or in the FaSTLMM style (tab-separated,
 with a header row and a first column of ``FID IID`` labels).  A plain matrix
 is in genotype order unless an ID sidecar ``<k_file>.id`` (one ``FID IID``
-per line, written by ``pylmmKinship``) names its rows.
+per line, written by ``pylmm kinship``) names its rows.
 
 Genotype coding
 ---------------
@@ -136,8 +136,8 @@ True
 
 from __future__ import annotations
 
+import logging
 import os
-import sys
 import warnings
 from collections.abc import Sequence
 from typing import IO, Any, cast
@@ -147,6 +147,8 @@ from numpy.typing import NDArray
 
 from pylmm import samples
 from pylmm.samples import SampleID
+
+log = logging.getLogger(__name__)
 
 # The genotype formats PlinkReader reads (its ``type`` argument).
 GENOTYPE_TYPES = ("b", "t", "emma")
@@ -944,7 +946,7 @@ class PlinkReader:
                 keys.append((v[0].strip(), v[1].strip()))
 
         self.N = len(keys)
-        sys.stderr.write("Read %d individuals from %s\n" % (self.N, fam_file))
+        log.info("Read %d individuals from %s", self.N, fam_file)
 
         return keys
 
@@ -955,10 +957,10 @@ class PlinkReader:
 
         Plain format: ``n`` lines of ``n`` whitespace-separated numbers.  The
         rows are named by the ID sidecar ``k_file + ".id"`` (one ``FID IID``
-        per line, as ``pylmmKinship`` writes it) if it exists; otherwise they
+        per line, as ``pylmm kinship`` writes it) if it exists; otherwise they
         must be the individuals of `indivs`, in that order.  For EMMA
         genotypes, which have no IDs, a sidecar is ignored with a warning
-        (as in ``pylmmGWAS``) and the rows are in genotype order.  FaSTLMM format
+        (as in ``pylmm gwas``) and the rows are in genotype order.  FaSTLMM format
         (``fastlmm_kinship=True``): the first line is a tab-separated header
         whose first field is ignored and whose others are ``FID IID`` labels,
         and each following line starts with a label field that is ignored.
@@ -978,7 +980,7 @@ class PlinkReader:
         -------
         numpy.ndarray or None
             The kinship matrix, shape ``(len(indivs), len(indivs))``, also
-            stored in ``self.K``; None (with a message on stderr) if no
+            stored in ``self.K``; None (with a logged warning) if no
             individuals were read.
 
         Raises
@@ -990,10 +992,10 @@ class PlinkReader:
             genotypes (which have none).
         """
         if self.indivs is None or len(self.indivs) == 0:
-            sys.stderr.write("Did not read any individuals so can't load kinship\n")
+            log.warning("Did not read any individuals so can't load kinship")
             return None
 
-        sys.stderr.write("Reading kinship matrix from %s\n" % (k_file))
+        log.info("Reading kinship matrix from %s", k_file)
 
         kin_ids: list[SampleID] | None = None
         rows: list[list[float]] = []
@@ -1016,7 +1018,7 @@ class PlinkReader:
         K = np.array(rows)
         if not self.fastlmm_kinship:
             if self.type == "emma" and os.path.isfile(samples.kinship_id_path(k_file)):
-                # As in pylmmGWAS: EMMA genotypes have no IDs, so K is in genotype order.
+                # As in `pylmm gwas`: EMMA genotypes have no IDs, so K is in genotype order.
                 warnings.warn(
                     "%s is ignored: EMMA genotypes have no IDs, so K is in genotype order"
                     % samples.kinship_id_path(k_file),
