@@ -7,7 +7,7 @@ abstract: >-
   used by humans and agents.
 authors:
   - family-names: Furlotte
-    given-names: Nicholas A.
+    given-names: Nick
     email: nick.furlotte@gmail.com
 version: 1.0.0
 date-released: "2026-10-19"
