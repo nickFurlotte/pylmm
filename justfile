@@ -17,11 +17,13 @@ lint:
     uv run --locked ruff check
     uv run --locked ruff format --check
 
-# Type-check the library modules (mypy, config in pyproject.toml).  Runs under
-# Python 3.10 in a throwaway environment: the numpy stubs of the lock's
-# newer-Python numpy do not support mypy's python_version = "3.10".
+# mypy config is in pyproject.toml.  Each run uses a throwaway environment:
+# the numpy stubs of the lock's newer-Python numpy do not support mypy's
+# python_version = "3.10".
+# Type-check the package, CLI included, under Python 3.10 and 3.14 (as CI does)
 typecheck:
     uv run --locked --isolated --python 3.10 mypy
+    uv run --locked --isolated --python 3.14 mypy --python-version 3.14
 
 # Apply formatting and auto-fixable lint fixes
 fmt:
@@ -51,6 +53,16 @@ sim-report STUDY *args:
 # Run scripts/example.py
 example:
     uv run python scripts/example.py
+
+# Run the pylmm command line, e.g. `just pylmm gwas --help`
+pylmm *args:
+    uv run pylmm "$@"
+
+# The README example: kinship, then GWAS, of the bundled data into OUTDIR
+readme-example OUTDIR="readme-example":
+    mkdir -p "{{OUTDIR}}"
+    uv run pylmm kinship -v --bfile data/snps.132k.clean.noX -o "{{OUTDIR}}/snps.kin"
+    uv run pylmm gwas -v --bfile data/snps.132k.clean.noX --kinship "{{OUTDIR}}/snps.kin" --pheno data/snps.132k.clean.noX.fake.phenos -o "{{OUTDIR}}/results.tsv"
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # DANGER: OVERWRITES tests/golden/ -- ONLY for a deliberate, reviewed

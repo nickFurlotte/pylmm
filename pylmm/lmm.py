@@ -225,7 +225,7 @@ def snp_estimable(
     norm) guards against rounding noise.  This one check replaces the old
     exact-zero variance filters, which let columns that are constant up to
     rounding through with ``t ~ 1e-8`` (issue 19, bug 13).  `gwas` and both
-    ``pylmmGWAS`` branches call it after dropping individuals with a missing
+    ``pylmm gwas`` branches call it after dropping individuals with a missing
     genotype.
 
     Examples

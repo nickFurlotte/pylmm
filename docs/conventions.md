@@ -40,14 +40,31 @@ attribute names; the rule applies to them all the same.
 - Individuals are matched by ID (`pylmm.samples`), never by row position, except for EMMA input,
   which has no IDs.
 
+## Command line (Phase 5b.2)
+
+The CLI exception of Phase 5.4 (camelCase flags such as `pylmmGWAS --removeMissingGenotypes`
+and optparse `dest` names such as `options.phenoFile`) is resolved: there is one command,
+`pylmm`, with subcommands (`pylmm gwas`, `pylmm kinship`), and
+
+- long options are kebab-case (`--remove-missing-genotypes`, `--pheno-name`), named after the
+  PLINK option where there is one (`--bfile`, `--pheno`, `--covar`, `--covar-name`,
+  `--pheno-name`, `--out`); EMMA inputs share an `--emma-` prefix (`--emma-geno`, `--emma-pheno`);
+- the argparse `dest` is the option name in snake_case (`args.remove_missing_genotypes`), except
+  where one dest serves two options (`--reml`/`--ml` -> `args.reml`, `-v`/`-q` ->
+  `args.log_level`);
+- choice values are kebab-case too (`--id-match fid-iid`), mapped to the library's values
+  (`id_match="fid_iid"`);
+- every output file is an option (`-o/--out`), never a positional argument;
+- exit codes: 0 success, 2 usage or input error, 1 unexpected error; messages go to the `pylmm`
+  logger as `pylmm: <level>: <message>`.
+
+`docs/migration/cli-map.csv` maps every old command and flag to the new one.
+
 ## Exceptions that are not Python names
 
 These are data or user-facing interface and keep their spelling:
 
-- CLI flags and command names (`pylmmGWAS --removeMissingGenotypes`), and the optparse
-  `dest` names in `pylmm/cli` (`options.phenoFile`), which set the `--help` metavars.
-  The CLI is redesigned separately (Phase 5b).
-- File formats: the `.npz` arrays written by `pylmmKinship --eigenNpz` are still named
+- File formats: the `.npz` arrays written by `pylmm kinship --eigen-npz` are still named
   `Kva` and `Kve`; text-file extensions `.kva` / `.kve`.
 - Keys of the golden result files under `tests/golden/`.
 

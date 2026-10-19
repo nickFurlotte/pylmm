@@ -44,7 +44,8 @@ directory.
 - `*.txt` is `numpy.savetxt(fmt='%.17g')`, which round-trips float64
   exactly. `#` header lines describe the contents. Load with `np.loadtxt`.
 - `*.kv.txt` holds one `key value` pair per line, with `#` comment lines.
-- `*.out` is the raw output of `scripts/pylmmGWAS.py`: a tab-separated header
+- `*.out` is the raw output of `scripts/pylmmGWAS.py` (today `pylmm gwas`, which
+  writes the same format): a tab-separated header
   `SNP_ID BETA BETA_SD F_STAT P_VALUE`, with values written by `str()` (shortest
   repr under numpy ≥1.14, `nan` when missing). Compare these numerically, not
   as text.
@@ -145,6 +146,9 @@ missing; see the baseline report.
 | `misc_fitTwo.kv.txt` | `misc.fitTwo(Y, K1=hmdp K, K2=kinship_hmdp_snps1000)` gives `h1 h2 e sigma LL beta_0`. |
 
 ### `pylmmGWAS.py` CLI outputs
+
+The commands below use the Phase 1 CLI names; `docs/migration/cli-map.csv` maps them to
+`pylmm gwas` / `pylmm kinship` (since Phase 5b.2).
 
 | file | command |
 |---|---|

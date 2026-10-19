@@ -42,11 +42,12 @@ The py2.7 image gives the same result on the ported code.
 |---|---|
 | `helpers.py` | paths, **all tolerances**, golden readers, input writers (BED/TPED/EMMA subsets, covariate and missing-phenotype files, header-less and gzipped kinship), CLI runner with timeout and `#`-header guard, the one npdump loader |
 | `conftest.py` | `--runslow`, session data fixtures (`hmdp`, `bed_null`) |
-| `test_kinship.py` | `calculate_kinship` (hmdp, centered, BED), `pylmmKinship.py` BED and EMMA paths, eigenvalues, symmetry/PSD, npdump = text. 1219×1219 kinships are checked through the leading and trailing 100×100 blocks, the diagonal and `K.dot(cos(arange(n)))` |
+| `test_kinship.py` | `calculate_kinship` (hmdp, centered, BED), `pylmm kinship` BED and EMMA paths, eigenvalues, symmetry/PSD, npdump = text. 1219×1219 kinships are checked through the leading and trailing 100×100 blocks, the diagonal and `K.dot(cos(arange(n)))` |
 | `test_null_fit.py` | `LMM.fit` REML/ML, LL grid, missing Y, covariate, BED h=0 boundary, h in [0,1] |
 | `test_association.py` | `lmm.gwas` REML/ML × refit with missing genotypes, `association(return_beta=True)` on imputed SNPs, p-value vs t-stat/df |
 | `test_misc.py` | `misc.fit_two` |
-| `test_cli_gwas.py` | `pylmmGWAS.py`: BED (default, `--REML`, `--refit`, `--REML --refit`, `--removeMissingGenotypes`, `--covfile`, `NA`/`-9` phenotypes), `--tfile`, EMMA (with/without `--emmaCOV`, gzipped `--kfile`, `NA` phenotypes). Each run also checks the null fit printed by `-v` against `gwas_cli_nullfit.kv.txt` and, where the same model exists, against the API fit in `null_fits.kv.txt`; the EMMA t-stats are also checked against the API's `assoc_hmdp_imputed.txt` |
+| `test_cli.py` | the `pylmm` command line: required options, mutually exclusive groups, old flags rejected, exit codes 0/1/2, `--version`, `python -m pylmm`, the console script, `--help` examples, logging (`-v`/`-q`/`--log-file`/`--debug`, library warnings) |
+| `test_cli_gwas.py` | `pylmm gwas`: BED (default, `--reml`, `--refit`, `--reml --refit`, `--remove-missing-genotypes`, `--covar`, `NA`/`-9` phenotypes), `--tfile`, EMMA (with/without `--emma-covar`, gzipped `--kinship`, `NA` phenotypes). Each run also checks the null fit logged by `-v` against `gwas_cli_nullfit.kv.txt` and, where the same model exists, against the API fit in `null_fits.kv.txt`; the EMMA t-stats are also checked against the API's `assoc_hmdp_imputed.txt` |
 | `test_example_script.py` | `scripts/example.py` end to end, via `runpy`; `LMM.fit`/`association` are wrapped to record the intermediate null fit and first association |
 
 CLI outputs are parsed as numbers, never compared as text, because `str()`
@@ -74,7 +75,7 @@ All of them are defined in `helpers.py`, with the measurements behind them.
   p below 1e-8). `RTOL_P=1e-5`; the worst measured relative p-value change
   in the same experiment was 1.2e-6.
 - `CLI_PRINT_ATOL` (1e-3): the `heritability=%0.3f, sigma=%0.3f` line of
-  `pylmmGWAS.py -v`, one unit in the last printed digit. Against the API fit
+  `pylmm gwas -v`, one unit in the last printed digit. Against the API fit
   the printed value must be within rounding (5e-4).
 - Eigenvalue files: `atol = 1e-10 * max(eig)`. Most entries are LAPACK
   round-off near 0, so their sign and relative error are meaningless.
@@ -89,12 +90,12 @@ and record the reason here.
 
 ## CLI inputs must be header-less
 
-Before Phase 5.1, `pylmmGWAS.py` read `--kfile` with `np.fromfile(sep=' ')`,
+Before Phase 5.1, `pylmmGWAS.py` read `--kfile` (now `pylmm gwas --kinship`) with `np.fromfile(sep=' ')`,
 which stops at the first `#`, and then `K.resize()` zero-filled the rest
 without a warning (`docs/phase1-baseline.md` bug 16); it now rejects any
 non-numeric token with an error. `tests/golden/hmdp_K_npdump.txt` has `#`
 header lines, so the EMMA tests write a header-less copy
-(`helpers.write_headerless_kinship`). `helpers.run_script` (and the
+(`helpers.write_headerless_kinship`). `helpers.run_cli` (and the
 generator's `run_cli`) refuse any input file that starts with `#`.
 
 ## Known gaps (by design)
@@ -105,17 +106,17 @@ generator's `run_cli`) refuse any input file that starts with `#`.
   `test_null_fit.py` (`hmdp_ml`, `bed_ml`).
 - REML refit through `lmm.gwas` is checked on the first 200 SNPs only. All
   1000 are covered through `example.py`.
-- `--removeMissingGenotypes` gets no p-value/df check, because its per-SNP N
+- `--remove-missing-genotypes` gets no p-value/df check, because its per-SNP N
   isn't in the output.
-- The null fit printed by `pylmmGWAS.py -v` has only 3 decimals, and the BED
+- The null fit logged by `pylmm gwas -v` has only 3 decimals, and the BED
   runs fit at the h=0 boundary, so for BED the printed h cannot tell a good
   kinship from a bad one; the per-SNP goldens do. With `--refit` nothing is
-  printed.
-- Not covered: `--kfile2` (broken, bug 6), `--eigen` (cannot read what
-  pylmmKinship writes, bug 7), `--noMean`, `-p` (phenotype index > 0),
-  `--covfile` with missing values (the CLI refuses them), the fastLMM-style
+  logged.
+- Not covered by the goldens (the regression tests in `tests/sims/` and
+  `test_cli_alignment.py` cover most of them): `--eigen`, `--no-mean`,
+  `--pheno-index` > 0, `--covar` with missing values, the fastLMM-style
   kinship reader in `plink_io.PlinkReader.read_kinship` (unreachable from the CLIs),
-  `pylmmKinship.py --tfile`, and `.kin` auto-discovery next to the genotype
+  `pylmm kinship --tfile`, and `.kin` auto-discovery next to the genotype
   files.
 - The TPED and covariate inputs are synthetic (derived from the BED subset);
   TPED uses only allele codes `1`/`2`/`0`, the only ones

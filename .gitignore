@@ -6,3 +6,5 @@ __pycache__/
 # Phase 4 simulation raw results and --quick reports (commit only summaries)
 sims/results/**/raw/
 sims/results/**/quick/
+# `just readme-example` output
+readme-example/

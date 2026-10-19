@@ -1,12 +1,54 @@
 # Changelog
 
 All notable user-visible changes to pylmm. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmGWAS` without `--refit`,
-`--removeMissingGenotypes` or `--ML`) is unchanged by every entry below.
+Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmm gwas`, formerly `pylmmGWAS`,
+without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below. Entries before
+Phase 5b.2 use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
+maps them).
 
 ## [Unreleased]
 
 ### Changed (breaking)
+
+#### Command line: one `pylmm` command (Phase 5b.2)
+A clean break, with no aliases for the old commands or flags; no number changes: for an equivalent invocation
+the output files (GWAS results, kinship, `.id`, `.kva`/`.kve`) are byte-identical to before.
+[`docs/migration/cli-map.csv`](docs/migration/cli-map.csv) maps every old command and flag to the new one (or
+says why it is gone).
+- `pylmmGWAS` -> `pylmm gwas`, `pylmmKinship` -> `pylmm kinship`, one console script `pylmm` (argparse
+  subcommands), also run as `python -m pylmm`; new `pylmm --version`. The `pylmmGWAS` / `pylmmKinship`
+  console scripts and the `scripts/pylmmGWAS.py` / `scripts/pylmmKinship.py` shims are removed
+  (`scripts/example.py` stays).
+- The output file is the required option `-o/--out FILE`, not a positional argument.
+- kebab-case flags, named after PLINK where it has one: `--kfile` -> `--kinship` (required), `--phenofile`
+  -> `--pheno`, `-p` -> `--pheno-index`, `--covfile` -> `--covar`, `--noMean` -> `--no-mean`,
+  `--removeMissingGenotypes` -> `--remove-missing-genotypes`, `--ML` -> `--ml`, `--REML` -> `--reml`
+  (still the default), `--emmaSNP` / `--emmaPHENO` / `--emmaCOV` -> `--emma-geno` / `--emma-pheno` /
+  `--emma-covar`; kinship: `--emmaNumSNPs` -> `--emma-num-snps`, `-n` -> `--block-size`, `-e/--efile VALUE`
+  (value ignored) -> the flag `--eigen-text`, `--eigenNpz` -> `--eigen-npz`. `--bfile`, `--tfile`,
+  `--eigen`, `--refit` are unchanged.
+- argparse checks the combinations: exactly one of `--bfile`/`--tfile`/`--emma-geno`; `--reml` or `--ml`;
+  `--pheno` or `--emma-pheno` (`--emma-pheno` used to override); `--covar` or `--emma-covar` (`--covfile`
+  used to win); `--pheno-name` or `--pheno-index`; `-v` or `-q`; `--emma-num-snps` exactly with
+  `--emma-geno`. Integer options are type-checked.
+- Exit codes: 0 success; 2 for usage and input errors (missing or malformed files, unknown columns,
+  unwritable output), reported as one `pylmm: error: ...` line; 1 for an unexpected error, reported as
+  `pylmm: error: unexpected error: ...`. No traceback unless `--debug`. Input errors no longer print the
+  usage text (argparse errors still do). `pylmm gwas` without arguments is a usage error (exit 2); it used
+  to print the help and exit 0.
+- Messages go through the `logging` module (logger `pylmm`) to stderr as `pylmm: <level>: <message>`:
+  `pylmmGWAS: warning: ...` -> `pylmm: warning: ...`, and the `-v` progress lines are `pylmm: info: ...`
+  (the null fit line reads `null model: heritability=%0.3f, sigma=%0.3f`). Default level WARNING; `-v`
+  INFO; new `-q` ERROR; new `--log-file FILE` (timestamped, at least INFO); new `--debug` (DEBUG messages,
+  tracebacks, and the library's own `LMM(verbose=True)` diagnostics, which `-v` used to print).
+  `warnings.warn` calls of the library are logged as warnings. `pylmm kinship`'s "skipped N SNPs with no
+  called genotype" is a logged warning, not a `UserWarning`.
+- `pylmm.plink_io` logs "Read N individuals from ..." and "Reading kinship matrix from ..." at INFO (logger
+  `pylmm.plink_io`) instead of writing them to stderr, so library users no longer see them by default.
+- `pylmm.cli`: `main(argv)` (the `pylmm` entry point) returns the exit code instead of exiting, so it can run
+  in-process; the per-command `pylmm.cli.gwas.main` / `pylmm.cli.kinship.main` are gone (`add_parser`,
+  `run` and the typed steps `load_inputs`, `fit_null_model`, `scan` replace them). `read_kinship_file` and
+  `read_eigen_file` are unchanged; `_read_aligned_kinship` -> `read_aligned_kinship`.
 
 #### Python API cleanups (Phase 5b.1)
 A clean break, with no aliases or shims; no number changes (the goldens and the README `pylmmGWAS` output
@@ -88,9 +130,17 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - `pylmmKinship OUT` also writes `OUT.id`, the (FID, IID) of each row of the kinship, tab-separated (GCTA
   `.grm.id` style; not for EMMA input, which has no IDs). The kinship file itself is unchanged.
 
+#### Command line (Phase 5b.2)
+- `pylmm gwas --id-match {fid-iid,iid}`: match phenotype, covariate and kinship rows on FID and IID (the
+  default) or on the IID alone (PLINK input only).
+- `pylmm gwas --pheno-name NAME`: test the phenotype column of that name (from a `FID IID name ...` header);
+  `--covar-name NAME ...` (space- or comma-separated): use only those covariate columns.
+- `pylmm gwas --help` and `pylmm kinship --help` describe every option and end with examples.
+- The command line is type-checked by mypy too (`just typecheck`, Python 3.10 and 3.14).
+
 #### Types and docstrings (Phase 5.5/5.6)
-- Type hints on the library modules (`pylmm.lmm`, `pylmm.plink_io`, `pylmm.misc`; the CLI modules follow in
-  Phase 5b), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
+- Type hints on the library modules (`pylmm.lmm`, `pylmm.plink_io`, `pylmm.misc`; the CLI modules followed in
+  Phase 5b.2), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
 - numpydoc docstrings with runnable examples for the public API; pytest runs them as doctests
   (`--doctest-modules`).
 - `pylmm.__version__`, the installed package version.
@@ -110,7 +160,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   individuals dropped for a missing phenotype or covariate still count in the mean and SD (max |dt| 0.024
   between the two rules; making them consistent is a Phase 6 item).
 - Individuals are matched by FID and IID; matching by IID alone is available in the library
-  (`PlinkReader(id_match="iid")`), and a CLI option comes with the 5b.2 CLI rewrite.
+  (`PlinkReader(id_match="iid")`), and on the command line since 5b.2 (`--id-match iid`).
 - `PlinkReader.read_kinship` ignores, with a warning, a `.id` next to a kinship for EMMA genotypes, as
   pylmmGWAS does. `pylmmKinship` on EMMA input removes a stale `OUT.id` (with a note on stderr).
 - `--eigen` is ignored (with a warning) when K was reordered or subset by its IDs, as when individuals are

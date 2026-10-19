@@ -33,8 +33,8 @@ The pieces:
   can select columns by name (with a header) or by 0-based index.
 * `read_id_file` / `write_id_file` read and write a list of IDs, one
   ``FID IID`` per line (PLINK ``--keep`` style; GCTA's ``.grm.id``).
-  ``pylmmKinship`` writes one next to each kinship matrix it computes,
-  ``<kinship>.id`` (`kinship_id_path`), so that ``pylmmGWAS`` can align the
+  ``pylmm kinship`` writes one next to each kinship matrix it computes,
+  ``<kinship>.id`` (`kinship_id_path`), so that ``pylmm gwas`` can align the
   matrix by ID instead of assuming that its rows are in genotype order.
 
 Examples
