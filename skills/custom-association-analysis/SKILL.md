@@ -133,9 +133,12 @@ print("SNP x sex: t=%.2f p=%.2f" % (t_gxe, p_gxe))
 
 The set-up (individual level with `K_animals = Z K_strains Z'` vs strain means, the strain-mean
 heritability, what to expect in small panels) is in one place: `estimate-heritability` section 7. For a
-scan at the individual level, expand the genotypes the same way as K (`W_animals = Z @ W_strains`) and
-write the IDs of the animals, not the strains. With few distinct strains, prefer LOCO (above): a K from
-the tested SNPs absorbs much of the signal (`simulate-lmm-data` section 6).
+scan at the individual level, expand the genotypes like K, by row indexing (`W_animals =
+W_strains[strain_of_animal]`; `Z @ W_strains` would spread a missing call to every animal), and write the
+IDs of the animals, not the strains. With few distinct strains, prefer LOCO (above): a K from the tested
+SNPs absorbs much of the signal (`simulate-lmm-data` section 6). Preparing the data (strain aliases and
+duplicate columns, imputing over strains rather than animals, PLINK-safe strain IDs, the EMMA strain-mean
+path): the `inbred-strain-panels` skill.
 
 ## Checks for any custom loop
 

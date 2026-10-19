@@ -72,7 +72,10 @@ Key caveats (details in reference.md):
 * `--double-id` makes FID = IID; without it plink2 writes FID `0` for VCF samples. Whatever you choose,
   the phenotype file must use the **same FID**, or run `pylmm gwas --id-match iid`.
 * Download public data with `curl -LO` (or `wget`), check the published checksum (`shasum -a 256`), and
-  note the genome build and the source URL next to the files.
+  note the genome build and the source URL next to the files. If a site blocks scripted access (e.g.
+  the Dryad landing page loads but `file_stream` returns 403), do not work around it: write the handoff
+  note in [reference.md](reference.md) ("When a site blocks scripted downloads"), have a person download
+  the files in a browser, and verify the checksums.
 
 ## Plain genotype tables (numpy → BED)
 
@@ -103,7 +106,23 @@ assert np.allclose(back, G / 2, equal_nan=True)       # pylmm reads the A2 fract
 print(open("table.bim").read())
 ```
 
-For inbred lines coded as one allele per strain (`A`/`G`), use `2 * (allele == a2)`. `write_bed` was
+For inbred lines coded as one allele per strain (`A`/`G`), use `2 * (allele == a2)`. A marker without
+allele letters (a 0/1 strain matrix with no base for one or both codes) takes `None` in `a1`/`a2`:
+`write_bed` writes the placeholders `1` (A1) and `2` (A2), and A2 = `2` is the counted allele (not `0`,
+which PLINK reads as a missing allele). FIDs and IIDs must not contain whitespace (`write_bed`,
+`write_pheno` and `write_kinship` refuse them): map names such as `BTBR T+ tf/J` with
+`plink_tools.sanitize_ids(names)` and keep the returned map. Strain panels with replicate animals:
+`inbred-strain-panels`.
+
+```python
+G01 = np.array([[0, 1], [1, 1], [1, 0]], dtype=float)  # 3 strains x 2 markers, coded 0/1
+strain = ["BTBR T+ tf/J", "C57BL/6J", "A/J"]
+tok = plink_tools.sanitize_ids(strain)               # {'BTBR T+ tf/J': 'BTBR_T_tf_J', ...}
+plink_tools.write_bed("strains01", 2 * G01, iids=[tok[s] for s in strain], a1=["C", None], a2=["T", None])
+print(open("strains01.bim").read())                  # marker 2: A1=1 A2=2, the allele coded 1
+```
+
+`write_bed` was
 checked against plink2 (`--export A` of its output gives the same counts). `plink_tools.subset_bed` copies
 a subset of SNPs (e.g. one chromosome) byte for byte; `read_bim` returns the `.bim` columns.
 

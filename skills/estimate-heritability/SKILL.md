@@ -259,8 +259,10 @@ share a genotype, so there are two ways to set up the data:
 
 * **Individual level** (EMMA-style): one row per animal; expand the strain kinship with the incidence
   matrix `Z` (animal × strain): `K_animals = Z K_strains Z'`. K is singular (rank = number of strains);
-  pylmm handles that (eigenvalues below 1e-6 are floored). For a scan, expand the genotypes the same way
-  (`W_animals = Z @ W_strains`) and write the IDs of the animals, not the strains.
+  pylmm handles that (eigenvalues below 1e-6 are floored). For a scan, expand the genotypes the same way,
+  by row indexing (`W_animals = W_strains[strain_of_animal]`: `Z @ W_strains` spreads a missing call to
+  every animal), and write the IDs of the animals, not the strains. Data preparation (aliases, duplicate
+  strain columns, imputing over strains): the `inbred-strain-panels` skill.
 * **Strain means**: average the phenotype per strain and fit one row per strain on `K_strains`.
 
 ```python
