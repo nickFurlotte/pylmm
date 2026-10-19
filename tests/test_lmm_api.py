@@ -63,9 +63,7 @@ def test_one_dimensional_snp_equals_a_column(data):
     # as a strided (n, 1) column always could.)
     col = [np.ascontiguousarray(W[:, j]) for j in range(4)]
     for j in range(4):
-        assert L.association(col[j], return_beta=True) == L.association(
-            W[:, [j]], return_beta=True
-        )
+        assert L.association(col[j], return_beta=True) == L.association(W[:, [j]], return_beta=True)
         np.testing.assert_allclose(
             L.association(W[:, j], return_beta=True),
             L.association(W[:, [j]], return_beta=True),
