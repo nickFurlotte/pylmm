@@ -104,7 +104,8 @@ A shell script or notes file (any file not ending in `.py`) passed to the script
 
 Behaviour changes with no rename (check numbers, not just that the code runs):
 
-* A kinship file `K` with a `K.id` next to it is aligned by ID; without it, a warning and genotype order.
+* A kinship file `K` with a `K.id` next to it is aligned by ID; without it, genotype order, with a
+  warning for `--bfile`/`--tfile` (not for `--emma-geno`, which has no IDs).
 * Phenotype/covariate rows are matched by ID (file order no longer matters); a missing covariate drops
   the individual instead of failing.
 * Untestable SNPs (constant, collinear, all missing) give `nan` instead of `t ≈ 1e-8` or a crash.

@@ -17,15 +17,22 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
 | `tests/` | pytest suite; `tests/golden/` = Phase 1 reference outputs; `tests/helpers.py` = all tolerances |
 | `sims/` | Phase 4 simulation framework (genotype/phenotype generators, oracle, studies) |
-| `docs/` | [guide.md](docs/guide.md) (library user guide), conventions, Phase 1/3/4 reports, `migration/` maps, `research/` |
+| `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reproduced), conventions, Phase 1/3/4 reports, `migration/` maps, `research/` |
 | `skills/` | agent skills (below); `.claude/skills` links here |
-| `data/` | example data (~215 MB): 1219 mice BED, 94-strain EMMA text |
+| `data/` | example data (~215 MB): 1219 mice BED (fake phenotypes), 94-strain HMDP EMMA text; provenance, marker map and checksums in [data/README.md](data/README.md) |
 | `scripts/example.py` | a short library example |
+| `scripts/build_hmdp_marker_map.py` | rebuilds `data/hmdp.liver.snps.map.tsv` (build-37 positions, alleles) from the Broad mouse HapMap file |
 | `notebooks/` | `pylmm_tour.ipynb`: walkthrough for human readers (run it to see outputs) (simulate, fit, scan, interpret) |
 
 ## Commands
 
-From a clone, `uv sync --group sims` once (or `just sync`), then:
+From a clone, `uv sync --group sims` once (or `just sync`), then prefix commands with `uv run` (or use the
+`just` recipes). `uv sync` and `uv run` create and use the virtual environment **`.venv/` at the repository
+root** (ignored by version control); the first `uv run` creates it if `uv sync` has not, so a `.venv/` you
+did not make yourself is expected. To use a different environment, either set
+`UV_PROJECT_ENVIRONMENT=/path/to/venv` for every `uv` command, or activate your own venv and run
+`pip install -e .` there (plus `pytest`, and `matplotlib pandas statsmodels` for the `sims` group), then
+call `pytest` and `pylmm` without `uv run`.
 
 ```bash skip-ci: runs the whole suite or the linters
 just test             # uv run --group sims pytest (fast suite; doctests + docs snippets included)
@@ -95,10 +102,11 @@ use `skills/` directly, or copy it to `.claude/skills`.
 | `run-gwas` | run a GWAS end to end (CLI or library), check it, fix common errors; `reference.md`: phenotype QC/transforms, SNP QC, loci |
 | `estimate-heritability` | fit the null model, interpret h², SE / profile-likelihood intervals, K scale vs other tools, inbred panels (strain-mean h²) |
 | `custom-association-analysis` | write ad-hoc loops: subsets, conditional analysis, LOCO kinship, many phenotypes |
+| `inbred-strain-panels` | strains with replicate animals: strain aliases and duplicate-genotype audits, strain → animal expansion, PLINK-safe IDs, imputing over strains, unequal replicates |
 | `simulate-lmm-data` | simulate genotypes/phenotypes with known h² and causal SNPs; sanity-check a pipeline |
 | `convert-genotype-formats` | VCF/BCF, BGEN, PGEN, VCF Zarr, Hail → PLINK BED; phenotype and `.id` files |
 | `migrate-from-old-pylmm` | port camelCase API / `pylmmGWAS` / `pylmmKinship` code and commands |
-| `interpret-gwas-results` | read the output, thresholds, λ_GC, effect allele and scale, when to distrust a scan |
+| `interpret-gwas-results` | read the output, thresholds, λ_GC, effect allele and scale, when to distrust a scan; `comparison-worksheet.md`: compare with a published GWAS |
 
 ## Known caveats (read before trusting a number)
 
@@ -117,8 +125,13 @@ use `skills/` directly, or copy it to `.claude/skills`.
   sigma is Q/(n-q) (bug 9); `tstat(log=True)` is wrong and unused (bug 5); genotypes are standardised over
   individuals later dropped for a missing phenotype (6.3b, |Δt| ≤ 0.024).
 * `LMM.association` fails on a `nan` genotype; `gwas` handles missing calls.
-* A kinship without a `K.id` sidecar is assumed to be in genotype order (with a warning). `pylmm kinship`
-  writes the sidecar.
+* A kinship without a `K.id` sidecar is assumed to be in genotype order. `pylmm gwas --bfile` / `--tfile`
+  warns about that. `pylmm gwas --emma-geno` does **not**: EMMA input has no IDs, so K's rows are always
+  taken in genotype-column order (a `K.id` that exists is ignored, with a warning). The library's
+  `PlinkReader.read_kinship` does not warn either; it only checks that K is n × n. `pylmm kinship` writes
+  the sidecar for PLINK input.
+* Inbred panels from a per-animal BED: `pylmm gwas` mean-imputes missing calls over **animals**, not
+  strains (Δ−log10 p up to 0.28 in the Phase R replication). See `inbred-strain-panels`.
 
 A 30-second sanity check that the install works:
 

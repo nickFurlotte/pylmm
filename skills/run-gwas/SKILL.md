@@ -22,7 +22,7 @@ genotype order); use it only for a pipeline you have already checked.
 | genotypes | PLINK 1 BED/BIM/FAM (`--bfile`), TPED (`--tfile`) or EMMA (`--emma-geno`) | anything else: the `convert-genotype-formats` skill |
 | phenotype | `FID IID name1 name2 ...` (header optional, `NA`/`-9` missing) | matched to the `.fam` by FID **and** IID |
 | covariates | same layout; only `NA` is missing | an intercept is added for you |
-| kinship | n × n text from `pylmm kinship`, plus `K.id` | `K.id` aligns K by ID |
+| kinship | n × n text from `pylmm kinship`, plus `K.id` | `K.id` aligns K by ID (PLINK input); with `--emma-geno` K is in genotype order, no `.id` and no warning |
 
 Make a small example: 3000 SNPs of the bundled mice, and a trait with a planted effect on SNP 500.
 
@@ -55,7 +55,9 @@ if it is a plain n × n text matrix; write its `.id` file (`pylmm.samples.write_
 **Inbred panels** (strains with replicate animals, few distinct genotypes): a K built from the tested
 SNPs absorbs much of a causal SNP's signal, so power is low and λ_GC from one scan is noisy. Prefer LOCO
 for the scan; `simulate-lmm-data` section 6 shows the size of the effect and the disjoint-K check, and
-`estimate-heritability` section 7 the individual vs strain-mean set-up.
+`estimate-heritability` section 7 the individual vs strain-mean set-up. Preparing such data (strain
+aliases, expanding strains to animals, IDs with spaces, imputing over strains rather than animals): the
+`inbred-strain-panels` skill.
 
 ## 2. Scan
 
