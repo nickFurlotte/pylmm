@@ -2,8 +2,8 @@
 
 All notable user-visible changes to pylmm. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmm gwas`, formerly `pylmmGWAS`,
-without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below. Entries before
-Phase 5b.2 use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
+without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below. Entries written
+before the single `pylmm` command use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
 maps them).
 
 ## [Unreleased]
@@ -20,7 +20,7 @@ original Python 2 outputs, simulation studies and two published mouse GWAS.
 - numpy >= 1.22 -> >= 1.23.2 and scipy >= 1.9 -> >= 1.9.2, the oldest releases with Python 3.11 wheels; CI
   runs the suite at exactly these versions on Python 3.11 (lowest-direct).
 
-#### Command line: one `pylmm` command (Phase 5b.2)
+#### Command line: one `pylmm` command
 A clean break, with no aliases for the old commands or flags; no number changes: for an equivalent invocation
 the output files (GWAS results, kinship, `.id`, `.kva`/`.kve`) are byte-identical to before.
 [`docs/migration/cli-map.csv`](docs/migration/cli-map.csv) maps every old command and flag to the new one (or
@@ -81,7 +81,7 @@ says why it is gone).
   `--block-size` is listed under "performance" in `--help`. The constant-phenotype error prints the value
   with `%g` (`equal 1`, not `equal np.float64(1.0)`).
 
-#### Python API cleanups (Phase 5b.1)
+#### Python API cleanups
 A clean break, with no aliases or shims; no number changes (the goldens and the README `pylmmGWAS` output
 are byte-identical). [`docs/migration/name-map.csv`](docs/migration/name-map.csv) has a row for each (now
 with `phase` and `notes` columns; `kind=signature` rows are changes of types or defaults, not names).
@@ -113,7 +113,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - `next(reader)` before `iter_snps()` raises `ValueError` (it was an `AttributeError` or a failed assert);
   after the last SNP the files are closed and `next` keeps raising `StopIteration`.
 
-#### Python API: PEP 8 names (Phase 5.4)
+#### Python API: PEP 8 names
 - Every Python name of the pylmm API follows PEP 8; a clean break, with no aliases or deprecation shims.
   [`docs/migration/name-map.csv`](docs/migration/name-map.csv) lists each changed name (`old_name`,
   `new_name`, `kind`, `module` = where it lives now): 1 module, 1 class, 15 functions, 25 methods,
@@ -141,7 +141,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Added
 
-#### Phase R follow-ups: data provenance, inbred panels, comparison with published GWAS
+#### Replication follow-ups: data provenance, inbred panels, comparison with published GWAS
 - `data/README.md`: what each bundled file is, its origin (the HMDP EMMA rows are, in order, the rows of the
   Broad merged mouse HapMap/WT file, build 37 / mm9; verified: same 132,285 rows, 122,242 informative rows
   with 0 discordances across 27 shared strains), the strain list (`AXB-19/PgnJ` three times, identical
@@ -163,7 +163,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - `plink_tools.write_bed`: `None` (or `""`) in `a1`/`a2` for a marker without allele letters -> the
   placeholders `1` (A1) / `2` (A2, the counted allele).
 
-#### Agent-facing docs (Phase 5c)
+#### Agent-facing docs
 - `AGENTS.md` (and a `CLAUDE.md` that imports it): repo map, `just` commands, test and golden rules,
   conventions, commit norms, the skills and the known caveats.
 - `docs/guide.md`: a user guide for ad-hoc analysis with the library (loading data and ID alignment,
@@ -183,11 +183,11 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   namespace and a scratch directory; `skip-ci: <reason>` opts a block out, `needs=<module>` skips it when
   a module is missing; a block in an unknown language is an error; the pytest summary lists the counts).
   `just docs-test` runs it alone.
-- `docs/research/io-formats.md`: the I/O formats review, with the Phase 5c verification of its
+- `docs/research/io-formats.md`: the I/O formats review, with a verification of its
   conversion recipes (plink2 `--extract-if-info`, vcztools `view-plink -o/--max-alleles`, and two
   corrections: plink2 BGEN import needs a REF/ALT mode, and dosage import rejects multiallelic records).
 
-#### Sample IDs and alignment (Phase 5b.1)
+#### Sample IDs and alignment
 - New module `pylmm.samples`: sample IDs are `(FID, IID)` pairs (`SampleID`); `align_samples()` aligns any
   number of per-sample sources (genotypes, phenotypes, covariates, kinship) by ID and returns an `Alignment`
   (the shared samples in the reference order, the rows of each source, and a report of the samples
@@ -207,17 +207,17 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - `pylmmKinship OUT` also writes `OUT.id`, the (FID, IID) of each row of the kinship, tab-separated (GCTA
   `.grm.id` style; not for EMMA input, which has no IDs). The kinship file itself is unchanged.
 
-#### Command line (Phase 5b.2)
+#### Command line
 - `pylmm gwas --id-match {fid-iid,iid}`: match phenotype, covariate and kinship rows on FID and IID (the
   default) or on the IID alone (PLINK input only).
 - `pylmm gwas --pheno-name NAME`: test the phenotype column of that name (from a `FID IID name ...` header);
   `--covar-name NAME ...` (space- or comma-separated): use only those covariate columns.
 - `pylmm gwas --help` and `pylmm kinship --help` describe every option and end with examples.
-- The command line is type-checked by mypy too (`just typecheck`, Python 3.10 and 3.14).
+- The command line is type-checked by mypy too (`just typecheck`, Python 3.11 and 3.14).
 
-#### Types and docstrings (Phase 5.5/5.6)
-- Type hints on the library modules (`pylmm.lmm`, `pylmm.plink_io`, `pylmm.misc`; the CLI modules followed in
-  Phase 5b.2), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
+#### Types and docstrings
+- Type hints on the library modules (`pylmm.lmm`, `pylmm.plink_io`, `pylmm.misc`; the CLI modules followed
+  with the single `pylmm` command), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
 - numpydoc docstrings with runnable examples for the public API; pytest runs them as doctests
   (`--doctest-modules`).
 - `pylmm.__version__`, the installed package version.
@@ -226,7 +226,10 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Changed
 
-#### pylmmGWAS: kinship IDs (Phase 5b.1)
+#### License
+- GNU AGPL v3 -> MIT.
+
+#### pylmmGWAS: kinship IDs
 - `--kfile K` reads the ID file `K.id` if it exists and aligns the kinship to the genotype file by
   (FID, IID): genotype individuals that are not in K are dropped (from the phenotype, the covariates and
   every SNP vector) and K's extra individuals are ignored, each with a `pylmmGWAS: warning:` line listing
@@ -235,7 +238,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   README example prints no such warning; its output file is unchanged.
 - When K drops individuals, genotypes are imputed and standardised over the kept individuals, but
   individuals dropped for a missing phenotype or covariate still count in the mean and SD (max |dt| 0.024
-  between the two rules; making them consistent is a Phase 6 item).
+  between the two rules; making them consistent is planned).
 - Individuals are matched by FID and IID; matching by IID alone is available in the library
   (`PlinkReader(id_match="iid")`), and on the command line since 5b.2 (`--id-match iid`).
 - `PlinkReader.read_kinship` ignores, with a warning, a `.id` next to a kinship for EMMA genotypes, as
@@ -290,7 +293,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   past h = 1 and raised `BracketError`, aborting the whole GWAS (high-h^2 traits). The null fit, the
   per-SNP refit and `misc.fitTwo` all use it. `LL_brent` also guards h > 1 (as well as h < 0). Results agree
   with the previous ones to < 3e-7. Unchanged on purpose: the 0.99 grid cap, the `getMax` off-by-one and
-  first-not-best (deferred to Phase 6.3).
+  first-not-best (known, not yet fixed).
 
 #### Library
 - `GWAS(REML=False)` is a real ML scan; it used to return the REML t. `association(REML=False)` uses
@@ -320,14 +323,14 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Fixed
 
-#### Phase R follow-ups
+#### Replication follow-ups
 - `pylmm.__version__` was `"unknown"` when pylmm was imported from a source checkout on `PYTHONPATH`
   without being installed -> the `[project] version` of the checkout's `pyproject.toml`.
 - `plink_tools.write_bed` / `write_pheno` / `write_kinship` wrote IDs with whitespace (e.g. a strain name
   as FID), which corrupts the whitespace-separated PLINK files -> `ValueError` naming the ID and pointing
   at `sanitize_ids`; empty IDs and equal `a1`/`a2` for a marker are errors too.
 
-#### `PlinkReader` (Phase 5b.1)
+#### `PlinkReader`
 - Silent misalignment: a FaSTLMM kinship (`fastlmm_kinship=True`) that lacked some individuals dropped them
   from `indivs`, `K` and `phenos`, but every SNP vector kept all `N` values, so genotype row `i` no longer
   belonged to individual `i` -> the SNP vectors are subset and reordered the same way (and standardised
@@ -341,7 +344,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - File handles: calling `get_snp_iterator()` again left the previous handles open until the reader was
   garbage-collected -> `iter_snps()` closes them first.
 
-#### `PlinkReader` (Phase 5.5, found while adding type hints)
+#### `PlinkReader` (found while adding type hints)
 - TPED: an allele code other than `0`/`1`/`2` (e.g. an un-recoded nucleotide letter) in a homozygous pair
   silently reused the previous individual's genotype, or raised `UnboundLocalError` for the first individual
   -> `ValueError` naming the SNP and the code (recode with `plink --recode12`). Valid 1/2-coded files read as
@@ -357,7 +360,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - Package metadata: description, Production/Stable and Python 3.11-3.14 classifiers, keywords, project
   URLs. The sdist ships the package, `sims/` (without result tables), `skills/` and the notebook, not the
   example data or the tests; the wheel holds `pylmm/` only.
-- `docs/replication.md`: the Phase R reanalysis of two published HMDP mouse GWAS by an agent working from
+- `docs/replication.md`: the reanalysis of two published HMDP mouse GWAS by an agent working from
   the docs alone (Farber 2011 BMD: partially replicated, all 5 published loci have a nearby signal (median −log10 p
   0.47 below published), 1/5 pass Bonferroni and 3/5 the paper's threshold; Bennett 2010 HDL:
   replicated, same lead SNP, −log10 p 11.5 vs 9.4), method choices and caveats; linked from the guide
@@ -370,7 +373,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   environment (`UV_PROJECT_ENVIRONMENT`, or an activated venv with `pip install -e .`).
 - A per-animal BED of an inbred panel is mean-imputed over animals by `pylmm gwas`, not over strains
   (Δ−log10 p up to 0.28 in the replication); the library recipe to impute over strains is in
-  `inbred-strain-panels`. A strain-aware option is planned (Phase 6).
+  `inbred-strain-panels`. A strain-aware option is planned.
 - `convert-genotype-formats/reference.md`: a handoff template for downloads a site blocks to scripts
   (Dryad's landing page loads but `file_stream` returns 403: download in a browser, verify checksums).
 - `estimate-heritability` / `custom-association-analysis`: expand strain genotypes to animals by row
@@ -380,3 +383,6 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 - Goldens `gwas_cli_bed_snps50_refit.out` and `gwas_cli_bed_snps50_removeMissing.out` were regenerated for the
   REML refit (py2 originals in `tests/golden/py2_original/`); `generate_golden.py` now refuses to run under
   Python 3.
+
+[Unreleased]: https://github.com/nickFurlotte/pylmm/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/nickFurlotte/pylmm/releases/tag/v1.0.0
