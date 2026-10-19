@@ -17,6 +17,12 @@ lint:
     uv run --locked ruff check
     uv run --locked ruff format --check
 
+# Type-check the library modules (mypy, config in pyproject.toml).  Runs under
+# Python 3.10 in a throwaway environment: the numpy stubs of the lock's
+# newer-Python numpy do not support mypy's python_version = "3.10".
+typecheck:
+    uv run --locked --isolated --python 3.10 mypy
+
 # Apply formatting and auto-fixable lint fixes
 fmt:
     uv run ruff format

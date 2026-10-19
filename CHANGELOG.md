@@ -34,6 +34,17 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
   written by `pylmmKinship --eigenNpz` and read by `pylmmGWAS --eigen`. The entries below use the names of
   the time.
 
+### Added
+
+#### Types and docstrings (Phase 5.5/5.6)
+- Type hints on the library modules (`pylmm.lmm`, `pylmm.plink_io`, `pylmm.misc`; the CLI modules follow in
+  Phase 5b), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
+- numpydoc docstrings with runnable examples for the public API; pytest runs them as doctests
+  (`--doctest-modules`).
+- `pylmm.__version__`, the installed package version.
+- `PlinkReader.N` is also set for EMMA input (the number of genotype columns); `indivs` is documented as
+  `(FID, IID)` pairs, or column positions `0..n-1` for EMMA, which has no IDs.
+
 ### Changed
 
 #### pylmmGWAS (CLI)
@@ -109,6 +120,18 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 
 ### Removed
 - `pylmmGWAS --kfile2`.
+
+### Fixed
+
+#### `PlinkReader` (Phase 5.5, found while adding type hints)
+- TPED: an allele code other than `0`/`1`/`2` (e.g. an un-recoded nucleotide letter) in a homozygous pair
+  silently reused the previous individual's genotype, or raised `UnboundLocalError` for the first individual
+  -> `ValueError` naming the SNP and the code (recode with `plink --recode12`). Valid 1/2-coded files read as
+  before.
+- `normalize_genotype` mean-imputed the caller's genotype array in place -> the imputation is done on a copy.
+- `get_covariates(None)` raised `TypeError` -> `ValueError`; `cov_file` is now a required argument.
+- An unknown genotype `type` wrote a message to stderr and `get_snp_iterator()` returned `None` -> the
+  constructor raises `ValueError`.
 
 ### Internal
 - Goldens `gwas_cli_bed_snps50_refit.out` and `gwas_cli_bed_snps50_removeMissing.out` were regenerated for the

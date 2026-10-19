@@ -42,6 +42,11 @@ Lint and formatting use [ruff](https://docs.astral.sh/ruff/): `just lint` checks
 applies fixes. CI runs the same checks. An optional [pre-commit](https://pre-commit.com) config
 (`.pre-commit-config.yaml`) runs ruff on commit; it is not required.
 
+The library modules carry type hints (the package ships `py.typed`). `just typecheck` runs
+[mypy](https://mypy-lang.org) on them as CI does (config in `pyproject.toml`; `pylmm/cli/` is not
+checked yet). It runs under Python 3.10, the oldest supported version. `uv run pytest` also runs the
+docstring examples in `pylmm/` as doctests.
+
 pylmm is offered under the MIT License. See [LICENSE](LICENSE).
 
 

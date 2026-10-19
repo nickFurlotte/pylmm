@@ -4,13 +4,94 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
-"""pylmm: linear mixed models for statistical genetics.
+"""PyLMM: a modern, readable, validated mixed-model toolkit for statistical genetics.
 
-Modules: ``pylmm.lmm`` (the LMM, GWAS scan and kinship), ``pylmm.plink_io``
-(PLINK/EMMA readers), ``pylmm.misc`` and ``pylmm.cli`` (the command-line
-programs).
+Built to be used by humans and agents.
 
-Naming (docs/conventions.md): PEP 8, except that a single capital letter,
-optionally followed by digits, is a math symbol (K, X, Y, X0, K2) and may be a
-parameter, local variable or attribute name.
+The model
+---------
+For n individuals, a phenotype ``Y``, covariates ``X0`` and a kinship matrix
+``K``::
+
+    Y = X0 b + g + e,   g ~ N(0, h * s2 * K),   e ~ N(0, (1 - h) * s2 * I)
+
+``h`` is the heritability (the share of the variance ``s2`` carried by ``K``).
+The SNP effect is tested by adding the SNP as a covariate (a Wald test).
+
+Module map
+----------
+``pylmm.lmm``
+    The model and GWAS: :func:`~pylmm.lmm.calculate_kinship`,
+    :class:`~pylmm.lmm.LMM` (``fit``, ``association``) and
+    :func:`~pylmm.lmm.gwas`.
+``pylmm.plink_io``
+    Readers for PLINK and EMMA files (:class:`~pylmm.plink_io.PlinkReader`).
+``pylmm.misc``
+    :func:`~pylmm.misc.fit_two`, a two-kinship variance-component fit.
+``pylmm.cli``
+    The command-line tools (``pylmmGWAS``, ``pylmmKinship``).
+
+Quick start
+-----------
+>>> import numpy as np
+>>> from pylmm.lmm import LMM, calculate_kinship, gwas
+>>> rng = np.random.default_rng(0)
+>>> W = rng.integers(0, 3, size=(50, 200)).astype(float)   # 50 people, 200 SNPs
+>>> K = calculate_kinship(W)                                # kinship
+>>> Y = W[:, :5].sum(axis=1) + rng.standard_normal(50)      # phenotype
+>>> model = LMM(Y, K)                                       # the LMM
+>>> h, beta, sigma, ll = model.fit()                        # null-model fit
+>>> bool(0 <= h < 1)
+True
+>>> ts, ps = model.association(W[:, [0]])                   # one SNP (n x 1)
+>>> bool(0 <= ps <= 1)
+True
+>>> ts, ps = gwas(Y, W[:, :10], K)                          # a scan
+>>> len(ps)
+10
+
+Reading PLINK files
+-------------------
+A BED -> genotype matrix ``W`` (n x m) recipe, for the first ``m`` SNPs
+(``reader.phenos`` is ``(n, k)``, so take ``[:, 0]`` for one phenotype):
+
+>>> import itertools                                          # doctest: +SKIP
+>>> from pylmm.plink_io import PlinkReader                    # doctest: +SKIP
+>>> reader = PlinkReader("data/snps.132k.clean.noX", type="b")  # doctest: +SKIP
+>>> W = np.column_stack([g for g, _ in itertools.islice(reader, m)])  # doctest: +SKIP
+>>> Y = reader.phenos[:, 0]                                   # doctest: +SKIP
+
+``gwas`` handles missing genotype calls (``nan``); ``LMM.association`` does
+not, and fails on a SNP that contains one.
+
+Effect scale and covariates
+---------------------------
+* ``beta`` is per unit of the genotype column you pass.  With
+  ``PlinkReader``'s default ``norm_genotype=True`` it is per SD of the
+  standardised genotype.  With ``norm_genotype=False`` it is per 0 -> 1 step
+  of the A2-allele fraction, i.e. two copies of A2, so its sign and scale
+  differ from PLINK's per-A1-copy convention (see ``pylmm.plink_io``).
+* ``PlinkReader.get_covariates`` returns the covariate columns WITHOUT an
+  intercept, and ``X0`` is used as given.  Passing covariates alone fits a
+  model with no intercept (test statistics can change a lot); add one:
+  ``X0 = np.column_stack([np.ones(n), cov])``.
+
+Where to read more
+------------------
+* ``docs/conventions.md``: naming (PEP 8, except that a single capital letter,
+  optionally followed by digits, is a math symbol: K, X, Y, X0, K2).
+* ``CHANGELOG.md``: what changed, release by release.
+* ``docs/migration/name-map.csv``: old name to new name for every renamed
+  API name (Phase 5.4).
 """
+
+from __future__ import annotations
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__: str = version("pylmm")
+except PackageNotFoundError:  # not installed (running from a source tree)
+    __version__ = "unknown"
+
+__all__ = ["__version__"]
