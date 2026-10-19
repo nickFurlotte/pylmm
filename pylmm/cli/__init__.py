@@ -58,7 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="pylmm",
-        description="PyLMM: linear mixed models for genome-wide association studies.",
+        description="PyLMM: a modern, readable, validated mixed-model toolkit for statistical\n"
+        "genetics, built to be used by humans and agents.",
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -194,10 +194,12 @@ def test_pheno_name_and_index_select_the_column(toy):
     y = np.loadtxt(toy["base"] + ".phenos", usecols=2)
     noise = np.random.default_rng(1).standard_normal(N)
     named = _write_table(str(toy["dir"] / "named.ph"), ["noise", "y"], [noise, y])
+    # Equal up to round-off: a column of a 2-column table is a strided view,
+    # which can change the BLAS summation order (seen with numpy 1.22).
     (_, b), _ = _gwas(toy, toy["kin"], "b.out", extra=["--pheno", named, "--pheno-name", "y"])
-    np.testing.assert_array_equal(b, a)
+    np.testing.assert_allclose(b, a, rtol=1e-12, atol=1e-14)
     (_, c), _ = _gwas(toy, toy["kin"], "c.out", extra=["--pheno", named, "--pheno-index", "1"])
-    np.testing.assert_array_equal(c, a)
+    np.testing.assert_array_equal(c, b)
     (_, d), _ = _gwas(toy, toy["kin"], "d.out", extra=["--pheno", named])  # first column
     assert not np.array_equal(d, a)
 
@@ -220,7 +222,7 @@ def test_covar_name_selects_columns(toy):
     only2 = _write_table(str(toy["dir"] / "only2.cov"), ["c2"], [c2])
     (_, a), _ = _gwas(toy, toy["kin"], "a.out", extra=["--covar", only2])
     (_, b), _ = _gwas(toy, toy["kin"], "b.out", extra=["--covar", both, "--covar-name", "c2"])
-    np.testing.assert_array_equal(b, a)
+    np.testing.assert_allclose(b, a, rtol=1e-12, atol=1e-14)
     (_, c), _ = _gwas(toy, toy["kin"], "c.out", extra=["--covar", both])
     for names in (["c1", "c2"], ["c1,c2"]):
         (_, d), _ = _gwas(toy, toy["kin"], "d.out", extra=["--covar", both, "--covar-name", *names])
