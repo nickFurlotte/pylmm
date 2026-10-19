@@ -164,3 +164,56 @@ exactly as in the `.fam` (watch leading zeros and float-formatted IDs like `101.
   of samples and variants, the chromosome names (`1` vs `chr1`), and whether sample IDs match the
   phenotype source.
 * Archive formats (`.tar.gz`, `.zip`): extract into an empty directory and list it before use.
+* Old links move: the 2011-era `http://www.mousehapmap.org/` redirects to
+  `https://data.broadinstitute.org/mouse/hapmap/` over plain HTTP, while HTTPS on the old hostname fails.
+  Try the URL exactly as the paper prints it before concluding that a resource is gone.
+
+### When a site blocks scripted downloads: a handoff note
+
+Some repositories serve the landing page to scripts but refuse the file itself. Seen in the Phase R
+replication: the **Dryad** dataset page (`https://datadryad.org/dataset/doi:...`) loads, while each file's
+`https://datadryad.org/downloads/file_stream/<id>` returns **HTTP 403** to `curl`; a publisher returned a
+reCAPTCHA page instead of the article; MPD returned 403 to a script. Do not try to get around it (other
+endpoints, faked headers, CAPTCHA solving). Stop, keep the evidence (`curl -D headers.txt`), and hand the
+download to a person, who should **use a browser and then verify the checksums**. Write down exactly what
+is needed, so the person does not have to rediscover it:
+
+```text
+DATA NEEDED: <study>, <dataset title>, release/version <x> (<date>)
+Landing page:   <URL that loads>
+Blocked:        <exact file URLs>  ->  HTTP <code> (headers saved in <path>), <date, UTC>
+Files needed (exact names, sizes if listed):
+  <file 1>  <URL>  <size>  <what it is, why it is needed>
+  <file 2>  ...
+Put them in:    <directory>  (do not rename; keep any archive as downloaded)
+Checksum plan:  the repository's published MD5/SHA-256, if it lists them -> compare; otherwise record
+                the SHA-256 of what was downloaded (shasum -a 256 <files> > SHA256SUMS) and the date,
+                so the analysis names exactly which bytes it used
+Also check:     sample count, variant count, genome build, ID format (see "Downloading public data")
+Not tried:      <routes deliberately not used: login, CAPTCHA, mirrors, emailing the authors>
+Meanwhile:      <what the analysis does without it; what stays "not assessed">
+```
+
+Verify what arrives before using it, and record the digests next to the files:
+
+```python
+import hashlib
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+with open("downloaded.txt", "w") as f:                    # stands in for the file the person fetched
+    f.write("FID IID y\nf1 i1 1.5\n")
+expected = {"downloaded.txt": sha256("downloaded.txt")}   # from the repository's listing, if it has one
+with open("SHA256SUMS", "w") as out:
+    for name, want in expected.items():
+        got = sha256(name)
+        assert got == want, "%s: SHA-256 %s, expected %s" % (name, got, want)
+        out.write("%s  %s\n" % (got, name))
+```
+
+A study whose data could not be obtained is **not assessed**, not a failed replication.
