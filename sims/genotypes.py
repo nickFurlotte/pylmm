@@ -184,7 +184,7 @@ def bed(
     want = np.zeros(m_total, dtype=bool)
     want[jj] = True
     cols, ids = {}, {}
-    reader.get_snp_iterator()
+    reader.iter_snps()
     for j in range(m_total):
         g, sid = next(reader)
         if want[j]:

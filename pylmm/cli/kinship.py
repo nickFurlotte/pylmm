@@ -9,6 +9,11 @@
 This is the former scripts/pylmmKinship.py, moved into the package so it can
 be installed as a console script.  scripts/pylmmKinship.py is now a thin shim
 that calls main().
+
+Next to the kinship ``outfile`` it writes ``outfile.id``, the (FID, IID) of
+each row (one ``FID IID`` per line), which ``pylmmGWAS --kfile outfile`` uses
+to align the matrix to its genotype file by ID.  EMMA input has no IDs, so no
+ID file is written for it.
 """
 
 import sys
@@ -18,7 +23,7 @@ from optparse import OptionGroup, OptionParser
 import numpy as np
 from scipy import linalg
 
-from pylmm import plink_io
+from pylmm import plink_io, samples
 
 usage = """usage: %prog [options] --[tfile | bfile] plinkFileBase outfile
 
@@ -121,7 +126,7 @@ def main(argv=None):
     m = options.computeSize
     W = np.ones((n, m)) * np.nan
 
-    reader.get_snp_iterator()
+    reader.iter_snps()
     # Annoying hack to get around the fact that it is expensive to determine the number of SNPs in an emma file
     if options.emmaFile:
         reader.num_snps = options.numSNPs
@@ -164,6 +169,12 @@ def main(argv=None):
     if options.verbose:
         sys.stderr.write("Saving Kinship file to %s\n" % out_file)
     np.savetxt(out_file, K)
+    # The IDs of K's rows (FID IID per line, GCTA .grm.id style), which
+    # pylmmGWAS --kfile uses to align K by ID.  EMMA input has no IDs.
+    if reader.type != "emma":
+        samples.write_id_file(samples.kinship_id_path(out_file), reader.indivs)
+        if options.verbose:
+            sys.stderr.write("Saving kinship IDs to %s\n" % samples.kinship_id_path(out_file))
 
     if options.saveEig or options.eigenNpz:
         if options.verbose:
