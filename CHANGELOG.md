@@ -131,6 +131,26 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 
 ### Added
 
+#### Agent-facing docs (Phase 5c)
+- `AGENTS.md` (and a `CLAUDE.md` that imports it): repo map, `just` commands, test and golden rules,
+  conventions, commit norms, the skills and the known caveats.
+- `docs/guide.md`: a user guide for ad-hoc analysis with the library (loading data and ID alignment,
+  kinship, the null fit and h² scaling, single-SNP tests, scans with covariates, missing data, the CLI,
+  reading the output and per-allele effects, performance, pitfalls, validated behaviour).
+- `skills/` (Agent Skills format; `.claude/skills` is a relative symlink to it): `run-gwas`,
+  `estimate-heritability`, `custom-association-analysis`, `simulate-lmm-data`,
+  `convert-genotype-formats` (with `reference.md` and `scripts/plink_tools.py`: read `.bim`, write and
+  subset BED files, write phenotype and kinship + `.id` files), `migrate-from-old-pylmm` (with
+  `scripts/migrate.py`, which rewrites old Python code and `pylmmGWAS`/`pylmmKinship` command lines from
+  the migration maps) and `interpret-gwas-results` (with `scripts/summarize_gwas.py`: λ_GC, top hits,
+  Manhattan/QQ plots).
+- `tests/test_docs.py` runs every `python`/`bash` code block of those files (blocks of a file share a
+  namespace and a scratch directory; `skip-ci: <reason>` opts a block out, `needs=<module>` skips it when
+  a module is missing; the pytest summary lists the counts). `just docs-test` runs it alone.
+- `docs/research/io-formats.md`: the I/O formats review, with the Phase 5c verification of its
+  conversion recipes (plink2 `--extract-if-info`, vcztools `view-plink -o/--max-alleles`, and two
+  corrections: plink2 BGEN import needs a REF/ALT mode, and dosage import rejects multiallelic records).
+
 #### Sample IDs and alignment (Phase 5b.1)
 - New module `pylmm.samples`: sample IDs are `(FID, IID)` pairs (`SampleID`); `align_samples()` aligns any
   number of per-sample sources (genotypes, phenotypes, covariates, kinship) by ID and returns an `Alignment`
