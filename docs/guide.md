@@ -484,3 +484,9 @@ pylmm's default path (REML null fit, Wald test) was checked by simulation in Pha
   SNPs; kinship normalisation (bug 8).
 * The Phase 1 golden tests (`tests/golden/`) pin every number of the original 2013 code: the CLI output is
   byte-identical for the default path.
+
+**Against published results** (Phase R, [replication.md](replication.md)): an agent using only these docs
+and the skills reanalysed two published mouse GWAS from their original phenotypes. Farber et al. 2011
+(bone mineral density): all 5 published loci found in their intervals, −log10 p about 0.5 lower than
+published (median 0.47). Bennett et al. 2010 (HDL): the same lead SNP, −log10 p 11.5 vs 9.4 published.
+Closest method: an IBS-style kinship with a per-SNP REML refit. No numerical bug was found.
