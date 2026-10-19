@@ -8,7 +8,17 @@ maps them).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-19
+
+The Python 3 port of pylmm, with a new PEP 8 API and a single `pylmm` command line, validated against the
+original Python 2 outputs, simulation studies and two published mouse GWAS.
+
 ### Changed (breaking)
+
+#### Python and dependency floors
+- Python >= 3.10 -> >= 3.11 (3.10 reaches end of life in October 2026); tested on 3.11-3.14.
+- numpy >= 1.22 -> >= 1.23.2 and scipy >= 1.9 -> >= 1.9.2, the oldest releases with Python 3.11 wheels; CI
+  runs the suite at exactly these versions on Python 3.11 (lowest-direct).
 
 #### Command line: one `pylmm` command (Phase 5b.2)
 A clean break, with no aliases for the old commands or flags; no number changes: for an equivalent invocation
@@ -342,6 +352,11 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   constructor raises `ValueError`.
 
 ### Docs
+- README rewritten for 1.0 (what pylmm does, how it is validated, install, quick start, agents, migration);
+  new `CITATION.cff` for the software.
+- Package metadata: description, Production/Stable and Python 3.11-3.14 classifiers, keywords, project
+  URLs. The sdist ships the package, `sims/` (without result tables), `skills/` and the notebook, not the
+  example data or the tests; the wheel holds `pylmm/` only.
 - `docs/replication.md`: the Phase R reanalysis of two published HMDP mouse GWAS by an agent working from
   the docs alone (Farber 2011 BMD: partially replicated, all 5 published loci have a nearby signal (median −log10 p
   0.47 below published), 1/5 pass Bonferroni and 3/5 the paper's threshold; Bennett 2010 HDL:
