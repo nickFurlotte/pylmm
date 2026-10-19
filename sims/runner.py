@@ -62,9 +62,8 @@ import traceback
 from collections.abc import Iterable
 from typing import Any
 
-import numpy as np
-
-import sims  # noqa: F401  (pins BLAS threads before numpy loads)
+import sims  # isort: skip  # noqa: F401  (pins BLAS threads before numpy loads)
+import numpy as np  # isort: skip
 
 SIMS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SIMS_DIR)
