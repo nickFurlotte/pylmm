@@ -171,12 +171,12 @@ def bed(
     import contextlib
     import io
 
-    from pylmm import input as pinput
+    from pylmm import plink_io
 
     rng = np.random.default_rng(seed)
     with contextlib.redirect_stderr(io.StringIO()):  # "Read N individuals"
-        IN = pinput.plink(base, type="b", normGenotype=False)
-    n_total = len(IN.indivs)
+        reader = plink_io.PlinkReader(base, type="b", norm_genotype=False)
+    n_total = len(reader.indivs)
     with open(base + ".bim") as f:
         m_total = sum(1 for _ in f)
     jj = _choose(m_total, n_snps, snps, select, rng)
@@ -184,9 +184,9 @@ def bed(
     want = np.zeros(m_total, dtype=bool)
     want[jj] = True
     cols, ids = {}, {}
-    IN.getSNPIterator()
+    reader.get_snp_iterator()
     for j in range(m_total):
-        g, sid = next(IN)
+        g, sid = next(reader)
         if want[j]:
             cols[j] = g[ii]
             ids[j] = sid
@@ -194,7 +194,7 @@ def bed(
             break
     order = list(jj)
     G = np.column_stack([cols[j] for j in order]) if order else np.zeros((len(ii), 0))
-    indiv_ids = ["%s:%s" % IN.indivs[i] for i in ii]
+    indiv_ids = ["%s:%s" % reader.indivs[i] for i in ii]
     return Genotypes(
         G.astype(np.float64),
         [ids[j] for j in order],

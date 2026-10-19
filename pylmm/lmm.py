@@ -14,14 +14,14 @@ from scipy import linalg, optimize, stats
 # np.seterr('raise')
 
 
-def matrixMult(A, B):
+def _matrix_mult(A, B):
     # The original code tried scipy.linalg.fblas.dgemm first.  scipy has had
     # no linalg.fblas since 0.12, so that path was dead and every call fell
     # back to np.dot -- which is what the Phase 1 goldens were computed with.
     return np.dot(A, B)
 
 
-def calculateKinship(W, center=False):
+def calculate_kinship(W, center=False):
     """
     W is an n x m matrix encoding SNP minor alleles.
 
@@ -48,12 +48,12 @@ def calculateKinship(W, center=False):
         W[:, i] = (W[:, i] - mn) / np.sqrt(vr)
 
     W = W[:, keep]
-    K = matrixMult(W, W.T) * 1.0 / float(m)
+    K = _matrix_mult(W, W.T) * 1.0 / float(m)
     if center:
         P = np.diag(np.repeat(1, n)) - 1 / float(n) * np.ones((n, n))
-        S = np.trace(matrixMult(matrixMult(P, K), P))
-        K_n = (n - 1) * K / S
-        return K_n
+        S = np.trace(_matrix_mult(_matrix_mult(P, K), P))
+        k_centered = (n - 1) * K / S
+        return k_centered
     return K
 
 
@@ -69,12 +69,12 @@ ESTIMABLE_RTOL = 1e-10
 _ESTIMABLE_FLOOR = 1e-20
 
 
-def _residualOnSpan(x, X0):
+def _residual_on_span(x, X0):
     """x minus its least-squares projection on the columns of X0 (QR)."""
     if X0.shape[1] == 0:
         return x
     Q, _ = linalg.qr(X0, mode="economic")
-    return x - matrixMult(Q, matrixMult(Q.T, x))
+    return x - _matrix_mult(Q, _matrix_mult(Q.T, x))
 
 
 def snp_estimable(x, X0, rtol=ESTIMABLE_RTOL, Q=None):
@@ -100,14 +100,14 @@ def snp_estimable(x, X0, rtol=ESTIMABLE_RTOL, Q=None):
         return False
     if Q is None:
         Q = linalg.qr(X0, mode="economic")[0] if q else np.zeros((n, 0))
-    r = x - matrixMult(Q, matrixMult(Q.T, x))
+    r = x - _matrix_mult(Q, _matrix_mult(Q.T, x))
     # The tolerance is relative to the squared norm of x.  When X0 spans the
     # intercept, that norm is taken after projecting the intercept out (the
     # centred x), so that a big constant offset does not make a low-variance
     # SNP look collinear.
     ref = np.dot(x, x)
     u = np.full(n, 1.0 / np.sqrt(n))
-    ru = u - matrixMult(Q, matrixMult(Q.T, u))
+    ru = u - _matrix_mult(Q, _matrix_mult(Q.T, u))
     if np.dot(ru, ru) <= ESTIMABLE_RTOL:
         xc = x - x.mean()
         ref = np.dot(xc, xc)
@@ -117,7 +117,7 @@ def snp_estimable(x, X0, rtol=ESTIMABLE_RTOL, Q=None):
     return bool(np.dot(r, r) > max(rtol * ref, _ESTIMABLE_FLOOR * np.dot(x, x)))
 
 
-def _columnList(cols):
+def _column_list(cols):
     return ", ".join(str(c) for c in cols)
 
 
@@ -135,55 +135,55 @@ def check_covariates(X0, n=None, what="covariate matrix X0"):
         cols = np.where(bad.any(axis=0))[0]
         raise ValueError(
             "%s has %d nan/inf values, in column(s) %s; remove those individuals "
-            "or impute the values" % (what, bad.sum(), _columnList(cols))
+            "or impute the values" % (what, bad.sum(), _column_list(cols))
         )
     q = X0.shape[1]
     if q == 0:
         return X0
     zero = [j for j in range(q) if not X0[:, j].any()]
     if zero:
-        raise ValueError("%s: column(s) %s are all zero" % (what, _columnList(zero)))
+        raise ValueError("%s: column(s) %s are all zero" % (what, _column_list(zero)))
     for j in range(q):
         for k in range(j):
             if np.array_equal(X0[:, j], X0[:, k]):
                 raise ValueError("%s: columns %d and %d are identical" % (what, k, j))
     for j in range(1, q):
-        r = _residualOnSpan(X0[:, j], X0[:, :j])
+        r = _residual_on_span(X0[:, j], X0[:, :j])
         if np.dot(r, r) <= ESTIMABLE_RTOL * np.dot(X0[:, j], X0[:, j]):
             raise ValueError(
                 "%s is rank deficient: column %d is a linear combination of columns "
-                "%s; remove it" % (what, j, _columnList(range(j)))
+                "%s; remove it" % (what, j, _column_list(range(j)))
             )
     return X0
 
 
-def check_ids(ids, K_ids):
+def check_ids(ids, kinship_ids):
     """Raise ValueError unless the individuals of K (K_ids) are those of Y
     (ids), in the same order.  Either may be None, then nothing is checked."""
-    if ids is None or K_ids is None:
+    if ids is None or kinship_ids is None:
         return
-    ids, K_ids = list(ids), list(K_ids)
-    if ids == K_ids:
+    ids, kinship_ids = list(ids), list(kinship_ids)
+    if ids == kinship_ids:
         return
-    known = set(K_ids)
+    known = set(kinship_ids)
     missing = [i for i in ids if i not in known]
     if missing:
         raise ValueError(
             "%d individuals are not in the kinship matrix, e.g. %s"
-            % (len(missing), _columnList(missing[:5]))
+            % (len(missing), _column_list(missing[:5]))
         )
-    if len(ids) != len(K_ids):
+    if len(ids) != len(kinship_ids):
         raise ValueError(
-            "the kinship matrix has %d individuals, the phenotype %d" % (len(K_ids), len(ids))
+            "the kinship matrix has %d individuals, the phenotype %d" % (len(kinship_ids), len(ids))
         )
-    i = next(i for i in range(len(ids)) if ids[i] != K_ids[i])
+    i = next(i for i in range(len(ids)) if ids[i] != kinship_ids[i])
     raise ValueError(
         "the kinship matrix is in a different order than the phenotype: position %d "
-        "is %s in K but %s in Y; reorder K (K[o][:, o]) to match" % (i, K_ids[i], ids[i])
+        "is %s in K but %s in Y; reorder K (K[o][:, o]) to match" % (i, kinship_ids[i], ids[i])
     )
 
 
-def _checkPhenotype(Y):
+def _check_phenotype(Y):
     """Y as a float vector; raise ValueError on inf, on no observed values or
     on a constant phenotype (issues 22 and 24)."""
     Y = np.asarray(Y, dtype=np.float64).reshape(-1)
@@ -197,7 +197,7 @@ def _checkPhenotype(Y):
     return Y
 
 
-def _checkDesignSize(n, q, what="model"):
+def _check_design_size(n, q, what="model"):
     """n observations vs q covariates: a Wald test of one SNP needs n > q+1
     (issue 20)."""
     if n <= q + 1:
@@ -207,7 +207,7 @@ def _checkDesignSize(n, q, what="model"):
         )
 
 
-def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_ids=None):
+def gwas(Y, X, K, kva=[], kve=[], X0=None, reml=True, refit=False, ids=None, kinship_ids=None):
     """
 
     Performs a basic GWAS scan using the LMM.  This function
@@ -230,7 +230,7 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
     cannot be tested (all missing, constant, or collinear with X0).
 
     """
-    Y = _checkPhenotype(Y)
+    Y = _check_phenotype(Y)
     X = np.asarray(X, dtype=np.float64)
     n = len(Y)
     if X.ndim == 1:
@@ -238,14 +238,14 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
     if X.shape[0] != n:
         raise ValueError("SNP matrix X has %d rows but Y has %d values" % (X.shape[0], n))
     m = X.shape[1]
-    check_ids(ids, K_ids)
+    check_ids(ids, kinship_ids)
 
     if X0 is None:
         X0 = np.ones((n, 1))
     X0 = np.asarray(X0, dtype=np.float64)
     nobs = (~np.isnan(Y)).sum()
     if nobs and X0.ndim == 2:
-        _checkDesignSize(nobs, X0.shape[1])
+        _check_design_size(nobs, X0.shape[1])
     # Shape now; the values (nan, rank) are checked below, on the individuals
     # that have a phenotype (a covariate may be nan where Y is nan).
     if X0.ndim != 2 or X0.shape[0] != n:
@@ -260,21 +260,21 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
         X = X[keep, :]
         X0 = X0[keep, :]
         K = K[keep, :][:, keep]
-        Kva = []
-        Kve = []
+        kva = []
+        kve = []
 
     if len(Y) == 0:
         return [np.nan] * m, [np.nan] * m
 
     X0 = check_covariates(X0, len(Y))
-    _checkDesignSize(len(Y), X0.shape[1])
-    L = LMM(Y, K, Kva, Kve, X0)
+    _check_design_size(len(Y), X0.shape[1])
+    L = LMM(Y, K, kva, kve, X0)
     if not refit:
-        L.fit(REML=REML)
+        L.fit(reml=reml)
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
 
-    PS = []
-    TS = []
+    p_values = []
+    t_stats = []
     counts = {}
 
     n = X.shape[0]
@@ -286,32 +286,32 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
         if v.sum():
             keep = ~v
             xs = x[keep, :]
-            Ys = Y[keep]
-            X0s = X0[keep, :]
-            if not subset_testable(xs, Ys, X0s, counts):
-                PS.append(np.nan)
-                TS.append(np.nan)
+            ys = Y[keep]
+            x0s = X0[keep, :]
+            if not subset_testable(xs, ys, x0s, counts):
+                p_values.append(np.nan)
+                t_stats.append(np.nan)
                 continue
 
-            Ks = K[keep, :][:, keep]
-            Ls = LMM(Ys, Ks, X0=X0s, validate=False)
+            ks = K[keep, :][:, keep]
+            ls = LMM(ys, ks, X0=x0s, validate=False)
             if refit:
-                Ls.fit(X=xs, REML=REML)
+                ls.fit(X=xs, reml=reml)
             else:
-                Ls.fit(REML=REML)
-            ts, ps = Ls.association(xs, REML=REML)
+                ls.fit(reml=reml)
+            ts, ps = ls.association(xs, reml=reml)
         else:
             if not snp_estimable(x, X0, Q=Q0):
-                PS.append(np.nan)
-                TS.append(np.nan)
+                p_values.append(np.nan)
+                t_stats.append(np.nan)
                 continue
 
             if refit:
-                L.fit(X=x, REML=REML)
-            ts, ps = L.association(x, REML=REML)
+                L.fit(X=x, reml=reml)
+            ts, ps = L.association(x, reml=reml)
 
-        PS.append(ps)
-        TS.append(ts)
+        p_values.append(ps)
+        t_stats.append(ts)
 
     if counts.get("collinear"):
         warnings.warn(
@@ -319,24 +319,24 @@ def GWAS(Y, X, K, Kva=[], Kve=[], X0=None, REML=True, refit=False, ids=None, K_i
             "the covariates are no longer of full rank" % (counts["collinear"], m),
             stacklevel=2,
         )
-    return TS, PS
+    return t_stats, p_values
 
 
-def subset_testable(xs, Ys, X0s, counts=None):
+def subset_testable(xs, ys, x0s, counts=None):
     """For a SNP with missing calls, on the individuals that have one: the
     SNP is estimable, X0 is still of full rank and Y is not constant.  If
     counts (a dict) is given, the SNPs rejected because the covariates lost
     rank on the subset are counted in counts['collinear'], so that the caller
     can report them once."""
-    if len(Ys) < 2 or np.ptp(Ys) == 0:
+    if len(ys) < 2 or np.ptp(ys) == 0:
         return False
     try:
-        check_covariates(X0s)
+        check_covariates(x0s)
     except ValueError:
         if counts is not None:
             counts["collinear"] = counts.get("collinear", 0) + 1
         return False
-    return snp_estimable(xs, X0s)
+    return snp_estimable(xs, x0s)
 
 
 class LMM:
@@ -356,7 +356,16 @@ class LMM:
     """
 
     def __init__(
-        self, Y, K, Kva=[], Kve=[], X0=None, verbose=False, ids=None, K_ids=None, validate=True
+        self,
+        Y,
+        K,
+        kva=[],
+        kve=[],
+        X0=None,
+        verbose=False,
+        ids=None,
+        kinship_ids=None,
+        validate=True,
     ):
         """
         The constructor takes a phenotype vector or array of size n.
@@ -377,16 +386,16 @@ class LMM:
         self.verbose = verbose
 
         if validate:
-            Y = _checkPhenotype(Y)
-            K = self._checkKinship(K, len(Y))
+            Y = _check_phenotype(Y)
+            K = self._check_kinship(K, len(Y))
             X0 = np.asarray(X0, dtype=np.float64)
             nobs = (~np.isnan(Y)).sum()
             if nobs and X0.ndim == 2:
-                _checkDesignSize(nobs, X0.shape[1])
+                _check_design_size(nobs, X0.shape[1])
             # shape only here; nan/rank are checked below, after dropping the missing-Y rows
             if X0.ndim != 2 or X0.shape[0] != len(Y):
                 check_covariates(X0, len(Y))
-            check_ids(ids, K_ids)
+            check_ids(ids, kinship_ids)
         else:
             Y = np.asarray(Y, dtype=np.float64).reshape(-1)
 
@@ -400,59 +409,59 @@ class LMM:
             Y = Y[x]
             K = K[x, :][:, x]
             X0 = X0[x, :]
-            Kva = []
-            Kve = []
+            kva = []
+            kve = []
         self.nonmissing = x
         if validate:
             if len(Y) == 0:
                 raise ValueError("phenotype has no non-missing values")
-            _checkDesignSize(len(Y), X0.shape[1])
+            _check_design_size(len(Y), X0.shape[1])
             X0 = check_covariates(
                 X0,
                 what="covariate matrix X0"
                 + (" (individuals with a phenotype)" if x.sum() < len(x) else ""),
             )
 
-        if len(Kva) == 0 or len(Kve) == 0:
+        if len(kva) == 0 or len(kve) == 0:
             if self.verbose:
                 sys.stderr.write(
                     "Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0], K.shape[1])
                 )
             begin = time.time()
-            Kva, Kve = linalg.eigh(K)
+            kva, kve = linalg.eigh(K)
             end = time.time()
             if self.verbose:
                 sys.stderr.write("Total time: %0.3f\n" % (end - begin))
         elif validate:
-            Kva, Kve = np.asarray(Kva, dtype=np.float64), np.asarray(Kve, dtype=np.float64)
-            if Kva.shape != (K.shape[0],) or Kve.shape != K.shape:
+            kva, kve = np.asarray(kva, dtype=np.float64), np.asarray(kve, dtype=np.float64)
+            if kva.shape != (K.shape[0],) or kve.shape != K.shape:
                 raise ValueError(
                     "eigendecomposition has shapes %s and %s, expected (%d,) and %s"
-                    % (Kva.shape, Kve.shape, K.shape[0], K.shape)
+                    % (kva.shape, kve.shape, K.shape[0], K.shape)
                 )
-            if not (np.isfinite(Kva).all() and np.isfinite(Kve).all()):
+            if not (np.isfinite(kva).all() and np.isfinite(kve).all()):
                 raise ValueError("eigendecomposition (Kva, Kve) has nan/inf values")
 
         if validate:
-            self._warnNegativeEigenvalues(Kva)
+            self._warn_negative_eigenvalues(kva)
 
         self.K = K
-        self.Kve = Kve
+        self.kve = kve
         self.N = self.K.shape[0]
         self.Y = Y.reshape((self.N, 1))
         self.X0 = X0
 
         # A new array: the caller's Kva is not clamped in place (bug 12).
-        self.Kva = np.array(Kva, dtype=np.float64)
-        if sum(self.Kva < 1e-6):
+        self.kva = np.array(kva, dtype=np.float64)
+        if sum(self.kva < 1e-6):
             if self.verbose:
-                sys.stderr.write("Cleaning %d eigen values\n" % (sum(self.Kva < 0)))
-            self.Kva[self.Kva < 1e-6] = 1e-6
+                sys.stderr.write("Cleaning %d eigen values\n" % (sum(self.kva < 0)))
+            self.kva[self.kva < 1e-6] = 1e-6
 
         self.transform()
 
     @staticmethod
-    def _checkKinship(K, n):
+    def _check_kinship(K, n):
         K = np.asarray(K, dtype=np.float64)
         if K.shape != (n, n):
             raise ValueError(
@@ -477,19 +486,19 @@ class LMM:
         return K
 
     @staticmethod
-    def _warnNegativeEigenvalues(Kva):
+    def _warn_negative_eigenvalues(kva):
         """Warn if K is clearly not positive semi-definite.  Round-off
         eigenvalues (|e| ~ 1e-13 relative) are normal for a rank-deficient
         K and are not reported."""
-        if not len(Kva):
+        if not len(kva):
             return
-        tol = 1e-8 * max(np.abs(Kva).max(), 1e-300)
-        neg = Kva < -tol
+        tol = 1e-8 * max(np.abs(kva).max(), 1e-300)
+        neg = kva < -tol
         if neg.any():
             warnings.warn(
                 "kinship matrix is not positive semi-definite: %d eigenvalue(s) below -%.1e, "
                 "the most negative is %g; all %d eigenvalues below 1e-6 are set to 1e-6"
-                % (neg.sum(), tol, Kva.min(), (Kva < 1e-6).sum()),
+                % (neg.sum(), tol, kva.min(), (kva < 1e-6).sum()),
                 stacklevel=3,
             )
 
@@ -500,12 +509,12 @@ class LMM:
         eigenvector matrix of K (the kinship).
         """
 
-        self.Yt = matrixMult(self.Kve.T, self.Y)
-        self.X0t = matrixMult(self.Kve.T, self.X0)
-        self.X0t_stack = np.hstack([self.X0t, np.ones((self.N, 1))])
-        self.q = self.X0t.shape[1]
+        self.yt = _matrix_mult(self.kve.T, self.Y)
+        self.x0t = _matrix_mult(self.kve.T, self.X0)
+        self.x0t_stack = np.hstack([self.x0t, np.ones((self.N, 1))])
+        self.q = self.x0t.shape[1]
 
-    def getMLSoln(self, h, X):
+    def ml_solution(self, h, X):
         """
         Obtains the maximum-likelihood estimates for the covariate coefficients (beta),
         the total variance of the trait (sigma) and also passes intermediates that can
@@ -514,26 +523,26 @@ class LMM:
         covariate matrix.
         """
 
-        S = 1.0 / (h * self.Kva + (1.0 - h))
-        Xt = X.T * S
-        XX = matrixMult(Xt, X)
-        XX_i = linalg.inv(XX)
-        beta = matrixMult(matrixMult(XX_i, Xt), self.Yt)
-        Yt = self.Yt - matrixMult(X, beta)
-        Q = np.dot(Yt.T * S, Yt)
+        S = 1.0 / (h * self.kva + (1.0 - h))
+        xt = X.T * S
+        xx = _matrix_mult(xt, X)
+        xx_inv = linalg.inv(xx)
+        beta = _matrix_mult(_matrix_mult(xx_inv, xt), self.yt)
+        yt = self.yt - _matrix_mult(X, beta)
+        Q = np.dot(yt.T * S, yt)
         sigma = Q * 1.0 / (float(self.N) - float(X.shape[1]))
-        return beta, sigma, Q, XX_i, XX
+        return beta, sigma, Q, xx_inv, xx
 
-    def LL_brent(self, h, X=None, REML=False):
+    def _neg_log_likelihood(self, h, X=None, reml=False):
         # Objective (-LL) for the bounded search in getMax.  That search never
         # leaves its grid interval inside [0, 0.99], so the h > 1 guard is purely
         # defensive; it is kept so LL is never evaluated where it is nan:
         # for h > 1, h*Kva + (1-h) can be negative and LL is nan (bug 4).
         if h < 0 or h > 1:
             return 1e6
-        return -self.LL(h, X, stack=False, REML=REML)[0]
+        return -self.log_likelihood(h, X, stack=False, reml=reml)[0]
 
-    def LL(self, h, X=None, stack=True, REML=False):
+    def log_likelihood(self, h, X=None, stack=True, reml=False):
         """
         Computes the log-likelihood for a given heritability (h).  If X==None, then the
         default X0t will be used.  If X is set and stack=True, then X0t will be matrix concatenated with
@@ -542,34 +551,34 @@ class LMM:
         """
 
         if X is None:
-            X = self.X0t
+            X = self.x0t
         elif stack:
-            self.X0t_stack[:, (self.q)] = matrixMult(self.Kve.T, X)[:, 0]
-            X = self.X0t_stack
+            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
+            X = self.x0t_stack
 
         n = float(self.N)
         q = float(X.shape[1])
-        beta, sigma, Q, XX_i, XX = self.getMLSoln(h, X)
-        LL = (
+        beta, sigma, Q, xx_inv, xx = self.ml_solution(h, X)
+        log_likelihood = (
             n * np.log(2 * np.pi)
-            + np.log(h * self.Kva + (1.0 - h)).sum()
+            + np.log(h * self.kva + (1.0 - h)).sum()
             + n
             + n * np.log(1.0 / n * Q)
         )
-        LL = -0.5 * LL
+        log_likelihood = -0.5 * log_likelihood
 
-        if REML:
-            LL_REML_part = (
+        if reml:
+            ll_reml_part = (
                 q * np.log(2.0 * np.pi * sigma)
-                + np.log(linalg.det(matrixMult(X.T, X)))
-                - np.log(linalg.det(XX))
+                + np.log(linalg.det(_matrix_mult(X.T, X)))
+                - np.log(linalg.det(xx))
             )
-            LL = LL + 0.5 * LL_REML_part
+            log_likelihood = log_likelihood + 0.5 * ll_reml_part
 
-        LL = LL.sum()
-        return LL, beta, sigma, XX_i
+        log_likelihood = log_likelihood.sum()
+        return log_likelihood, beta, sigma, xx_inv
 
-    def getMax(self, H, X=None, REML=False):
+    def _get_max(self, H, X=None, reml=False):
         """
         Helper functions for .fit(...).
         This function takes a set of LLs computed over a grid and finds possible regions
@@ -577,10 +586,10 @@ class LMM:
         to find the optimum.
 
         """
-        n = len(self.LLs)
-        HOpt = []
+        n = len(self.ll_grid)
+        h_opt = []
         for i in range(1, n - 2):
-            if self.LLs[i - 1] < self.LLs[i] and self.LLs[i] > self.LLs[i + 1]:
+            if self.ll_grid[i - 1] < self.ll_grid[i] and self.ll_grid[i] > self.ll_grid[i + 1]:
                 # Bounded to the bracketing grid interval [H[i-1], H[i+1]].  The
                 # unbounded optimize.brent used before could step above h = 1,
                 # where LL is nan, and scipy >= 1.11 then raised BracketError
@@ -593,28 +602,28 @@ class LMM:
                 # and 0/183 real bimodal S2 fits; max |dh| = 7e-8 and
                 # |dt| = 2.8e-7 on non-crashing fits).
                 res = optimize.minimize_scalar(
-                    self.LL_brent,
-                    args=(X, REML),
+                    self._neg_log_likelihood,
+                    args=(X, reml),
                     bounds=(H[i - 1], H[i + 1]),
                     method="bounded",
                     options={"xatol": 1e-10},
                 )
-                HOpt.append(np.float64(res.x))
+                h_opt.append(np.float64(res.x))
                 # if np.isnan(HOpt[-1]): HOpt[-1] = self.LLs[i-1]
                 # if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
 
-        if len(HOpt) > 1:
+        if len(h_opt) > 1:
             if self.verbose:
                 sys.stderr.write("NOTE: Found multiple optima.  Returning first...\n")
-            return HOpt[0]
-        elif len(HOpt) == 1:
-            return HOpt[0]
-        elif self.LLs[0] > self.LLs[n - 1]:
+            return h_opt[0]
+        elif len(h_opt) == 1:
+            return h_opt[0]
+        elif self.ll_grid[0] > self.ll_grid[n - 1]:
             return H[0]
         else:
             return H[n - 1]
 
-    def fit(self, X=None, ngrids=100, REML=True):
+    def fit(self, X=None, ngrids=100, reml=True):
         """
         Finds the maximum-likelihood solution for the heritability (h) given the current parameters.
         X can be passed and will transformed and concatenated to X0t.  Otherwise, X0t is used as
@@ -625,28 +634,28 @@ class LMM:
         """
 
         if X is None:
-            X = self.X0t
+            X = self.x0t
         else:
             # X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
-            self.X0t_stack[:, (self.q)] = matrixMult(self.Kve.T, X)[:, 0]
-            X = self.X0t_stack
+            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
+            X = self.x0t_stack
 
         H = np.array(range(ngrids)) / float(ngrids)
-        L = np.array([self.LL(h, X, stack=False, REML=REML)[0] for h in H])
-        self.LLs = L
+        L = np.array([self.log_likelihood(h, X, stack=False, reml=reml)[0] for h in H])
+        self.ll_grid = L
 
-        hmax = self.getMax(H, X, REML)
-        L, beta, sigma, betaSTDERR = self.LL(hmax, X, stack=False, REML=REML)
+        hmax = self._get_max(H, X, reml)
+        L, beta, sigma, beta_stderr = self.log_likelihood(hmax, X, stack=False, reml=reml)
 
-        self.H = H
-        self.optH = hmax.sum()
-        self.optLL = L
-        self.optBeta = beta
-        self.optSigma = sigma.sum()
+        self.h_grid = H
+        self.opt_h = hmax.sum()
+        self.opt_ll = L
+        self.opt_beta = beta
+        self.opt_sigma = sigma.sum()
 
         return hmax, beta, sigma, L
 
-    def association(self, X, h=None, stack=True, REML=True, returnBeta=False):
+    def association(self, X, h=None, stack=True, reml=True, return_beta=False):
         """
         Calculates association statitics for the SNPs encoded in the vector X of size n.
         If h == None, the optimal h stored in optH is used.
@@ -656,22 +665,22 @@ class LMM:
         """
         if stack:
             # X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
-            self.X0t_stack[:, (self.q)] = matrixMult(self.Kve.T, X)[:, 0]
-            X = self.X0t_stack
+            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
+            X = self.x0t_stack
 
         if h is None:
-            h = self.optH
+            h = self.opt_h
 
-        L, beta, sigma, betaVAR = self.LL(h, X, stack=False, REML=REML)
+        L, beta, sigma, beta_var = self.log_likelihood(h, X, stack=False, reml=reml)
         q = len(beta)
         # ML test: sigma^2 = Q/n, the ML estimate (bug 9, Phase 5.2); REML
         # keeps Q/(n-q).  The reference distribution is t(n-q) either way.
-        if not REML:
+        if not reml:
             sigma = sigma * (float(self.N) - q) / float(self.N)
-        ts, ps = self.tstat(beta[q - 1], betaVAR[q - 1, q - 1], sigma, q)
+        ts, ps = self.tstat(beta[q - 1], beta_var[q - 1, q - 1], sigma, q)
 
-        if returnBeta:
-            return ts, ps, beta[q - 1].sum(), betaVAR[q - 1, q - 1].sum() * sigma
+        if return_beta:
+            return ts, ps, beta[q - 1].sum(), beta_var[q - 1, q - 1].sum() * sigma
         return ts, ps
 
     def tstat(self, beta, var, sigma, q, log=False):
@@ -691,7 +700,7 @@ class LMM:
             raise Exception("Something bad happened :(")
         return ts.sum(), ps.sum()
 
-    def plotFit(self, color="b-", title=""):
+    def plot_fit(self, color="b-", title=""):
         """
         Simple function to visualize the likelihood space.  It takes the LLs
         calcualted over a grid and normalizes them by subtracting off the mean and exponentiating.
@@ -703,22 +712,22 @@ class LMM:
         """
         import matplotlib.pyplot as pl
 
-        mx = self.LLs.max()
-        p = np.exp(self.LLs - mx)
+        mx = self.ll_grid.max()
+        p = np.exp(self.ll_grid - mx)
         p = p / p.sum()
 
-        pl.plot(self.H, p, color)
+        pl.plot(self.h_grid, p, color)
         pl.xlabel("Heritability")
         pl.ylabel("Probability of data")
         pl.title(title)
 
-    def meanAndVar(self):
+    def mean_and_var(self):
 
-        mx = self.LLs.max()
-        p = np.exp(self.LLs - mx)
+        mx = self.ll_grid.max()
+        p = np.exp(self.ll_grid - mx)
         p = p / p.sum()
 
-        mn = (self.H * p).sum()
-        vx = ((self.H - mn) ** 2 * p).sum()
+        mn = (self.h_grid * p).sum()
+        vx = ((self.h_grid - mn) ** 2 * p).sum()
 
         return mn, vx

@@ -121,9 +121,9 @@ def _setup(params):
         geno = genotypes.get(spec)
         mk, mt = params["m_kin"], params["m_test"]
         kin = kinship.get(spec, snps=slice(0, mk))  # K from SNPs [0, mk)
-        G_dis = _impute_filter(geno.G, np.arange(mk, geno.G.shape[1]), mt)  # disjoint from K
-        G_in = _impute_filter(geno.G, np.arange(0, mk), mt)  # inside K
-        _SETUP[key] = (kin, G_dis, G_in)
+        g_dis = _impute_filter(geno.G, np.arange(mk, geno.G.shape[1]), mt)  # disjoint from K
+        g_in = _impute_filter(geno.G, np.arange(0, mk), mt)  # inside K
+        _SETUP[key] = (kin, g_dis, g_in)
     return _SETUP[key]
 
 
@@ -136,21 +136,21 @@ def _tail_and_random(p, rng):
 
 def run_cell(params, seed):
     rng = np.random.default_rng(seed)
-    kin, G_dis, G_in = _setup(params)
+    kin, g_dis, g_in = _setup(params)
     ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng)
     y = ph.y
 
     out = {
-        "h_hat": methods.pylmm_null(y, kin, REML=True)["h"],
-        "m_dis": G_dis.shape[1],
-        "m_in": G_in.shape[1],
+        "h_hat": methods.pylmm_null(y, kin, reml=True)["h"],
+        "m_dis": g_dis.shape[1],
+        "m_in": g_in.shape[1],
     }
     pv = {}
-    for suffix, G in (("", G_dis), ("_in", G_in)):
+    for suffix, G in (("", g_dis), ("_in", g_in)):
         pv["ols" + suffix] = methods.ols_gwas(y, G)[1]
-        pv["reml" + suffix] = methods.pylmm_gwas(y, G, kin, REML=True)[1]
+        pv["reml" + suffix] = methods.pylmm_gwas(y, G, kin, reml=True)[1]
         # pre-5.2 CLI default == REML Wald (bugs 1 and 9); see the docstring
-        pv["cli" + suffix] = methods.pylmm_gwas(y, G, kin, REML=True)[1]
+        pv["cli" + suffix] = methods.pylmm_gwas(y, G, kin, reml=True)[1]
 
     for meth in METHODS:
         p = np.asarray(pv[meth], dtype=np.float64)

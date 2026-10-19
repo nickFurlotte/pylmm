@@ -6,10 +6,10 @@ from pylmm import lmm, misc
 
 def test_fit_two(hmdp):
     Y, K, snps = hmdp
-    K2 = lmm.calculateKinship(snps.copy())
-    h1, h2, e, beta, sigma, LL = misc.fitTwo(Y, K, K2)
+    K2 = lmm.calculate_kinship(snps.copy())
+    h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(Y, K, K2)
     exp = h.load_kv("misc_fitTwo.kv.txt")
-    got = {"h1": h1, "h2": h2, "e": e, "sigma": np.asarray(sigma).sum(), "LL": LL}
+    got = {"h1": h1, "h2": h2, "e": e, "sigma": np.asarray(sigma).sum(), "LL": log_likelihood}
     for i, b in enumerate(np.asarray(beta).ravel()):
         got["beta_%d" % i] = b
     assert sorted(got) == sorted(exp)

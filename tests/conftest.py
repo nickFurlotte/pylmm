@@ -47,11 +47,11 @@ def bed_null():
     """(Y, K, Kva, Kve) for the README BED data (1219 individuals)."""
     from scipy import linalg
 
-    from pylmm import input as pinput
+    from pylmm import plink_io
 
-    IN = pinput.plink(helpers.BED_BASE, type="b", phenoFile=helpers.FAKE_PHENOS)
-    n = len(IN.indivs)
+    reader = plink_io.PlinkReader(helpers.BED_BASE, type="b", pheno_file=helpers.FAKE_PHENOS)
+    n = len(reader.indivs)
     K = helpers.load_readme_kinship(n)
-    Y = IN.phenos[:, 0]
-    Kva, Kve = linalg.eigh(K)
-    return Y, K, Kva, Kve
+    Y = reader.phenos[:, 0]
+    kva, kve = linalg.eigh(K)
+    return Y, K, kva, kve

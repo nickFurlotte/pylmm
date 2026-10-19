@@ -46,6 +46,6 @@ ts, ps = L.association(X)
 # Setting refit = False will cause the program to fit the model once
 # and hold those variance component estimates for each SNP.
 begin = time.time()
-TS, PS = lmm.GWAS(Y, snps, K, REML=True, refit=True)
+t_stats, p_values = lmm.gwas(Y, snps, K, reml=True, refit=True)
 end = time.time()
 sys.stderr.write("Total time for 1000 SNPs: %0.3f\n" % (end - begin))

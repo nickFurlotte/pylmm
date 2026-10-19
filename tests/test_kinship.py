@@ -51,14 +51,14 @@ def assert_eigenvalues_close(actual, expected, what):
 )
 def test_calculate_kinship_hmdp(hmdp, center, name):
     _, _, snps = hmdp
-    K = lmm.calculateKinship(snps.copy(), center=center)
+    K = lmm.calculate_kinship(snps.copy(), center=center)
     h.assert_close(K, h.load_golden_txt(name), what=name)
     check_kinship_invariants(K, name)
 
 
 def test_calculate_kinship_bed():
     W = h.read_bed_snps(h.BED_KIN_NSNPS, norm=False)
-    K = lmm.calculateKinship(W)
+    K = lmm.calculate_kinship(W)
     check_big_kinship(K, "kinship_bed_snps%d_calc" % h.BED_KIN_NSNPS)
     check_kinship_invariants(K, "calculateKinship(bed)")
 
@@ -93,9 +93,9 @@ def test_cli_kinship_emma(tmp_path):
 
 
 def test_readme_kinship_eigenvalues(bed_null):
-    _, K, Kva, _ = bed_null
+    _, K, kva, _ = bed_null
     assert_eigenvalues_close(
-        Kva, h.load_golden_txt("bed_readme_kin_eigenvalues.txt"), "eigh(README kinship)"
+        kva, h.load_golden_txt("bed_readme_kin_eigenvalues.txt"), "eigh(README kinship)"
     )
     check_kinship_invariants(K, "README kinship")
 

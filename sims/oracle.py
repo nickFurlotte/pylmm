@@ -147,7 +147,7 @@ class OracleWald:
     fit: OracleFit
 
 
-def _as_X(X, n):
+def _as_x(X, n):
     if X is None:
         return np.ones((n, 1))
     X = np.asarray(X, dtype=np.float64)
@@ -170,7 +170,7 @@ def clamp_kinship(K: np.ndarray, floor: float = 1e-6) -> np.ndarray:
     return (V * d) @ V.T
 
 
-def _prep_K(K, eig_clamp):
+def _prep_kinship(K, eig_clamp):
     K = np.asarray(K, dtype=np.float64)
     return K if eig_clamp is None else clamp_kinship(K, eig_clamp)
 
@@ -188,26 +188,26 @@ def _profile(h, y, K, X, reml):
     # LAPACK may "succeed" on an exactly singular K with a round-off pivot
     if not np.all(np.isfinite(d2)) or d2.min() <= 1e-12 * d2.max():
         return singular
-    logdetH = 2.0 * np.log(np.diag(C[0])).sum()
-    XtHiX = X.T @ linalg.cho_solve(C, X)
+    logdet_h = 2.0 * np.log(np.diag(C[0])).sum()
+    xt_hi_x = X.T @ linalg.cho_solve(C, X)
     try:
-        beta = linalg.solve(XtHiX, X.T @ linalg.cho_solve(C, y), assume_a="pos")
+        beta = linalg.solve(xt_hi_x, X.T @ linalg.cho_solve(C, y), assume_a="pos")
     except linalg.LinAlgError:
         return singular
     r = y - X @ beta
     Q = float(r @ linalg.cho_solve(C, r))
     if reml:
-        _, logdet_XtHiX = np.linalg.slogdet(XtHiX)
-        _, logdet_XtX = np.linalg.slogdet(X.T @ X)
+        _, logdet_xt_hi_x = np.linalg.slogdet(xt_hi_x)
+        _, logdet_xt_x = np.linalg.slogdet(X.T @ X)
         ll = -0.5 * (
             (n - p) * np.log(2 * np.pi * Q / (n - p))
-            + logdetH
-            + logdet_XtHiX
-            - logdet_XtX
+            + logdet_h
+            + logdet_xt_hi_x
+            - logdet_xt_x
             + (n - p)
         )
     else:
-        ll = -0.5 * (n * np.log(2 * np.pi * Q / n) + logdetH + n)
+        ll = -0.5 * (n * np.log(2 * np.pi * Q / n) + logdet_h + n)
     return float(ll), beta, Q
 
 
@@ -223,9 +223,9 @@ def profile_loglik(
     sigma2_hat is Q/(n-p) for REML and Q/n for ML.  ``eig_clamp`` applies
     pylmm's eigenvalue floor to K first (an eigh per call; in loops clamp once
     with :func:`clamp_kinship`)."""
-    K = _prep_K(K, eig_clamp)
+    K = _prep_kinship(K, eig_clamp)
     y = np.asarray(y, dtype=np.float64).reshape(-1)
-    X = _as_X(X, len(y))
+    X = _as_x(X, len(y))
     n, p = X.shape
     ll, beta, Q = _profile(h, y, K, X, reml)
     return ll, beta, Q / ((n - p) if reml else n)
@@ -263,7 +263,7 @@ def _search_pylmm(ll):
     H = np.array(range(ngrids)) / float(ngrids)  # 0, 0.01, ..., 0.99
     L = np.array([ll(h) for h in H])
 
-    def LL_brent(h):
+    def _neg_log_likelihood(h):
         if h < 0 or h > 1:
             return 1e6  # pylmm's guard
         v = ll(h)
@@ -271,16 +271,19 @@ def _search_pylmm(ll):
         return np.nan if not np.isfinite(v) else -v
 
     n = len(L)
-    HOpt = []
+    h_opt = []
     for i in range(1, n - 2):  # off-by-one kept (#2)
         if L[i - 1] < L[i] and L[i] > L[i + 1]:
             # bounded to the bracketing grid interval, like pylmm since Phase 5.1 (#4)
             res = optimize.minimize_scalar(
-                LL_brent, bounds=(H[i - 1], H[i + 1]), method="bounded", options={"xatol": 1e-10}
+                _neg_log_likelihood,
+                bounds=(H[i - 1], H[i + 1]),
+                method="bounded",
+                options={"xatol": 1e-10},
             )
-            HOpt.append(float(res.x))
-    if len(HOpt) >= 1:
-        h = HOpt[0]  # first, not best
+            h_opt.append(float(res.x))
+    if len(h_opt) >= 1:
+        h = h_opt[0]  # first, not best
     elif L[0] > L[n - 1]:
         h = H[0]
     else:
@@ -305,8 +308,8 @@ def fit(
     ``h_grid='pylmm'`` (pylmm's exact search instead of the global one).
     """
     y = np.asarray(y, dtype=np.float64).reshape(-1)
-    K = _prep_K(K, eig_clamp)
-    X = _as_X(X, len(y))
+    K = _prep_kinship(K, eig_clamp)
+    X = _as_x(X, len(y))
     _check(y, K, X)
     n, p = X.shape
 
@@ -376,23 +379,23 @@ def wald(
     test_reml = null_reml if test_reml is None else test_reml
     y = np.asarray(y, dtype=np.float64).reshape(-1)
     n = len(y)
-    X0 = _as_X(X0, n)
+    X0 = _as_x(X0, n)
     X = np.hstack([X0, np.asarray(x, dtype=np.float64).reshape(n, 1)])
-    K = _prep_K(K, eig_clamp)
-    Xf = X if refit else X0
+    K = _prep_kinship(K, eig_clamp)
+    xf = X if refit else X0
     if h is None:
-        f = fit(y, K, Xf, reml=null_reml, n_grid=n_grid, h_grid=h_grid)
+        f = fit(y, K, xf, reml=null_reml, n_grid=n_grid, h_grid=h_grid)
         f.eig_clamp = eig_clamp
         h = f.h
     else:
-        llv, b, Qf = _profile(h, y, K, Xf, null_reml)
-        nf, pf = Xf.shape
+        llv, b, qf = _profile(h, y, K, xf, null_reml)
+        nf, pf = xf.shape
         f = OracleFit(
             h=float(h),
             ll=llv,
-            sigma2=Qf / ((nf - pf) if null_reml else nf),
-            sigma2_ml=Qf / nf,
-            sigma2_reml=Qf / (nf - pf),
+            sigma2=qf / ((nf - pf) if null_reml else nf),
+            sigma2_ml=qf / nf,
+            sigma2_reml=qf / (nf - pf),
             beta=b,
             reml=null_reml,
             identifiable=True,

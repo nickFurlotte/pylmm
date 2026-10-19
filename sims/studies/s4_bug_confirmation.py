@@ -305,15 +305,15 @@ def gls_t(y, K, G, h, X0=None, sigma="reml"):
     X0 = np.ones((n, 1)) if X0 is None else np.asarray(X0, dtype=np.float64).reshape(n, -1)
     C = linalg.cholesky(h * np.asarray(K) + (1.0 - h) * np.eye(n), lower=True)
     yt = linalg.solve_triangular(C, y, lower=True)
-    Xt = linalg.solve_triangular(C, X0, lower=True)
-    Gt = linalg.solve_triangular(C, np.asarray(G, dtype=np.float64), lower=True)
-    Qx, _ = np.linalg.qr(Xt)
-    ry = yt - Qx @ (Qx.T @ yt)
-    RG = Gt - Qx @ (Qx.T @ Gt)
-    ss = (RG**2).sum(axis=0)
+    xt = linalg.solve_triangular(C, X0, lower=True)
+    gt = linalg.solve_triangular(C, np.asarray(G, dtype=np.float64), lower=True)
+    qx, _ = np.linalg.qr(xt)
+    ry = yt - qx @ (qx.T @ yt)
+    rg = gt - qx @ (qx.T @ gt)
+    ss = (rg**2).sum(axis=0)
     p = X0.shape[1] + 1
     with np.errstate(divide="ignore", invalid="ignore"):
-        b = (RG.T @ ry) / ss
+        b = (rg.T @ ry) / ss
         rss = ry @ ry - b**2 * ss
         s2 = rss / ((n - p) if sigma == "reml" else n)
         t = b / np.sqrt(s2 / ss)
@@ -352,38 +352,38 @@ class SpyLMM:
     unbounded Brent (bug 4) evaluates h > 1."""
 
     @staticmethod
-    def make(y, K, Kva, Kve, X0=None):
+    def make(y, K, kva, kve, X0=None):
         from pylmm.lmm import LMM
 
         class _Spy(LMM):
-            def LL_brent(self, h, X=None, REML=False):
-                v = LMM.LL_brent(self, h, X, REML)
+            def _neg_log_likelihood(self, h, X=None, reml=False):
+                v = LMM._neg_log_likelihood(self, h, X, reml)
                 self.evals.append((float(h), float(v)))
                 return v
 
         L = _Spy.__new__(_Spy)
         L.evals = []
         with _quiet():
-            _Spy.__init__(L, y, K, Kva, Kve, X0=X0)
+            _Spy.__init__(L, y, K, kva, kve, X0=X0)
         return L
 
 
-def pylmm_fit_instrumented(y, kin, REML=True, X=None):
+def pylmm_fit_instrumented(y, kin, reml=True, X=None):
     """pylmm ``LMM.fit`` with diagnostics.  Returns a dict with h (nan on a
     crash), crashed, crash_type, cap (h == 0.99), skip98 (a grid local max
     at index 98 that range(1, n-2) never tests), gt1 (Brent evaluated h > 1),
     nan_fallback (Brent returned nan -> H[i-1]) and the LMM object."""
-    Kva, Kve = kin.eig_for_pylmm()
-    L = SpyLMM.make(np.asarray(y, dtype=np.float64), np.asarray(kin.K), Kva, Kve)
+    kva, kve = kin.eig_for_pylmm()
+    L = SpyLMM.make(np.asarray(y, dtype=np.float64), np.asarray(kin.K), kva, kve)
     out = {"crashed": 0, "crash_type": "", "lmm": L}
     try:
         with _quiet(), np.errstate(all="ignore"):
-            h = L.fit(X=X, REML=REML)[0]
+            h = L.fit(X=X, reml=reml)[0]
         out["h"] = float(np.sum(h))
     except Exception as e:  # scipy >= 1.11 raises BracketError (bug 4)
         out.update(h=np.nan, crashed=1, crash_type=type(e).__name__)
-    LLs = getattr(L, "LLs", None)
-    out["skip98"] = int(LLs is not None and bool(LLs[97] < LLs[98] > LLs[99]))
+    ll_grid = getattr(L, "ll_grid", None)
+    out["skip98"] = int(ll_grid is not None and bool(ll_grid[97] < ll_grid[98] > ll_grid[99]))
     out["cap"] = int(out["h"] == 0.99)
     out["gt1"] = int(any(h > 1 for h, _ in L.evals))
     out["nan_fallback"] = int(
@@ -414,8 +414,8 @@ def _std_setup(params):
         spec = _geno_spec(params["pop"], params["n"], mk + mt + mt // 2 + (1 if mt == 0 else 0))
         geno = genotypes.get(spec)
         kin = kinship.get(spec, snps=slice(0, mk))
-        G_test = impute_filter(geno.G[:, mk:], mt) if mt else np.zeros((params["n"], 0))
-        return kin, G_test, geno
+        g_test = impute_filter(geno.G[:, mk:], mt) if mt else np.zeros((params["n"], 0))
+        return kin, g_test, geno
 
     return _cached(key, build)
 
@@ -437,15 +437,15 @@ def run_remlml(params, rng):
     )  # 4% each
     y = ph.y
     out = {}
-    null_reml = pylmm_fit_instrumented(y, kin, REML=True)
-    null_ml = pylmm_fit_instrumented(y, kin, REML=False)
+    null_reml = pylmm_fit_instrumented(y, kin, reml=True)
+    null_ml = pylmm_fit_instrumented(y, kin, reml=False)
     out["reml_pylmm_crashed"] = null_reml["crashed"]
     if null_reml["crashed"]:  # bug 4: GWAS would raise too
         return out
-    t_reml, p_reml = methods.pylmm_gwas(y, G, kin, REML=True)
+    t_reml, p_reml = methods.pylmm_gwas(y, G, kin, reml=True)
     # the pre-Phase-5.2 CLI default (REML null, Q/(n-q) Wald) == REML=True;
     # since 5.2, REML=False would be a real ML scan (bug 1 fixed)
-    t_cli, p_cli = methods.pylmm_gwas(y, G, kin, REML=True)  # CLI default (pre-5.2)
+    t_cli, p_cli = methods.pylmm_gwas(y, G, kin, reml=True)  # CLI default (pre-5.2)
     out["cli_vs_reml_max_abs_dt"] = float(np.nanmax(np.abs(t_cli - t_reml)))
     out.update(
         h_reml_pylmm=null_reml["h"],
@@ -490,21 +490,21 @@ def run_remlml(params, rng):
     # --refit: CLI fits h by ML per SNP (REML=options.REML), lib GWAS(refit) by REML
     sel = np.r_[cidx, rng.choice(null, size=4, replace=False)]
     h_r_cli, h_r_lib, t_r_cli, t_r_lib, crash = [], [], [], [], 0
-    Kva, Kve = kin.eig_for_pylmm()
+    kva, kve = kin.eig_for_pylmm()
     with _quiet():
-        L = LMM(y, K, Kva, Kve)
+        L = LMM(y, K, kva, kve)
     for j in sel:
         x = G[:, j].reshape(-1, 1)
         try:
             with np.errstate(all="ignore"):
                 # pre-Phase-5.2 CLI --refit: ML refit, Q/(n-q) Wald, which is
                 # association(REML=True) since 5.2 (REML=False now uses Q/n)
-                L.fit(X=x, REML=False)
-                h_r_cli.append(L.optH)
-                t_r_cli.append(L.association(x, REML=True)[0])
+                L.fit(X=x, reml=False)
+                h_r_cli.append(L.opt_h)
+                t_r_cli.append(L.association(x, reml=True)[0])
                 L.fit(X=x)  # lmm.GWAS(refit=True)
-                h_r_lib.append(L.optH)
-                t_r_lib.append(L.association(x, REML=True)[0])
+                h_r_lib.append(L.opt_h)
+                t_r_lib.append(L.association(x, reml=True)[0])
         except Exception:
             crash += 1
     out["refit_crashes"] = crash
@@ -526,7 +526,7 @@ def run_hgrid(params, rng):
     cidx = phenotypes.choose_causal(G.shape[1], 2, rng, G=G)
     ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng, G=G, causal_idx=cidx, causal_var=0.06)
     y = ph.y
-    fp = pylmm_fit_instrumented(y, kin, REML=True)
+    fp = pylmm_fit_instrumented(y, kin, reml=True)
     fo = oracle.fit(y, K, reml=True, n_grid=201)
     fc = oracle.fit(y, K, reml=True, n_grid=201, eig_clamp=1e-6)
     out = {k: fp[k] for k in ("h", "crashed", "cap", "skip98", "gt1", "nan_fallback")}
@@ -537,7 +537,7 @@ def run_hgrid(params, rng):
     out["abs_dh"] = abs(out["dh"])
     out["mismatch"] = int(abs(out["dh"]) > 1e-3)
     out["clamp_dh"] = fc.h - fo.h
-    t_p, p_p = methods.pylmm_gwas(y, G, kin, REML=True)
+    t_p, p_p = methods.pylmm_gwas(y, G, kin, reml=True)
     t_o, p_o = gls_t(y, K, G, fo.h, sigma="reml")
     d = mlogp(p_p) - mlogp(p_o)
     out.update(
@@ -549,9 +549,9 @@ def run_hgrid(params, rng):
     # refit-mode crash exposure: per-SNP REML refits on 20 SNPs
     from pylmm.lmm import LMM
 
-    Kva, Kve = kin.eig_for_pylmm()
+    kva, kve = kin.eig_for_pylmm()
     with _quiet():
-        L = LMM(y, K, Kva, Kve)
+        L = LMM(y, K, kva, kve)
     crashes = 0
     for j in rng.choice(G.shape[1], size=20, replace=False):
         try:
@@ -569,48 +569,48 @@ def _kinship_setup(params):
     )
 
     def build():
-        from pylmm import input as pinput
-        from pylmm.lmm import calculateKinship
+        from pylmm import plink_io
+        from pylmm.lmm import calculate_kinship
 
         mk, mt = params["m_kin"], params["m_test"]
         spec = _geno_spec(params["pop"], params["n"], mk + mt + mt // 2)
         geno = genotypes.get(spec)
-        Gk = np.array(geno.G[:, :mk], dtype=np.float64)
-        G_test = impute_filter(geno.G[:, mk:], mt)
+        g_kin = np.array(geno.G[:, :mk], dtype=np.float64)
+        g_test = impute_filter(geno.G[:, mk:], mt)
         rng = np.random.default_rng(12345)
-        K_true = None
+        k_true = None
         if params["pop"] == "unrelated":
             n_mono = round(mk * params["mono"] / (1 - params["mono"]))
-            Gk = np.hstack([Gk, np.zeros((Gk.shape[0], n_mono))])
-            K_true = calculateKinship(Gk[:, :mk].copy()) * 1.0  # complete, all polymorphic
-            Gk = genotypes.with_missing(Gk, params["miss"], rng)
-        m = Gk.shape[1]
-        poly = np.array([np.nanvar(Gk[:, j]) > 0 for j in range(m)])
-        K_lib = calculateKinship(Gk.copy())
-        K_fix = K_lib * m / poly.sum()
-        W = np.zeros((Gk.shape[0], 0))
+            g_kin = np.hstack([g_kin, np.zeros((g_kin.shape[0], n_mono))])
+            k_true = calculate_kinship(g_kin[:, :mk].copy()) * 1.0  # complete, all polymorphic
+            g_kin = genotypes.with_missing(g_kin, params["miss"], rng)
+        m = g_kin.shape[1]
+        poly = np.array([np.nanvar(g_kin[:, j]) > 0 for j in range(m)])
+        k_lib = calculate_kinship(g_kin.copy())
+        k_fix = k_lib * m / poly.sum()
+        W = np.zeros((g_kin.shape[0], 0))
         cols = []
         for j in range(m):  # pylmmKinship CLI path
-            g = pinput.plink.normalizeGenotype(None, Gk[:, j].copy())
+            g = plink_io.PlinkReader.normalize_genotype(None, g_kin[:, j].copy())
             if g.var() == 0:
                 continue
             cols.append(g)
         W = np.column_stack(cols)
-        K_cli = W @ W.T / float(m)
-        ks = {"lib": K_lib, "cli": K_cli, "fix": K_fix}
-        if K_true is not None:
-            ks["true"] = K_true
+        k_cli = W @ W.T / float(m)
+        ks = {"lib": k_lib, "cli": k_cli, "fix": k_fix}
+        if k_true is not None:
+            ks["true"] = k_true
         kins = {k: kinship.from_matrix(v) for k, v in ks.items()}
         info = {
             "mono_frac": float(1 - poly.mean()),
-            "miss_frac": float(np.isnan(Gk).mean()),
+            "miss_frac": float(np.isnan(g_kin).mean()),
             "scale_c": float(poly.sum() / m),
-            "max_abs_dK_lib_cli": float(np.max(np.abs(K_lib - K_cli))),
-            "meandiag_lib": float(np.mean(np.diag(K_lib))),
-            "meandiag_cli": float(np.mean(np.diag(K_cli))),
-            "meandiag_fix": float(np.mean(np.diag(K_fix))),
+            "max_abs_dK_lib_cli": float(np.max(np.abs(k_lib - k_cli))),
+            "meandiag_lib": float(np.mean(np.diag(k_lib))),
+            "meandiag_cli": float(np.mean(np.diag(k_cli))),
+            "meandiag_fix": float(np.mean(np.diag(k_fix))),
         }
-        return kins, G_test, info
+        return kins, g_test, info
 
     return _cached(key, build)
 
@@ -626,11 +626,11 @@ def run_kinship(params, rng):
     out = dict(info)
     res = {}
     for k, kin in kins.items():
-        f = pylmm_fit_instrumented(y, kin, REML=True)
+        f = pylmm_fit_instrumented(y, kin, reml=True)
         if f["crashed"]:
             out["crashed_" + k] = 1
             continue
-        t, p = methods.pylmm_gwas(y, G, kin, REML=True)
+        t, p = methods.pylmm_gwas(y, G, kin, reml=True)
         res[k] = (f["h"], t, p)
         out["h_" + k] = f["h"]
         out["cap_" + k] = f["cap"]
@@ -655,8 +655,8 @@ def run_mlcent(params, rng):
     y = ph.y
     fml = oracle.fit(y, K, reml=False, n_grid=101)
     fre = oracle.fit(y, K, reml=True, n_grid=101)
-    pml = pylmm_fit_instrumented(y, kin, REML=False)
-    pre = pylmm_fit_instrumented(y, kin, REML=True)
+    pml = pylmm_fit_instrumented(y, kin, reml=False)
+    pre = pylmm_fit_instrumented(y, kin, reml=True)
     # the -1/2 log(1-h) term of the null direction: LL gain from 0.9 to 0.99
     ll = lambda h: oracle.profile_loglik(h, y, K, reml=False)[0]  # noqa: E731
     out = {
@@ -668,7 +668,7 @@ def run_mlcent(params, rng):
         "ml_pylmm_cap": pml["cap"],
         "ml_pylmm_crashed": pml["crashed"],
         "reml_pylmm_cap": pre["cap"],
-        "rank_K": int((np.asarray(kin.Kva) > 1e-8).sum()),
+        "rank_K": int((np.asarray(kin.kva) > 1e-8).sum()),
         "ml_ll_gain_0999": float(ll(0.999) - ll(0.99)),
     }
     if not pml["crashed"]:
@@ -681,12 +681,12 @@ def _bednull_setup(params):
 
     def build():
         kin, G, geno = _std_setup(params)
-        Gall = np.where(np.isnan(geno.G), -1.0, geno.G)
+        g_all = np.where(np.isnan(geno.G), -1.0, geno.G)
         Z = (G - G.mean(0)) / G.std(0)
         ev = np.clip(np.linalg.eigvalsh(Z @ Z.T / G.shape[1]), 0, None)
         info = {
-            "rank_K": int((np.asarray(kin.Kva) > 1e-6).sum()),
-            "unique_indivs": len(np.unique(Gall, axis=0)),
+            "rank_K": int((np.asarray(kin.kva) > 1e-6).sum()),
+            "unique_indivs": len(np.unique(g_all, axis=0)),
             "unique_test_patterns": len(np.unique(np.round(G.T, 6), axis=0)),
             # effective number of independent tests (participation ratio of
             # the SNP correlation spectrum) -- n x n form of the same spectrum
@@ -711,13 +711,13 @@ def run_bednull(params, rng):
     y = ph.y
     out = dict(info)
     null = np.setdiff1d(np.arange(G.shape[1]), cidx)
-    nf = pylmm_fit_instrumented(y, kin, REML=True)
+    nf = pylmm_fit_instrumented(y, kin, reml=True)
     out["pylmm_crashed"] = nf["crashed"]  # bug 4 (BracketError) at high h2
     fo = oracle.fit(y, K, reml=True, n_grid=101)
     if nf["crashed"]:
         p_l = np.full(G.shape[1], np.nan)
     else:
-        _, p_l = methods.pylmm_gwas(y, G, kin, REML=True)
+        _, p_l = methods.pylmm_gwas(y, G, kin, reml=True)
     _, p_o = gls_t(y, K, G, fo.h)
     h_true = ph.sigma_g2 / (ph.sigma_g2 + ph.sigma_e2)
     _, p_t = gls_t(y, K, G, h_true) if h_true < 1 else (None, p_o)

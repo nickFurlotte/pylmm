@@ -77,8 +77,8 @@ def test_family_kinship_structure():
 
 def test_with_missing_rate():
     G = np.zeros((200, 200))
-    Gm = genotypes.with_missing(G, 0.1, np.random.default_rng(0))
-    assert abs(np.isnan(Gm).mean() - 0.1) < 0.01
+    g_missing = genotypes.with_missing(G, 0.1, np.random.default_rng(0))
+    assert abs(np.isnan(g_missing).mean() - 0.1) < 0.01
     assert not np.isnan(G).any()
 
 
@@ -128,7 +128,7 @@ def test_hmdp_subset():
 
 
 def test_kinship_matches_pylmm_and_does_not_mutate():
-    from pylmm.lmm import calculateKinship
+    from pylmm.lmm import calculate_kinship
 
     g = genotypes.with_missing(
         genotypes.unrelated(30, 50, seed=1).G, 0.05, np.random.default_rng(0)
@@ -136,7 +136,7 @@ def test_kinship_matches_pylmm_and_does_not_mutate():
     before = g.copy()
     K = kinship.kinship(g)
     np.testing.assert_array_equal(np.isnan(g), np.isnan(before))
-    np.testing.assert_allclose(K, calculateKinship(before.copy()))
+    np.testing.assert_allclose(K, calculate_kinship(before.copy()))
 
 
 def test_kinship_get_cache_and_split():
@@ -145,9 +145,9 @@ def test_kinship_get_cache_and_split():
     assert kinship.get(spec, snps=slice(0, 40)) is k1
     assert kinship.get(spec) is not k1
     np.testing.assert_allclose(k1.K, kinship.kinship(genotypes.get(spec).G[:, :40]))
-    Kva, Kve = k1.eig_for_pylmm()
-    Kva[0] = 123.0  # pylmm clamps in place: cache unaffected
-    assert k1.Kva[0] != 123.0
+    kva, kve = k1.eig_for_pylmm()
+    kva[0] = 123.0  # pylmm clamps in place: cache unaffected
+    assert k1.kva[0] != 123.0
     kin, test = kinship.split_snps(100, 60, 30, np.random.default_rng(0))
     assert len(kin) == 60 and len(test) == 30 and not set(kin) & set(test)
     kin, test = kinship.split_snps(100, 60, 30, overlap=True)
@@ -203,13 +203,13 @@ def test_effect_split_normal():
     assert np.isclose(ph.causal_var, 0.2)
 
 
-def test_polygenic_covariance_matches_K():
+def test_polygenic_covariance_matches_k():
     """Empirical cov of many u draws ~ sigma_g2 K, incl. a rank-deficient K."""
     g = genotypes.unrelated(40, 10, seed=0)  # m < n: K is singular
     kin = kinship.from_matrix(kinship.kinship(g.G))
-    assert kin.Kva.min() < 1e-8
+    assert kin.kva.min() < 1e-8
     rng = np.random.default_rng(0)
-    U = np.array([phenotypes.sample_polygenic(kin.Kva, kin.Kve, 0.7, rng) for _ in range(20000)])
+    U = np.array([phenotypes.sample_polygenic(kin.kva, kin.kve, 0.7, rng) for _ in range(20000)])
     C = U.T @ U / len(U)
     err = np.linalg.norm(C - 0.7 * kin.K) / np.linalg.norm(0.7 * kin.K)
     assert err < 0.03, err

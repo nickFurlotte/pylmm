@@ -19,7 +19,7 @@ def _quiet():
     return contextlib.redirect_stderr(io.StringIO())
 
 
-def pylmm_null(y: np.ndarray, kin, X0: np.ndarray | None = None, REML: bool = True) -> dict:
+def pylmm_null(y: np.ndarray, kin, X0: np.ndarray | None = None, reml: bool = True) -> dict:
     """Null-model fit with ``pylmm.lmm.LMM(...).fit(REML=REML)``.
 
     Returns {'h', 'sigma', 'll', 'beta'} (beta as an array).  Missing y are
@@ -28,10 +28,10 @@ def pylmm_null(y: np.ndarray, kin, X0: np.ndarray | None = None, REML: bool = Tr
     from pylmm.lmm import LMM
 
     y = np.asarray(y, dtype=np.float64)
-    Kva, Kve = kin.eig_for_pylmm()
+    kva, kve = kin.eig_for_pylmm()
     with _quiet():
-        L = LMM(y, np.asarray(kin.K), Kva, Kve, X0=X0)
-        h, beta, sigma, ll = L.fit(REML=REML)
+        L = LMM(y, np.asarray(kin.K), kva, kve, X0=X0)
+        h, beta, sigma, ll = L.fit(reml=reml)
     return {
         "h": float(np.sum(h)),
         "sigma": float(np.sum(sigma)),
@@ -46,7 +46,7 @@ def pylmm_gwas(
     G: np.ndarray,
     kin,
     X0: np.ndarray | None = None,
-    REML: bool = True,
+    reml: bool = True,
     refit: bool = False,
 ):
     """``pylmm.lmm.GWAS`` on the columns of G -> (t, p) float arrays.
@@ -57,28 +57,28 @@ def pylmm_gwas(
     genotypes are refit on the non-missing subset with a fresh eigh each.
     Non-estimable SNPs (monomorphic, collinear with X0) give nan.
     """
-    from pylmm.lmm import GWAS
+    from pylmm.lmm import gwas
 
-    Kva, Kve = kin.eig_for_pylmm()
+    kva, kve = kin.eig_for_pylmm()
     G = np.array(G, dtype=np.float64)  # GWAS does not mutate, but be safe
     with _quiet():
-        ts, ps = GWAS(
+        ts, ps = gwas(
             np.asarray(y, dtype=np.float64),
             G,
             np.asarray(kin.K),
-            Kva,
-            Kve,
+            kva,
+            kve,
             X0=X0,
-            REML=REML,
+            reml=reml,
             refit=refit,
         )
     return np.asarray(ts, dtype=np.float64), np.asarray(ps, dtype=np.float64)
 
 
-def pylmm_association(L, x: np.ndarray, REML: bool = True, h: float | None = None):
+def pylmm_association(L, x: np.ndarray, reml: bool = True, h: float | None = None):
     """``L.association`` for one SNP column x on a fitted pylmm LMM -> (t, p)."""
     x = np.asarray(x, dtype=np.float64).reshape(-1, 1)
-    ts, ps = L.association(x, h=h, REML=REML)
+    ts, ps = L.association(x, h=h, reml=reml)
     return float(ts), float(ps)
 
 
@@ -114,13 +114,13 @@ def ols_gwas(y: np.ndarray, G: np.ndarray, X0: np.ndarray | None = None):
 def _ols_block(y, G, X0):
     """Vectorised OLS t for each column of G given covariates X0."""
     n, q = X0.shape
-    Qx, _ = np.linalg.qr(X0)
-    ry = y - Qx @ (Qx.T @ y)
-    RG = G - Qx @ (Qx.T @ G)
-    ss_g = (RG**2).sum(axis=0)
+    qx, _ = np.linalg.qr(X0)
+    ry = y - qx @ (qx.T @ y)
+    rg = G - qx @ (qx.T @ G)
+    ss_g = (rg**2).sum(axis=0)
     df = n - q - 1
     with np.errstate(divide="ignore", invalid="ignore"):
-        b = (RG.T @ ry) / ss_g
+        b = (rg.T @ ry) / ss_g
         rss = (ry @ ry) - b**2 * ss_g
         se = np.sqrt(rss / df / ss_g)
         t = b / se

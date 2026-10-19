@@ -42,14 +42,14 @@ def test_gwas_hmdp(hmdp, gwas_golden, reml, refit, tag, nsnps):
     """Missing genotypes left in place: GWAS drops them per SNP and refits."""
     Y, K, snps = hmdp
     X = snps[:, :nsnps].copy()
-    TS, PS = lmm.GWAS(Y, X, K, REML=reml, refit=refit)
+    t_stats, p_values = lmm.gwas(Y, X, K, reml=reml, refit=refit)
     m = X.shape[1]
-    h.assert_fit_close(TS, gwas_golden["ts_" + tag][:m], what="ts_" + tag)
-    h.assert_pvalues_close(PS, gwas_golden["ps_" + tag][:m], what="ps_" + tag)
-    h.assert_pvalues_valid(PS, tag)
+    h.assert_fit_close(t_stats, gwas_golden["ts_" + tag][:m], what="ts_" + tag)
+    h.assert_pvalues_close(p_values, gwas_golden["ps_" + tag][:m], what="ps_" + tag)
+    h.assert_pvalues_valid(p_values, tag)
     # Each SNP uses only its non-missing individuals; q = intercept + SNP.
     df = len(Y) - gwas_golden["n_missing"][:m] - 2
-    h.assert_p_matches_t(TS, PS, df, tag)
+    h.assert_p_matches_t(t_stats, p_values, df, tag)
 
 
 def test_gwas_hmdp_ml_golden_columns_were_reml(gwas_golden):
@@ -64,14 +64,14 @@ def test_gwas_hmdp_ml(hmdp, gwas_golden):
     oracle = pytest.importorskip("sims.oracle")
     Y, K, snps = hmdp
     X = snps[:, :60].copy()
-    TS, PS = lmm.GWAS(Y, X, K, REML=False)
-    TS = np.asarray(TS)
-    assert np.nanmax(np.abs(TS - gwas_golden["ts_reml_norefit"][:60])) > 1e-3
+    t_stats, p_values = lmm.gwas(Y, X, K, reml=False)
+    t_stats = np.asarray(t_stats)
+    assert np.nanmax(np.abs(t_stats - gwas_golden["ts_reml_norefit"][:60])) > 1e-3
     for j in range(X.shape[1]):
         ok = ~np.isnan(X[:, j])
         x = X[ok, j]
         if np.ptp(x) == 0:
-            assert np.isnan(TS[j])
+            assert np.isnan(t_stats[j])
             continue
         w = oracle.wald(
             Y[ok],
@@ -82,9 +82,9 @@ def test_gwas_hmdp_ml(hmdp, gwas_golden):
             eig_clamp=1e-6,
             h_grid="pylmm",
         )
-        assert abs(TS[j] - w.t) <= 1e-5 * max(1.0, abs(w.t)), (j, TS[j], w.t)
+        assert abs(t_stats[j] - w.t) <= 1e-5 * max(1.0, abs(w.t)), (j, t_stats[j], w.t)
     df = len(Y) - gwas_golden["n_missing"][:60] - 2
-    h.assert_p_matches_t(TS, PS, df, "ml_norefit")
+    h.assert_p_matches_t(t_stats, p_values, df, "ml_norefit")
 
 
 def test_association_imputed_with_beta(hmdp):
@@ -101,7 +101,7 @@ def test_association_imputed_with_beta(hmdp):
         if x.var() == 0:
             rows.append([i, np.nan, np.nan, np.nan, np.nan])
             continue
-        ts, ps, beta, bvar = L.association(x, REML=True, returnBeta=True)
+        ts, ps, beta, bvar = L.association(x, reml=True, return_beta=True)
         # bvar comes back as a 1x1 array (betaVAR * sigma); flatten to scalars
         rows.append([i, ts, ps, beta, np.asarray(bvar, dtype=np.float64).sum()])
     rows = np.array(rows, dtype=np.float64)

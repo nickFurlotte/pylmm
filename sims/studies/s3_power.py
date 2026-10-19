@@ -137,11 +137,11 @@ def _design(p):
     cols = np.flatnonzero(_usable(G))
     if len(cols) < need:
         raise RuntimeError("only %d usable SNPs, need %d" % (len(cols), need))
-    Gk, Gt = G[:, cols[: p["m_kin"]]], G[:, cols[p["m_kin"] : need]]
-    kin = kinship.from_matrix(kinship.kinship(Gk), n_snps=Gk.shape[1])
+    g_kin, g_test = G[:, cols[: p["m_kin"]]], G[:, cols[p["m_kin"] : need]]
+    kin = kinship.from_matrix(kinship.kinship(g_kin), n_snps=g_kin.shape[1])
     if len(_DESIGN) >= 3:
         _DESIGN.pop(next(iter(_DESIGN)))
-    _DESIGN[key] = (Gk, Gt, kin)
+    _DESIGN[key] = (g_kin, g_test, kin)
     return _DESIGN[key]
 
 
@@ -166,7 +166,7 @@ def _lmm_scan(L, G, idx, refit):
         x = G[:, j : j + 1]
         if refit:
             L.fit(X=x)
-        t[i], p[i], b[i], _ = L.association(x, REML=True, returnBeta=True)
+        t[i], p[i], b[i], _ = L.association(x, reml=True, return_beta=True)
     return t, p, b
 
 
@@ -193,45 +193,47 @@ def _record(out, name, p_c, b_c, beta, p_null, thresholds):
 def run_cell(params, seed):
     rng = np.random.default_rng(seed)
     p = params
-    Gk, Gt, kin = _design(p)
-    m = Gt.shape[1]
+    g_kin, g_test, kin = _design(p)
+    m = g_test.shape[1]
     k = p["n_causal"]
     thresholds = [*list(ALPHA_FIXED), 0.05 / m]
 
-    cidx = phenotypes.choose_causal(m, k, rng, G=Gt, min_maf=MIN_MAF)
-    ph = phenotypes.simulate(kin, p["h2"], rng, G=Gt, causal_idx=cidx, causal_var=[p["vpe"]] * k)
+    cidx = phenotypes.choose_causal(m, k, rng, G=g_test, min_maf=MIN_MAF)
+    ph = phenotypes.simulate(
+        kin, p["h2"], rng, G=g_test, causal_idx=cidx, causal_var=[p["vpe"]] * k
+    )
     y = ph.y
     beta = ph.beta
 
     if p["contam"]:  # K rebuilt with the causal SNPs included (proximal contamination)
-        kin = kinship.from_matrix(kinship.kinship(np.hstack([Gk, Gt[:, cidx]])))
+        kin = kinship.from_matrix(kinship.kinship(np.hstack([g_kin, g_test[:, cidx]])))
 
     is_null = np.ones(m, dtype=bool)
     is_null[cidx] = False
     nulls = np.flatnonzero(is_null)
     samp = rng.choice(nulls, size=N_NULL_SAMPLE, replace=False)
 
-    null = methods.pylmm_null(y, kin, REML=True)
+    null = methods.pylmm_null(y, kin, reml=True)
     L = null["lmm"]
     all_idx = np.arange(m)
     out = {"h_hat": null["h"], "n_causal_obs": int(k)}
 
     # pylmm, fixed null h (identical to lmm.GWAS(refit=False))
-    t, pl, bl = _lmm_scan(L, Gt, all_idx, refit=False)
+    t, pl, bl = _lmm_scan(L, g_test, all_idx, refit=False)
     _record(out, "lmm", pl[cidx], bl[cidx], beta, pl[nulls], thresholds)
     out["lam_lmm"] = metrics.lambda_gc(pl[nulls])
     out["p_n_lmm"] = pl[samp].tolist()
 
     # OLS
-    to, po = methods.ols_gwas(y, Gt)
-    bo = ols_beta(y, Gt)
+    to, po = methods.ols_gwas(y, g_test)
+    bo = ols_beta(y, g_test)
     _record(out, "ols", po[cidx], bo[cidx], beta, po[nulls], thresholds)
     out["lam_ols"] = metrics.lambda_gc(po[nulls])
     out["p_n_ols"] = po[samp].tolist()
 
     # pylmm refit: causal SNPs + the null sample only
     ridx = np.r_[cidx, samp]
-    _, pr, br = _lmm_scan(L, Gt, ridx, refit=True)
+    _, pr, br = _lmm_scan(L, g_test, ridx, refit=True)
     _record(out, "lmmr", pr[:k], br[:k], beta, pr[k:], thresholds)
     out["p_n_lmmr"] = pr[k:].tolist()
     # paired: how much do refit and fixed-h p-values/betas differ on the same SNPs
@@ -241,7 +243,7 @@ def run_cell(params, seed):
     if p["oracle"]:
         K = np.asarray(kin.K)
         f = oracle.fit(y, K, reml=True)
-        ws = [oracle.wald(y, K, Gt[:, j], h=f.h) for j in cidx]
+        ws = [oracle.wald(y, K, g_test[:, j], h=f.h) for j in cidx]
         _record(
             out,
             "orc",

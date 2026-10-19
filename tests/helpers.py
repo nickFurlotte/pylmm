@@ -233,13 +233,13 @@ def load_readme_kinship(n):
 
 
 def read_bed_snps(nsnps, norm):
-    from pylmm import input as pinput
+    from pylmm import plink_io
 
-    IN = pinput.plink(BED_BASE, type="b", normGenotype=norm)
-    IN.getSNPIterator()
+    reader = plink_io.PlinkReader(BED_BASE, type="b", norm_genotype=norm)
+    reader.get_snp_iterator()
     cols = []
     for _ in range(nsnps):
-        g, _sid = next(IN)
+        g, _sid = next(reader)
         cols.append(g)
     return np.array(cols).T.copy()
 

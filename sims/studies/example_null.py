@@ -59,15 +59,15 @@ def run_cell(params, seed):
     }
     geno = genotypes.get(spec)
     kin = kinship.get(spec, snps=slice(0, params["m_kin"]))  # cached K + eigh
-    G_test = geno.G[:, params["m_kin"] :]
+    g_test = geno.G[:, params["m_kin"] :]
 
     # 2. phenotype under the null for every tested SNP
     ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng)
 
     # 3. methods
-    null = methods.pylmm_null(ph.y, kin, REML=True)
-    t_lmm, p_lmm = methods.pylmm_gwas(ph.y, G_test, kin, REML=True, refit=False)
-    t_ols, p_ols = methods.ols_gwas(ph.y, G_test)
+    null = methods.pylmm_null(ph.y, kin, reml=True)
+    t_lmm, p_lmm = methods.pylmm_gwas(ph.y, g_test, kin, reml=True, refit=False)
+    t_ols, p_ols = methods.ols_gwas(ph.y, g_test)
 
     # 4. metrics
     out = {
@@ -86,8 +86,8 @@ def run_cell(params, seed):
         out["dh_oracle"] = null["h"] - ofit.h
         # pylmm's REML LL = oracle REML LL + a known h-independent constant
         out["dll_oracle"] = null["ll"] - (ofit.ll + oracle.pylmm_reml_offset(params["n"], 1))
-        idx = rng.choice(G_test.shape[1], size=N_ORACLE_SNPS, replace=False)
-        t_or = [oracle.wald(ph.y, np.asarray(kin.K), G_test[:, j], h=ofit.h).t for j in idx]
+        idx = rng.choice(g_test.shape[1], size=N_ORACLE_SNPS, replace=False)
+        t_or = [oracle.wald(ph.y, np.asarray(kin.K), g_test[:, j], h=ofit.h).t for j in idx]
         out.update(metrics.compare(t_lmm[idx], t_or, prefix="t_vs_oracle_"))
 
     # 5. a small array: random null p-values for the pooled QQ plot

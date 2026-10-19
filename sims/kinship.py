@@ -25,8 +25,8 @@ from sims import genotypes as _geno
 @dataclasses.dataclass
 class Kinship:
     K: np.ndarray  # n x n, read-only
-    Kva: np.ndarray  # eigenvalues (ascending), read-only, NOT clamped
-    Kve: np.ndarray  # eigenvectors (columns), read-only
+    kva: np.ndarray  # eigenvalues (ascending), read-only, NOT clamped
+    kve: np.ndarray  # eigenvectors (columns), read-only
     meta: dict = dataclasses.field(default_factory=dict)
 
     @property
@@ -41,7 +41,7 @@ class Kinship:
         fails on the read-only cached array), so Kva is copied.  Kve is only
         read by pylmm and is passed as is.
         """
-        return self.Kva.copy(), self.Kve
+        return self.kva.copy(), self.kve
 
     def subset(self, keep: np.ndarray) -> Kinship:
         """Kinship for a subset of individuals (recomputes the eigh)."""
@@ -50,19 +50,19 @@ class Kinship:
 
 def kinship(G: np.ndarray, center: bool = False) -> np.ndarray:
     """``pylmm.lmm.calculateKinship`` on a copy of G (G is left untouched)."""
-    from pylmm.lmm import calculateKinship
+    from pylmm.lmm import calculate_kinship
 
-    return calculateKinship(np.array(G, dtype=np.float64), center=center)
+    return calculate_kinship(np.array(G, dtype=np.float64), center=center)
 
 
 def from_matrix(K: np.ndarray, **meta) -> Kinship:
     """Wrap an existing kinship matrix (symmetrised) with its eigh."""
     K = np.array(K, dtype=np.float64)
     K = 0.5 * (K + K.T)
-    Kva, Kve = linalg.eigh(K)
-    for a in (K, Kva, Kve):
+    kva, kve = linalg.eigh(K)
+    for a in (K, kva, kve):
         a.setflags(write=False)
-    return Kinship(K, Kva, Kve, dict(meta))
+    return Kinship(K, kva, kve, dict(meta))
 
 
 def _snps_key(snps) -> str:
