@@ -29,10 +29,20 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+# Per-file statistics of tests/test_docs.py, kept in the config stash (not in a
+# module global, whose module name depends on pytest's import mode).
+DOCS_STATS = pytest.StashKey[dict]()
+
+
+@pytest.fixture
+def docs_stats(request) -> dict:
+    """The dict tests/test_docs.py fills with {doc file: executed/skipped statistics}."""
+    return request.config.stash.setdefault(DOCS_STATS, {})
+
+
 def pytest_terminal_summary(terminalreporter):
     """Report the snippets run and skipped by tests/test_docs.py, if it ran."""
-    mod = sys.modules.get("test_docs")
-    stats = getattr(mod, "STATS", None)
+    stats = terminalreporter.config.stash.get(DOCS_STATS, None)
     if not stats:
         return
     tr = terminalreporter

@@ -141,8 +141,15 @@ pylmm's is ≈ 1. Test statistics are invariant to the scale; h² is not.
 
 ## Phenotype files from data frames
 
-```python skip-ci: needs pandas and a data frame df
+```python needs=pandas
+import pandas as pd
+
+# from a file: pd.read_csv(path, dtype={"FID": str, "IID": str}) keeps IDs such as 007 intact
+df = pd.DataFrame({"FID": ["f1", "f1", "f2"], "IID": ["007", "008", "101"],
+                   "weight": [20.5, None, 22.0], "sex": ["F", "M", "F"]})
 df[["FID", "IID", "weight"]].to_csv("pheno.txt", sep="\t", index=False, na_rep="NA")
+print(open("pheno.txt").read())
+assert open("pheno.txt").read().splitlines()[2] == "f1\t008\tNA"
 ```
 
 The header must start `FID IID` (not `#FID`); `NA` for missing; numeric values only. IDs as strings

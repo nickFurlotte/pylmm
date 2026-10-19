@@ -2,6 +2,14 @@
 
 The docs promise that their snippets run; this test keeps that promise.
 
+What is not executed: ``README.md`` and ``docs/research/*.md`` (and the other
+reports under ``docs/``).  The README's example commands scan the full
+bundled dataset (minutes) and are covered instead by ``just readme-example``
+and the CLI tests that compare the same command with the Phase 1 goldens
+(tests/test_cli_gwas.py); the research notes are background surveys of other
+tools' formats and methods, with sketches of external APIs, not instructions
+that an agent or user is meant to run.
+
 How blocks are run
 ------------------
 * Each Markdown file is one session.  Its blocks run IN ORDER, sharing one
@@ -20,8 +28,21 @@ How blocks are run
   environment (so ``uv run --group sims python -m sims ...`` uses the
   already-installed interpreter); ``pylmm`` is this environment's console
   script.  ``SIMS_RESULTS_DIR`` points into the temporary directory.
-* Other languages (``text``, ``csv``, ``yaml``, ...) are not code and are not
-  run.  A fence without a language is an error: write ``text`` for output.
+* Known non-code languages are not run: ``text``, ``txt``, ``csv``, ``tsv``,
+  ``yaml``, ``yml``, ``toml``, ``json``, ``ini``, ``console-output``,
+  ``diff``, ``markdown``, ``md`` (`NON_CODE_LANGS`).  Any other language
+  (a typo such as ``pyhton``, or ``python3``, ``zsh``, ``console``) is an
+  error unless the block is marked ``skip-ci``, so a block is never silently
+  not run.  A fence without a language is an error: write ``text`` for output.
+
+Fences
+------
+Fences are three or more backticks or tildes (CommonMark).  A block closes at
+a line of the same character, at least as long as its opening, with nothing
+after it, so a four-backtick block can show a three-backtick fence as text.
+A line inside a block that opens a fence of the same kind (same character, at
+least as long, with a language) is an error: it is almost always a block
+that was never closed.
 
 Opting out
 ----------
@@ -37,6 +58,10 @@ The info string of a block can carry (after the language):
 
 Fences must start in column 0 (an indented fence is an error, since it would
 silently not be run).
+
+Statistics (blocks executed and skipped, per file) are kept in the pytest
+config stash (`tests/conftest.py`'s ``docs_stats`` fixture) and printed in the
+terminal summary, whatever the import mode.
 """
 
 from __future__ import annotations
@@ -65,13 +90,26 @@ DOC_FILES = sorted(
 LINKED_DIRS = ("data", "docs", "sims", "skills")
 PY_LANGS = {"python", "py"}
 SH_LANGS = {"bash", "sh", "shell"}
+NON_CODE_LANGS = {
+    "text",
+    "txt",
+    "csv",
+    "tsv",
+    "yaml",
+    "yml",
+    "toml",
+    "json",
+    "ini",
+    "console-output",
+    "diff",
+    "markdown",
+    "md",
+}
 SH_PREFIXES = ("pylmm ", "uv run ")
 
-# Filled by the tests, printed by tests/conftest.py's pytest_terminal_summary.
-STATS: dict[str, dict] = {}
-
-_FENCE = re.compile(r"^```(.*)$")
-_INDENTED_FENCE = re.compile(r"^\s+```")
+# An opening or closing fence: 3+ backticks or 3+ tildes, then the info string.
+_FENCE = re.compile(r"^(`{3,}|~{3,})(.*)$")
+_INDENTED_FENCE = re.compile(r"^[ \t]+(`{3,}|~{3,})")
 
 
 @dataclass
@@ -91,34 +129,44 @@ def parse_blocks(path: str) -> list[Block]:
     """The fenced code blocks of a Markdown file, in order."""
     with open(path, encoding="utf-8") as f:
         lines = f.read().splitlines()
+    rel = os.path.relpath(path, REPO)
     blocks = []
     i = 0
     while i < len(lines):
         if _INDENTED_FENCE.match(lines[i]):
             raise AssertionError(
                 "%s:%d: indented code fence; start fences in column 0 so the docs test sees them"
-                % (os.path.relpath(path, REPO), i + 1)
+                % (rel, i + 1)
             )
         m = _FENCE.match(lines[i])
         if not m:
             i += 1
             continue
-        info = m.group(1).strip()
+        fence, info = m.group(1), m.group(2).strip()
+        if fence[0] == "`" and "`" in info:
+            i += 1  # inline code such as ```x``` on its own line, not a fence
+            continue
         start = i
         i += 1
         body = []
-        while i < len(lines) and lines[i].rstrip() != "```":
-            if _INDENTED_FENCE.match(lines[i]) or _FENCE.match(lines[i]):
+        while i < len(lines):
+            inner = _FENCE.match(lines[i])
+            if inner and inner.group(1)[0] == fence[0] and len(inner.group(1)) >= len(fence):
+                if not inner.group(2).strip():
+                    break  # the closing fence
                 raise AssertionError(
                     "%s:%d: a fence inside a block (unclosed block opened at line %d?)"
-                    % (os.path.relpath(path, REPO), i + 1, start + 1)
+                    % (rel, i + 1, start + 1)
+                )
+            if _INDENTED_FENCE.match(lines[i]) and lines[i].lstrip().startswith(fence):
+                raise AssertionError(
+                    "%s:%d: an indented fence inside a block (unclosed block opened at line %d?)"
+                    % (rel, i + 1, start + 1)
                 )
             body.append(lines[i])
             i += 1
         if i == len(lines):
-            raise AssertionError(
-                "%s:%d: unclosed code block" % (os.path.relpath(path, REPO), start + 1)
-            )
+            raise AssertionError("%s:%d: unclosed code block" % (rel, start + 1))
         i += 1
         lang, _, flags = info.partition(" ")
         blocks.append(Block(path, start + 1, lang.lower(), flags.strip(), "\n".join(body) + "\n"))
@@ -199,18 +247,23 @@ def run_doc(path: str, tmp_path, monkeypatch) -> dict:
     stats: dict = {"executed": 0, "skipped": [], "seconds": 0.0}
     begin = time.time()
     for b in blocks:
-        runnable = b.lang in PY_LANGS or b.lang in SH_LANGS
         if not b.lang:
             raise AssertionError(
                 "%s: code block without a language; use ```text for output or ```python/```bash"
                 % b.where
             )
-        if not runnable:
+        if b.lang in NON_CODE_LANGS:
             continue
         reason = skip_reason(b)
         if reason is not None:
             stats["skipped"].append((b.where, reason))
             continue
+        if b.lang not in PY_LANGS and b.lang not in SH_LANGS:
+            raise AssertionError(
+                "%s: unknown code block language %r; use python/py, bash/sh/shell, one of the "
+                "non-code languages (%s), or mark the block skip-ci: <reason>"
+                % (b.where, b.lang, ", ".join(sorted(NON_CODE_LANGS)))
+            )
         if b.lang in PY_LANGS:
             try:
                 exec(compile(b.code, b.where, "exec"), namespace)
@@ -245,9 +298,8 @@ def run_doc(path: str, tmp_path, monkeypatch) -> dict:
 
 
 @pytest.mark.parametrize("path", DOC_FILES, ids=lambda p: os.path.relpath(p, REPO))
-def test_doc_snippets_run(path, tmp_path, monkeypatch):
-    stats = run_doc(path, tmp_path, monkeypatch)
-    STATS[os.path.relpath(path, REPO)] = stats
+def test_doc_snippets_run(path, tmp_path, monkeypatch, docs_stats):
+    docs_stats[os.path.relpath(path, REPO)] = run_doc(path, tmp_path, monkeypatch)
 
 
 def test_doc_files_exist():
@@ -297,3 +349,51 @@ def test_claude_skills_symlink():
     assert os.path.islink(link)
     assert os.readlink(link) == "../skills"
     assert os.path.samefile(link, os.path.join(REPO, "skills"))
+
+
+# -- the parser and the language rules themselves --------------------------------
+
+
+def _doc(tmp_path, text: str) -> str:
+    path = tmp_path / "doc.md"
+    path.write_text(text)
+    return str(path)
+
+
+def test_parse_tilde_and_long_backtick_fences(tmp_path):
+    text = "~~~python\nx = 1\n~~~\n````markdown\n```python\nnot run\n```\n````\n```text\n~~~\n```\n"
+    blocks = parse_blocks(_doc(tmp_path, text))
+    assert [(b.lang, b.code) for b in blocks] == [
+        ("python", "x = 1\n"),
+        ("markdown", "```python\nnot run\n```\n"),
+        ("text", "~~~\n"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "```python\nx = 1\n```python\ny = 2\n```\n",  # an unclosed block
+        "````python\nx = 1\n```\n",  # a closing fence shorter than the opening one
+        "  ```python\nx = 1\n```\n",  # indented
+        "~~~python\nx = 1\n  ~~~\n",  # indented closing fence
+    ],
+)
+def test_parse_rejects_bad_fences(tmp_path, text):
+    with pytest.raises(AssertionError, match=r"fence|unclosed"):
+        parse_blocks(_doc(tmp_path, text))
+
+
+@pytest.mark.parametrize("lang", ["pyhton", "python3", "zsh", "console"])
+def test_unknown_language_is_an_error(tmp_path, monkeypatch, lang):
+    path = _doc(tmp_path, "```%s\nprint(1)\n```\n" % lang)
+    with pytest.raises(AssertionError, match="unknown code block language %r" % lang):
+        run_doc(path, tmp_path, monkeypatch)
+
+
+def test_non_code_and_skipped_blocks(tmp_path, monkeypatch):
+    text = "".join("```%s\nanything\n```\n" % lang for lang in sorted(NON_CODE_LANGS))
+    text += "```zsh skip-ci: needs zsh\nsetopt x\n```\n```python\nok = 1\n```\n"
+    stats = run_doc(_doc(tmp_path, text), tmp_path, monkeypatch)
+    assert stats["executed"] == 1
+    assert [reason for _, reason in stats["skipped"]] == ["needs zsh"]
