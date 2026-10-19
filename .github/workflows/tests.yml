@@ -27,6 +27,23 @@ jobs:
       - name: Ruff format check
         run: uv run --locked ruff format --check
 
+  typecheck:
+    # mypy on the library modules (pylmm/cli/ excluded until Phase 5b).  On
+    # Python 3.10, the floor: the numpy stubs that the lock resolves for newer
+    # Pythons (numpy >= 2.3) do not support mypy's python_version = "3.10".
+    name: typecheck (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.10"
+          enable-cache: true
+
+      - name: mypy
+        run: uv run --locked mypy
+
   pytest:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -50,6 +67,8 @@ jobs:
           enable-cache: true
 
       # Slow full-dataset tests are skipped unless --runslow is given.
+      # pytest.ini adds --doctest-modules, so the pylmm/ docstring examples
+      # run here and in the lowest-direct job too.
       # The py27 Docker baseline (docker/py27/) is kept for reference only
       # and is not run in CI.
       # --group sims adds pandas/matplotlib/statsmodels for the sims/ tests

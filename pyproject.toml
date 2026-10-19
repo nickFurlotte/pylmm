@@ -39,6 +39,7 @@ pylmmKinship = "pylmm.cli.kinship:main"
 dev = [
     "pytest>=7",
     "ruff==0.15.*",
+    "mypy==2.4.0",
 ]
 sims = [
     "matplotlib>=3.5",
@@ -53,6 +54,29 @@ packages = ["pylmm"]
 # tests/ needs tests/golden and data/ (~215MB), and scripts/ only holds
 # source-checkout shims, so the sdist ships the package alone.
 exclude = ["/data", "/docker", "/docs", "/tests", "/scripts", "/.github"]
+
+[tool.mypy]
+# Library modules only: pylmm/cli/ is rewritten (with types) in Phase 5b and
+# is excluded until then.  numpy ships its own stubs; scipy has none (the
+# third-party scipy-stubs package requires a newer numpy than the
+# numpy>=1.22 floor), so its imports are untyped.  Run it under Python 3.10
+# (`just typecheck`): numpy >= 2.3, which the lock resolves for newer
+# Pythons, ships stubs that do not support python_version = "3.10".
+files = ["pylmm"]
+exclude = ["^pylmm/cli/"]
+python_version = "3.10"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+# matplotlib (sims group only) is imported lazily by LMM.plot_fit.
+module = ["scipy", "scipy.*", "matplotlib", "matplotlib.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
