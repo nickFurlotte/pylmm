@@ -26,8 +26,15 @@ print(geno.G.shape, np.bincount(geno.pops))
 | `unrelated` | `n, m, maf, seed` | independent HWE SNPs, K ≈ I |
 | `balding_nichols` | `n, m, k, fst, maf, admixture, seed` | k populations (or Dirichlet admixture) |
 | `family` | `n_families, n_sibs, m, include_parents, maf, seed` | nuclear sibships, relatedness 0.5 |
-| `bed` | `n_snps, snps, n_indivs, indivs, select, seed` | the bundled 1219 mice (0/0.5/1 coding, real LD, ~110 distinct genotypes) |
+| `bed` | `n_snps, snps, n_indivs, indivs, select, seed` | the bundled 1219 mice (0/0.5/1 coding, real LD, ~110 distinct genotypes, ~1% missing calls) |
 | `hmdp` | same | the bundled 94-strain EMMA text data |
+
+For `bed` / `hmdp`: `n_snps` takes that many SNPs, chosen by `select`: `"first"` (the default: the first
+`n_snps` in `.bim` order, i.e. the start of chromosome 1 only), `"even"` (evenly spaced over the whole
+file, the usual choice) or `"random"` (with `seed`); `snps` gives explicit 0-based indices instead.
+`n_indivs` / `indivs` choose individuals the same way. The chosen indices are in
+`geno.meta["snp_index"]` / `geno.meta["indiv_index"]`, and `geno.indiv_ids` are `"FID:IID"` strings
+(section 6 turns them into `(FID, IID)` pairs).
 
 `genotypes.with_missing(G, rate, rng)` adds missing calls. Copy before changing (`geno.copy()`).
 
@@ -111,8 +118,11 @@ plink_tools.write_kinship("sim.kin", kin.K, fid_iid)              # K from the k
 ```
 
 ```bash
-pylmm gwas --bfile sim --kinship sim.kin --pheno sim.pheno --covar sim.covar -o sim.tsv -q
+pylmm gwas --bfile sim --kinship sim.kin --pheno sim.pheno --covar sim.covar -o sim.tsv -v
 ```
+
+Keep `-v` in such checks: it logs how many individuals were read, matched and dropped, and the null fit;
+`-q` would hide the warnings that reveal an ID mismatch.
 
 ```python
 res = np.genfromtxt("sim.tsv", names=True, dtype=None, encoding="utf-8")
@@ -124,7 +134,69 @@ print("pipeline OK: causal p =", ["%.1e" % p for p in res["P_VALUE"][causal]])
 Things such a check catches: an ID mismatch (individuals dropped or misaligned), a missing intercept, a
 flipped allele (BETA signs flip), a kinship for other samples (λ off, h wrong).
 
-## 6. Calibration across replicates, and studies
+## 6. Real genotypes (the `bed` source) and inbred panels
+
+The bundled mice are inbred strains with replicate animals: real LD, ~110 distinct genotypes among 1219
+animals, and missing calls. Three things differ from the synthetic sources:
+
+* **Missing calls.** `phenotypes.simulate` needs complete causal genotypes (`ValueError: causal
+  genotypes must be complete`). Pick causal SNPs among the complete ones (below), or impute first,
+  e.g. `G_imp = np.where(np.isnan(G), np.nanmean(G, axis=0), G)` (then the causal "genotypes" include
+  imputed means).
+* **Coding.** `G` is the fraction of A2 (0/0.5/1). `ph.beta` is the effect per unit of the `G` you pass,
+  so the effect per copy of A2 is `ph.beta / 2`; double `G` (or `coding="fraction"`) before `write_bed`.
+* **IDs.** `geno.indiv_ids` are `"FID:IID"` strings; split them, or take the pairs from
+  `PlinkReader(...).indivs` with `geno.meta["indiv_index"]`.
+
+```python
+from pylmm.plink_io import PlinkReader
+
+spec_bed = {"source": "bed", "n_snps": 3000, "select": "even"}   # every ~33rd SNP of the 98,740
+mice = genotypes.get(spec_bed)
+complete = ~np.isnan(mice.G).any(axis=0)
+print(mice.G.shape, "missing calls %.1f%%, complete SNPs %d" % (100 * np.isnan(mice.G).mean(), complete.sum()))
+fid_iid_m = [tuple(s.split(":", 1)) for s in mice.indiv_ids]          # "FID:IID" -> (FID, IID)
+with PlinkReader("data/snps.132k.clean.noX") as r:                  # or from the reader
+    assert fid_iid_m == [r.indivs[i] for i in mice.meta["indiv_index"]]
+chrom = plink_tools.read_bim("data/snps.132k.clean.noX")["chrom"][mice.meta["snp_index"]]
+
+test = np.flatnonzero((chrom == "1") & complete)      # test chromosome 1's complete SNPs
+causal_m = test[[20, 100]]                            # columns of mice.G, complete
+kin_all = kinship.get(spec_bed)                       # K from all 3000 SNPs, tested ones included
+ph_m = phenotypes.simulate(kin_all, h2=0.5, rng=np.random.default_rng(1), G=mice.G,
+                           causal_idx=causal_m, causal_var=0.1)
+print("beta per unit of G (fraction) %s, per copy of A2 %s" % (np.round(ph_m.beta, 3), np.round(ph_m.beta / 2, 3)))
+```
+
+**Expect low power with K from the tested SNPs.** With few distinct strains, a K that includes the
+tested SNPs (and the SNPs in LD with them, which in inbred panels span megabases) absorbs much of a causal
+SNP's signal: its p-value is far weaker than the effect deserves (proximal contamination). For a pipeline
+check, build K from SNPs that are not tested (a **disjoint K**); for a real analysis use **LOCO** (K
+without the tested chromosome; `custom-association-analysis`):
+
+```python
+def causal_p(kin):
+    kva_k, kve_k = kin.eig_for_pylmm()
+    p_k = np.asarray(gwas(ph_m.y, mice.G[:, test], kin.K, kva_k, kve_k)[1])
+    return p_k[np.searchsorted(test, causal_m)]
+
+kin_disjoint = kinship.get(spec_bed, snps=np.setdiff1d(np.arange(mice.m), test))   # all but the tested
+kin_loco = kinship.get(spec_bed, snps=chrom != "1")                                # all but chromosome 1
+p_all, p_dis, p_loco = causal_p(kin_all), causal_p(kin_disjoint), causal_p(kin_loco)
+for name, pv in (("K from all SNPs", p_all), ("disjoint K", p_dis), ("LOCO K", p_loco)):
+    print("%-16s causal p = %s" % (name, ["%.1e" % x for x in pv]))
+assert np.all(p_loco < p_all)
+```
+
+Each causal SNP explains 5% of the variance of 1219 animals, yet even with LOCO p is only ~1e-6: the
+effective sample size is closer to the ~110 distinct genotypes than to 1219, and with two causal SNPs
+on one chromosome the ranking of the three kinships varies between draws. The disjoint K still contains
+chromosome-1 SNPs in LD with the causal ones, so it helps less than
+LOCO. Under LOCO, λ_GC of one chromosome's scan can be well above 1 when that chromosome carries a
+causal SNP: in inbred panels LD makes much of the chromosome associated. For what h² recovery to expect
+in panels of this kind (wide intervals), see `estimate-heritability` section 7.
+
+## 7. Calibration across replicates, and studies
 
 One replicate is noisy. For calibration, pool null p-values over replicates (new phenotype draws on the
 same genotypes) and look at the pooled type-I error and mean χ², not one λ_GC (`metrics.type1_error`,

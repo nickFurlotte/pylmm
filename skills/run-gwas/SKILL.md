@@ -1,13 +1,19 @@
 ---
 name: run-gwas
-description: Run a genome-wide association scan (GWAS) with pylmm's linear mixed model, end to end - from PLINK BED/TPED or EMMA genotypes, a phenotype file and a kinship matrix to a checked result table - with the pylmm gwas command line or the Python library. Covers choosing REML vs ML, --refit, covariates and the intercept, sample ID matching, checking lambda_GC, QQ and top hits, and fixing the common pylmm errors. Use when asked to run, rerun, script or debug a GWAS or association scan with pylmm.
+description: Run a genome-wide association scan (GWAS) with pylmm's linear mixed model, end to end - from PLINK BED/TPED or EMMA genotypes, a phenotype file and a kinship matrix to a checked result table - with the pylmm gwas command line or the Python library. Covers choosing REML vs ML, --refit, covariates and the intercept, sample ID matching, phenotype and SNP QC recipes, first sanity checks of the output (interpretation, thresholds and effect alleles are in interpret-gwas-results), inbred panels, and fixing the common pylmm errors. Use when asked to run, rerun, script or debug a GWAS or association scan with pylmm.
 ---
 
 # Run a GWAS with pylmm
 
 The steps: genotypes in PLINK BED → phenotype file → kinship (`pylmm kinship`, writes `K.id`) → scan
 (`pylmm gwas`) → check. Paths in the examples are relative to the repository root, and the blocks run in
-CI in order (`tests/test_docs.py`). Background: [docs/guide.md](../../docs/guide.md).
+CI in order (`tests/test_docs.py`). Background: [docs/guide.md](../../docs/guide.md). Recipes for phenotype
+QC and transformation, SNP QC (MAF, missingness) and defining loci: [reference.md](reference.md).
+
+Run the commands with `-v` while setting up an analysis: it logs how many individuals were read,
+matched and dropped (missing phenotype or covariate, not in the kinship), alignment warnings and the null
+fit. `-q` hides warnings that matter for correctness (e.g. a kinship without `.id` assumed to be in
+genotype order); use it only for a pipeline you have already checked.
 
 ## 0. Inputs
 
@@ -39,18 +45,37 @@ plink_tools.write_pheno("geno.pheno", ids, y, ["trait"])
 ## 1. Kinship
 
 ```bash
-pylmm kinship --bfile geno -o geno.kin -q      # writes geno.kin and geno.kin.id
+pylmm kinship --bfile geno -o geno.kin -v      # writes geno.kin and geno.kin.id
 ```
 
 Build K from the SNPs you trust (QC'd, autosomal). With many SNPs, K from all of them is standard; for
 LOCO (leave the tested chromosome out of K) see `custom-association-analysis`. A K from another tool works
 if it is a plain n × n text matrix; write its `.id` file (`pylmm.samples.write_id_file`).
 
+**Inbred panels** (strains with replicate animals, few distinct genotypes): a K built from the tested
+SNPs absorbs much of a causal SNP's signal, so power is low and λ_GC from one scan is noisy. Prefer LOCO
+for the scan; `simulate-lmm-data` section 6 shows the size of the effect and the disjoint-K check, and
+`estimate-heritability` section 7 the individual vs strain-mean set-up.
+
 ## 2. Scan
 
 ```bash
 pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name trait -o trait.tsv -v 2> trait.log
 grep "null model" trait.log
+```
+
+Covariates come from a file with the same layout; with a `FID IID name ...` header, pick columns by name
+(here a made-up `sex` and `batch`; only `sex` is used):
+
+```python
+rng = np.random.default_rng(0)
+cov = np.column_stack([rng.integers(0, 2, len(ids)), rng.normal(size=len(ids))])
+plink_tools.write_pheno("geno.covar", ids, cov, ["sex", "batch"])
+```
+
+```bash
+pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name trait --covar geno.covar --covar-name sex -o trait_sex.tsv -v 2> trait_sex.log
+grep -i "covariate\|individuals\|null model" trait_sex.log
 ```
 
 Options that matter:

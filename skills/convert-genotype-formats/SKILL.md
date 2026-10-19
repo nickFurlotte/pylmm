@@ -171,7 +171,7 @@ plink_tools.write_kinship("other.kin", K_other, k_ids)       # other.kin + other
 ## After converting: checks
 
 ```bash
-pylmm kinship --bfile table -o table.kin -q
+pylmm kinship --bfile table -o table.kin -v
 pylmm gwas --bfile table --kinship table.kin --pheno table.pheno -o table.tsv -v 2>&1 | grep -i "individuals\|null model"
 ```
 

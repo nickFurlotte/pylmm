@@ -196,7 +196,7 @@ plink_tools.subset_bed(BED, "mini", np.arange(2000))
 ```
 
 ```bash
-uv run pylmm kinship --bfile mini -o mini.kin -q
+uv run pylmm kinship --bfile mini -o mini.kin -v
 head -n 2 mini.kin.id
 ```
 
@@ -426,8 +426,8 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
 * Process SNPs in blocks with `islice` rather than building a full genotype matrix.
 
 ```bash
-pylmm kinship --bfile mini -o mini.kin --eigen-npz mini.eig.npz -q
-pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.pheno -o fast.tsv -q
+pylmm kinship --bfile mini -o mini.kin --eigen-npz mini.eig.npz -v
+pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.pheno -o fast.tsv -v
 ```
 
 ## 12. Pitfalls
