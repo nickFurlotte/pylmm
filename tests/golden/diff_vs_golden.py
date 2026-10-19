@@ -18,9 +18,12 @@ Py3 shims applied here (generate_golden.py itself stays the py2 generator):
   * the CLI runner decodes the -v log to str (py2 Popen output was already
     str), and a failing CLI run aborts with its output, as in the generator;
   * generate_golden.py calls the pre-Phase-5.4 API (pylmm.input.plink,
-    lmm.GWAS(REML=...), L.optH, ...); a small adapter, local to this tool,
-    maps those names onto the current API through docs/migration/name-map.csv.
-    pylmm itself keeps no aliases.
+    lmm.GWAS(REML=...), L.optH, IN.getSNPIterator(), ...); a small adapter,
+    local to this tool, maps those names onto the current API through
+    docs/migration/name-map.csv, following renames across phases (e.g.
+    getSNPIterator -> get_snp_iterator (5.4) -> iter_snps (5b)), and keeps
+    the old defaults where they changed (LL defaulted to ML).  pylmm itself
+    keeps no aliases.
 """
 
 import argparse
@@ -58,7 +61,19 @@ np.load = _load_py2_pickles
 from pylmm import lmm, misc, plink_io  # noqa: E402
 
 with open(os.path.join(REPO, "docs", "migration", "name-map.csv")) as _f:
-    _NEW_NAME = {r["old_name"]: r["new_name"] for r in csv.DictReader(_f)}
+    _RENAMES = {r["old_name"]: r["new_name"] for r in csv.DictReader(_f)}
+
+
+def _final_name(name):
+    """The current name of `name`, following the renames of every phase."""
+    seen = {name}
+    while name in _RENAMES and _RENAMES[name] not in seen:
+        name = _RENAMES[name]
+        seen.add(name)
+    return name
+
+
+_NEW_NAME = {old: _final_name(old) for old in _RENAMES}
 
 
 def _new_kw(kw):
@@ -83,6 +98,10 @@ class _OldLMM(_OldNames, lmm.LMM):
 
     def association(self, *a, **kw):
         return super().association(*a, **_new_kw(kw))
+
+    def LL(self, h, X=None, stack=True, REML=False):  # noqa: N802, N803 - the py2 names
+        # The py2 LL defaulted to ML; log_likelihood defaults to REML since Phase 5b.
+        return tuple(self.log_likelihood(h, X, stack=stack, reml=REML))
 
 
 class _OldPlink(_OldNames, plink_io.PlinkReader):
@@ -128,9 +147,9 @@ _savetxt = gen.savetxt
 
 
 def savetxt(name, arr, header):
-    # association(return_beta=True) returns beta_var as a (1,1) ndarray (sigma
-    # is 1x1).  numpy 1.16 coerced the list of mixed rows; numpy >= 1.24
-    # refuses ragged input, so flatten each entry to a float first.
+    # Before Phase 5b association(return_beta=True) returned beta_var as a
+    # (1,1) ndarray, and numpy >= 1.24 refuses such ragged rows; it is a float
+    # now, but rows are still converted entry by entry, as numpy 1.16 did.
     if isinstance(arr, list):
         arr = [[float(np.asarray(v).sum()) for v in row] for row in arr]
     return _savetxt(name, arr, header)

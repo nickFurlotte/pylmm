@@ -14,7 +14,7 @@ from pylmm.lmm import LMM, calculate_kinship
 class SpyLMM(LMM):
     """Records every h the local search evaluates."""
 
-    def _neg_log_likelihood(self, h, X=None, reml=False):
+    def _neg_log_likelihood(self, h, X=None, reml=True):
         self.evals.append(float(h))
         return LMM._neg_log_likelihood(self, h, X, reml)
 

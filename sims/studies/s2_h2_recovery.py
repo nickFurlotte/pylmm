@@ -105,9 +105,7 @@ def n_modes(L, prom=0.1):
 def pylmm_profile(lmm, reml):
     """pylmm's own LL (clamped eigenvalues) on LL_GRID; REML includes pylmm's
     constant, irrelevant for deficits."""
-    return np.array(
-        [float(np.sum(lmm.log_likelihood(h, lmm.x0t, stack=False, reml=reml)[0])) for h in LL_GRID]
-    )
+    return np.array([lmm.log_likelihood(h, lmm.x0t, stack=False, reml=reml).ll for h in LL_GRID])
 
 
 def pylmm_block(prefix, y, kin, reml, n):

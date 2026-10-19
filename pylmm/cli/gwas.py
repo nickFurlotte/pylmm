@@ -21,7 +21,7 @@ from optparse import OptionGroup, OptionParser
 import numpy as np
 from scipy import linalg
 
-from pylmm import plink_io
+from pylmm import plink_io, samples
 from pylmm.lmm import LMM, check_covariates, snp_estimable, subset_testable
 
 usage = """usage: %prog [options] --kfile kinshipFile --[tfile | bfile] plinkFileBase outfileBase
@@ -165,7 +165,7 @@ def build_parser():
     basic_group.add_option(
         "--kfile",
         dest="kfile",
-        help="The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.",
+        help='The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.  Individuals are matched to the genotype file by FID and IID, using the ID file KINSHIP.id if it exists (the library can match by IID alone: PlinkReader(id_match="iid"); a CLI option comes later).',
     )
     basic_group.add_option(
         "--covfile",
@@ -319,22 +319,38 @@ def _main(argv=None):
     if options.covfile and not os.path.isfile(options.covfile):
         parser.error("The --covfile file %s does not exist." % options.covfile)
 
+    # READING Kinship - major bottleneck for large datasets.  Read before the
+    # covariates: when the kinship has IDs, the genotype individuals that are
+    # not in it are dropped from the reader (indivs, phenos, SNP vectors).
+    if options.verbose:
+        sys.stderr.write("Reading kinship...\n")
+    begin = time.time()
+    try:
+        K, kinship_aligned = _read_aligned_kinship(options.kfile, reader)
+    except ValueError as e:
+        parser.error(str(e))
+    end = time.time()
+    if options.verbose:
+        sys.stderr.write(
+            "Read the %d x %d kinship matrix in %0.3fs \n" % (K.shape[0], K.shape[1], end - begin)
+        )
+
     try:
         # Read the emma phenotype file if provided.
         # Format should be rows are phenotypes and columns are individuals.
         if options.emmaPheno:
-            reader.phenos = reader.get_phenos_emma(options.emmaPheno)
+            reader.phenos = reader.read_phenos_emma(options.emmaPheno)
 
         # READING Covariate File
         P = None
         if options.covfile:
             if options.verbose:
                 sys.stderr.write("Reading covariate file...\n")
-            P = reader.get_covariates(options.covfile)
+            P = reader.read_covariates(options.covfile)
         elif options.emmaCov:
             if options.verbose:
                 sys.stderr.write("Reading covariate file...\n")
-            P = reader.get_covariates_emma(options.emmaCov)
+            P = reader.read_covariates_emma(options.emmaCov)
     except ValueError as e:
         parser.error(str(e))
 
@@ -348,20 +364,6 @@ def _main(argv=None):
         X0 = np.ones((reader.phenos.shape[0], 1)) if P is None else P
     else:
         X0 = np.hstack([np.ones((reader.phenos.shape[0], 1)), P])
-
-    # READING Kinship - major bottleneck for large datasets
-    if options.verbose:
-        sys.stderr.write("Reading kinship...\n")
-    begin = time.time()
-    try:
-        K = read_kinship_file(options.kfile, len(reader.indivs))
-    except ValueError as e:
-        parser.error(str(e))
-    end = time.time()
-    if options.verbose:
-        sys.stderr.write(
-            "Read the %d x %d kinship matrix in %0.3fs \n" % (K.shape[0], K.shape[1], end - begin)
-        )
 
     # PROCESS the phenotype data -- Remove individuals with a missing
     # phenotype or a missing covariate (Phase 5.2: individuals with missing
@@ -397,9 +399,9 @@ def _main(argv=None):
     except ValueError as e:
         parser.error(str(e))
 
-    # Only load the decomposition if we did not remove individuals.
+    # Only load the decomposition if we did not remove or reorder individuals.
     # Otherwise it would not be correct and we would have to compute it again.
-    if not v.sum() and options.eigenfile:
+    if not v.sum() and not kinship_aligned and options.eigenfile:
         if options.verbose:
             sys.stderr.write("Loading pre-computed eigendecomposition...\n")
         try:
@@ -407,10 +409,15 @@ def _main(argv=None):
         except ValueError as e:
             parser.error(str(e))
     else:
-        if options.eigenfile:
+        if options.eigenfile and v.sum():
             _warn(
                 "--eigen is ignored: %d individuals were dropped, so the decomposition is recomputed"
                 % v.sum()
+            )
+        elif options.eigenfile:
+            _warn(
+                "--eigen is ignored: the kinship was reordered to the genotype individuals by "
+                "its IDs, so the decomposition is recomputed"
             )
         kva = None
         kve = None
@@ -483,7 +490,7 @@ def _main(argv=None):
                     L.fit(X=x, reml=reml)
                 ts, ps, beta, beta_var = L.association(x, reml=reml, return_beta=True)
 
-            _output_result(out, id, beta, np.sqrt(beta_var).sum(), ts, ps)
+            _output_result(out, id, beta, np.sqrt(beta_var), ts, ps)
             p_values.append(ps)
             t_stats.append(ts)
 
@@ -492,6 +499,54 @@ def _main(argv=None):
             "%d of %d SNPs are nan because, on the individuals with a called genotype, "
             "the covariates are no longer of full rank\n" % (counts["collinear"], count)
         )
+
+
+def _read_aligned_kinship(k_file, reader):
+    """The --kfile kinship, in the order of reader.indivs, and whether it was realigned.
+
+    With an ID sidecar k_file + ".id" (pylmmKinship writes one), K is matched
+    to the genotype individuals by (FID, IID): genotype individuals that are not
+    in K are dropped from the reader (indivs, phenotypes and SNP vectors) and
+    K's extra individuals are ignored, each with a warning.  Without one, K's
+    rows are assumed to be the genotype individuals in file order, with a
+    warning (not for EMMA input, which has no IDs).  Raises ValueError.
+
+    Note: when K drops individuals, genotypes are imputed and standardised
+    over the KEPT individuals, but individuals dropped for a missing phenotype
+    or covariate still count in the mean and SD (max |dt| 0.024 between the
+    two rules; making them consistent is a Phase 6 item).
+    """
+    id_file = samples.kinship_id_path(k_file)
+    if reader.type == "emma":
+        if os.path.isfile(id_file):
+            _warn("%s is ignored: EMMA genotypes have no IDs, so K is in genotype order" % id_file)
+        return read_kinship_file(k_file, len(reader.indivs)), False
+    kin_ids = samples.read_kinship_ids(k_file)
+    if kin_ids is None:
+        _warn(
+            "no kinship ID file %s; assuming the rows of %s are the individuals of the "
+            "genotype file, in its order (pylmmKinship writes the ID file)" % (id_file, k_file)
+        )
+        return read_kinship_file(k_file, len(reader.indivs)), False
+    try:
+        K = read_kinship_file(k_file, len(kin_ids))
+    except ValueError as e:
+        raise ValueError(
+            "%s (its ID file %s lists %d individuals)" % (e, id_file, len(kin_ids))
+        ) from e
+    al = samples.align_samples(
+        {"genotype file": reader.indivs, "kinship": kin_ids}, match=reader.id_match
+    )
+    for line in al.report():
+        _warn(line)
+    aligned = False
+    if not al.is_identity("genotype file"):
+        reader.subset(al.ids)
+        aligned = True
+    if not al.is_identity("kinship"):
+        K = al.take_square("kinship", K)
+        aligned = True
+    return K, aligned
 
 
 def read_eigen_file(fn, K):

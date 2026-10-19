@@ -24,9 +24,10 @@ Supported formats
     allele fields per individual.  ``<fbase>.tfam`` lists the individuals
     (FID, IID, ...).  SNP names are read from ``<fbase>.bim`` if it exists,
     otherwise from ``<fbase>.map``, which must list the same SNPs in the same
-    order.  Alleles must already be recoded as ``1``/``2`` (``0`` is missing);
-    nucleotide letters are not supported.  With PLINK 1.9, make such a file
-    with ``plink --bfile X --recode 12 transpose --out Y``.
+    order.  Alleles must already be recoded as ``1``/``2`` (``0`` is missing,
+    and so is a half-missing pair such as ``0 1``, as in PLINK); nucleotide
+    letters are not supported.  With PLINK 1.9, make such a file with
+    ``plink --bfile X --recode 12 transpose --out Y``.
 
 ``type="emma"``: EMMA genotype matrix
     ``fbase`` is the path of a whitespace-separated numeric text file with
@@ -36,11 +37,14 @@ Supported formats
     and individuals are identified by position only.
 
 Phenotype and covariate files are PLINK-style text tables ``FID IID v1 [v2
-...]`` with an optional ``FID IID ...`` header line (any case); EMMA ones are
-plain numeric matrices (see :meth:`PlinkReader.get_phenos_emma` and
-:meth:`PlinkReader.get_covariates_emma`).  A kinship matrix is a plain
-whitespace-separated square matrix in genotype order, or in the FaSTLMM style
-(tab-separated, with a header row and a first column of ``FID IID`` labels).
+...]`` with an optional ``FID IID name1 [name2 ...]`` header line (any case),
+whose names can select columns (``read_phenos(columns=["bmi"])``); EMMA ones
+are plain numeric matrices (see :meth:`PlinkReader.read_phenos_emma` and
+:meth:`PlinkReader.read_covariates_emma`).  A kinship matrix is a plain
+whitespace-separated square matrix, or in the FaSTLMM style (tab-separated,
+with a header row and a first column of ``FID IID`` labels).  A plain matrix
+is in genotype order unless an ID sidecar ``<k_file>.id`` (one ``FID IID``
+per line, written by ``pylmmKinship``) names its rows.
 
 Genotype coding
 ---------------
@@ -67,31 +71,29 @@ t statistic and p-value do not depend on the scale.
 Missing values
 --------------
 Missing genotypes are ``numpy.nan`` in raw output (BED code ``01``, TPED
-``0 0``, an unparsable EMMA value).  After normalisation there are no nans,
-except that an all-missing SNP is returned unchanged (all nan) and a
-constant SNP is returned as all zeros; callers skip both.  Missing phenotypes
-and covariates (``NA``, and ``-9`` for phenotypes) are ``nan``.
+``0 0`` or a half-missing pair, an unparsable EMMA value).  After
+normalisation there are no nans, except that an all-missing SNP is returned
+unchanged (all nan) and a constant SNP is returned as all zeros; callers skip
+both.  Missing phenotypes and covariates (``NA``, and ``-9`` for phenotypes)
+are ``nan``.
 
 ID alignment
 ------------
 Individuals are identified by the pair ``(FID, IID)`` from the ``.fam`` /
-``.tfam`` file, kept in file order in ``PlinkReader.indivs``.  Phenotype and
-covariate rows are matched to that order by ``(FID, IID)``, whatever order
-the file lists them in: extra individuals in the file are ignored, individuals
-missing from the file get ``nan`` rows (with a warning giving the count), and
-duplicate IDs or a file with no matching individual raise ``ValueError``.
-EMMA input has no IDs, so rows are matched by position and the row count must
-equal the number of individuals.  A FaSTLMM-style kinship matrix is reordered
-to ``indivs``, and individuals absent from it are dropped from ``indivs``
-(listed in ``indivs_removed``).
+``.tfam`` file, kept in file order in ``PlinkReader.indivs``; the matching
+itself is done by :mod:`pylmm.samples`.  ``id_match="iid"`` matches on the
+IID alone.  Phenotype and covariate rows are matched to ``indivs`` by ID,
+whatever order the file lists them in: extra individuals in the file are
+ignored, individuals missing from the file get ``nan`` rows (with a warning
+giving the count), and duplicate IDs or a file with no matching individual
+raise ``ValueError``.  EMMA input has no IDs, so rows are matched by position
+and the row count must equal the number of individuals.
 
-.. warning::
-   The genotype vector of each SNP has length ``N``, the number of
-   individuals in the genotype file, NOT ``len(indivs)``.  A FaSTLMM kinship
-   that drops individuals shrinks ``indivs``, ``K`` and ``phenos``, but the
-   SNP vectors are not subset to match, so they no longer line up with
-   ``K`` and ``phenos``.  Subset them yourself (by the positions of the
-   kept individuals) before testing.  TODO(5b): subset the SNP vectors too.
+A kinship matrix with IDs (FaSTLMM labels or a ``.id`` sidecar) is reordered
+to ``indivs``, and the individuals absent from it are dropped from the reader
+(listed in ``indivs_removed``, with a warning): from ``indivs``, ``phenos``
+**and the genotype vectors**, which always have ``len(indivs)`` values in the
+order of ``indivs``.  `PlinkReader.subset` drops individuals the same way.
 
 Examples
 --------
@@ -107,22 +109,28 @@ Write a tiny BED/BIM/FAM set (3 individuals, 2 SNPs) and read it back:
 ...     _ = f.write("1 rs1 0 100 A G\n1 rs2 0 200 C T\n")
 >>> with open(base + ".bed", "wb") as f:
 ...     _ = f.write(bytes([0x6C, 0x1B, 0x01, 0b00111000, 0b00000111]))
->>> reader = PlinkReader(base, type="b", norm_genotype=False)
->>> reader.indivs
+>>> with PlinkReader(base, type="b", norm_genotype=False) as reader:
+...     print(reader.indivs)
+...     for g, name in reader.iter_snps():
+...         print(name, g)
 [('F1', 'I1'), ('F1', 'I2'), ('F2', 'I3')]
->>> for g, name in reader.get_snp_iterator():
-...     print(name, g)
 rs1 [0.  0.5 1. ]
 rs2 [ 1. nan  0.]
->>> del reader
+
+Keep two of the individuals, in another order; the genotype vectors follow:
+
+>>> with PlinkReader(base, type="b", norm_genotype=False) as reader:
+...     reader.subset([("F2", "I3"), ("F1", "I1")])
+...     print([g.tolist() for g, _ in reader])
+[[1.0, 0.0], [0.0, 1.0]]
 >>> tmp.cleanup()                     # remove the temporary files
 
 The bundled 132k-SNP example is read the same way; the path is relative to
 the repository root, hence the skips:
 
 >>> r = PlinkReader("data/snps.132k.clean.noX", type="b")  # doctest: +SKIP
->>> g, name = next(r.get_snp_iterator())  # doctest: +SKIP
->>> g.shape == (r.N,)  # doctest: +SKIP
+>>> g, name = next(r.iter_snps())  # doctest: +SKIP
+>>> g.shape == (len(r.indivs),)  # doctest: +SKIP
 True
 """
 
@@ -131,26 +139,32 @@ from __future__ import annotations
 import os
 import sys
 import warnings
-from collections.abc import Callable
+from collections.abc import Sequence
 from typing import IO, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
-# An (FID, IID) pair.
-IndivKey = tuple[str, str]
+from pylmm import samples
+from pylmm.samples import SampleID
 
 # The genotype formats PlinkReader reads (its ``type`` argument).
 GENOTYPE_TYPES = ("b", "t", "emma")
+
+# The first three bytes of a SNP-major PLINK 1 BED file.
+_BED_MAGIC = b"\x6c\x1b"
+_BED_SNP_MAJOR = b"\x01"
 
 
 class PlinkReader:
     """Read genotypes (and optionally phenotypes and a kinship matrix) of one dataset.
 
-    The object is its own iterator: ``for g, name in reader.get_snp_iterator()``
+    The object is its own iterator: ``for g, name in reader.iter_snps()``
     (or ``for g, name in reader``) yields one SNP at a time as
-    ``(genotypes, snp_name)``.  See the module docstring for the file formats,
-    the genotype coding, missing values and ID alignment.
+    ``(genotypes, snp_name)``.  It is also a context manager that closes its
+    files (``with PlinkReader(...) as reader:``); `close` does the same.  See
+    the module docstring for the file formats, the genotype coding, missing
+    values and ID alignment.
 
     Parameters
     ----------
@@ -160,7 +174,8 @@ class PlinkReader:
         genotype matrix for ``type="emma"``.
     k_file : str, optional
         Kinship matrix file.  If omitted and ``fbase + ".kin"`` exists, that
-        file is used (and read only if ``read_k_file`` is true).
+        file is used (and read only if ``read_k_file`` is true).  If
+        ``k_file + ".id"`` exists, it names the rows (see `read_kinship`).
     pheno_file : str, optional
         PLINK-style phenotype file.  Defaults to ``fbase + ".phenos"``, which
         is silently skipped if it does not exist.
@@ -178,24 +193,33 @@ class PlinkReader:
         Whether the kinship file is FaSTLMM style (tab separated, header row
         and first column of ``FID IID`` labels), in which case it is reordered
         to match the individuals.
+    id_match : {"fid_iid", "iid"}, default "fid_iid"
+        Match phenotype, covariate and kinship rows to the genotype file on
+        (FID, IID), or on the IID alone (PLINK input only).
 
     Attributes
     ----------
     indivs : list of (str, str), or list of int for EMMA
         ``(FID, IID)`` of each individual in genotype-column order.  EMMA
         input has no IDs, so it is the integers ``0 .. n-1`` (column
-        positions) instead.
+        positions) instead.  Individuals dropped by a kinship with IDs or by
+        `subset` are not in it.
     N : int
-        Number of individuals in the genotype file (genotype columns).  It
-        stays the same when a FaSTLMM kinship drops individuals from
-        `indivs`.  (Since Phase 5.5 it is also set for EMMA input.)
+        Number of individuals in the genotype file (genotype columns),
+        whatever was dropped since.  The genotype vectors have
+        ``len(indivs)`` values.
     K : numpy.ndarray or None
-        Kinship matrix, shape ``(n, n)``, or None if none was read (also
-        None when an automatically found ``fbase + ".kin"`` exists but
-        ``read_k_file`` is false).
+        Kinship matrix, shape ``(len(indivs), len(indivs))``, or None if none
+        was read (also None when an automatically found ``fbase + ".kin"``
+        exists but ``read_k_file`` is false).
     phenos : numpy.ndarray or None
-        Phenotypes, shape ``(n, n_phenotypes)``, aligned with `indivs`; None
-        if there is no phenotype file.
+        Phenotypes, shape ``(len(indivs), n_phenotypes)``, aligned with
+        `indivs`; None if there is no phenotype file.
+    pheno_names, covariate_names : list of str or None
+        Column names of the last phenotype / covariate file read, from its
+        ``FID IID ...`` header; None for a file without one.
+    indivs_removed : list
+        Individuals of the genotype file that were dropped (see `indivs`).
     num_snps : int
         Number of SNPs (set when iteration starts; -1 for EMMA, unknown).
     have_read : int
@@ -209,21 +233,27 @@ class PlinkReader:
     fbase: str
     type: str
     # (FID, IID) pairs for "b"/"t"; column positions 0..n-1 for "emma" (no IDs).
-    indivs: list[IndivKey] | list[int]
+    indivs: list[SampleID] | list[int]
     N: int
     K: NDArray[np.float64] | None
     phenos: NDArray[np.float64] | None
+    pheno_names: list[str] | None
+    covariate_names: list[str] | None
     k_file: str | None
     pheno_file: str | None
     norm_genotype: bool
     read_k_file: bool
     fastlmm_kinship: bool
+    id_match: str
     fhandle: IO[Any] | None
     snp_file_handle: IO[str] | None
     num_snps: int
     have_read: int
     _bytes_to_read: int
-    indivs_removed: list[IndivKey]
+    indivs_removed: list[Any]
+    # Positions (in the genotype file) of `indivs`; None while that is all of them, in order.
+    _geno_index: NDArray[np.intp] | None
+    _exhausted: bool
 
     def __init__(
         self,
@@ -234,27 +264,45 @@ class PlinkReader:
         norm_genotype: bool = True,
         read_k_file: bool = False,
         fastlmm_kinship: bool = False,
+        id_match: str = "fid_iid",
     ) -> None:
 
         self.fhandle = None
         self.snp_file_handle = None
+        self._exhausted = False
+        self.num_snps = 0
+        self.have_read = 0
         if type not in GENOTYPE_TYPES:
             raise ValueError(
                 "unknown genotype file type %r; use one of %s"
                 % (type, ", ".join(repr(t) for t in GENOTYPE_TYPES))
             )
+        if id_match not in samples.MATCH_MODES:
+            raise ValueError(
+                "id_match=%r: use one of %s"
+                % (id_match, ", ".join(repr(m) for m in samples.MATCH_MODES))
+            )
+        if type == "emma" and id_match != "fid_iid":
+            raise ValueError("id_match='iid' needs PLINK input; EMMA genotypes have no IDs")
         self.fbase = fbase
         self.type = type
+        self.id_match = id_match
+        self._geno_index = None
+        self.indivs_removed = []
+        self.K = None
+        self.phenos = None
+        self.pheno_names = None
+        self.covariate_names = None
         if type != "emma":
             self.indivs = self._read_fam(self.fbase, type)
         else:
             # Just read a line from the SNP file and see how many individuals we have
-            f = open(fbase)
-            self.indivs = list(range(len(f.readline().strip().split())))
-            f.close()
+            with open(fbase) as f:
+                self.indivs = list(range(len(f.readline().strip().split())))
             self.N = len(self.indivs)
+        if type == "b":
+            self._check_bed_header()
         self.k_file = k_file
-        self.phenos = None
         self.norm_genotype = norm_genotype
         self.pheno_file = pheno_file
         # Originally I was using the fastLMM style that has indiv IDs embedded.
@@ -264,41 +312,63 @@ class PlinkReader:
         self.fastlmm_kinship = fastlmm_kinship
 
         if self.k_file:
-            self.K = self.read_kinship(self.k_file)
+            self.read_kinship(self.k_file)
         elif os.path.isfile("%s.kin" % fbase):
             self.k_file = "%s.kin" % fbase
             if self.read_k_file:
-                self.K = self.read_kinship(self.k_file)
-            else:
-                self.K = None
+                self.read_kinship(self.k_file)
         else:
             self.k_file = None
-            self.K = None
 
-        self.get_phenos(self.pheno_file)
+        self.read_phenos(self.pheno_file)
 
-        self.fhandle = None
-        self.snp_file_handle = None
+    # -- file handles -------------------------------------------------------
+
+    def close(self) -> None:
+        """Close the genotype files opened by `iter_snps` (safe to call twice)."""
+        for attr in ("fhandle", "snp_file_handle"):
+            fh = getattr(self, attr, None)
+            if fh is not None:
+                fh.close()
+                setattr(self, attr, None)
+
+    def __enter__(self) -> PlinkReader:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     def __del__(self) -> None:
         """Close any open file handles."""
-        if self.fhandle:
-            self.fhandle.close()
-        if self.snp_file_handle:
-            self.snp_file_handle.close()
+        self.close()
 
-    def get_snp_iterator(self) -> PlinkReader:
+    def _check_bed_header(self) -> None:
+        """Raise ValueError unless ``fbase.bed`` starts with the SNP-major BED magic bytes."""
+        fn = self.fbase + ".bed"
+        with open(fn, "rb") as f:
+            head = f.read(3)
+        if head[:2] != _BED_MAGIC:
+            raise ValueError(
+                "%s is not a PLINK BED file (its first bytes are %s, expected 6c 1b)"
+                % (fn, head[:2].hex() or "empty")
+            )
+        if head[2:3] != _BED_SNP_MAJOR:
+            raise ValueError(
+                "%s is not in SNP-major order (third byte %s, expected 01); pylmm reads "
+                "SNP-major BED files only (rewrite it with PLINK: plink --bfile X --make-bed "
+                "--out Y)" % (fn, head[2:3].hex() or "missing")
+            )
+
+    # -- SNP iteration ------------------------------------------------------
+
+    def iter_snps(self) -> PlinkReader:
         """Open the genotype files and return the iterator (this reader).
 
         Resets the iteration, so it can be called again to re-read from the
-        first SNP.  Each ``next()`` returns ``(genotypes, snp_name)``: a
-        float64 array of length ``N`` and the SNP's name.
-
-        .. warning::
-           The length is ``N``, the number of individuals in the genotype
-           file, NOT ``len(indivs)``.  If a FaSTLMM kinship dropped
-           individuals, ``indivs``, ``K`` and ``phenos`` are shorter than the
-           genotype vector, which is not subset to match (TODO(5b)).
+        first SNP; the files of the previous iteration are closed first.
+        Each ``next()`` returns ``(genotypes, snp_name)``: a float64 array of
+        length ``len(indivs)``, in the order of `indivs`, and the SNP's name.
+        The files are closed when the iteration ends (and by `close`).
 
         Returns
         -------
@@ -308,110 +378,97 @@ class PlinkReader:
         Raises
         ------
         ValueError
-            If `type` is not a known format.  (The constructor already
-            rejects one; this catches a later reassignment.  It used to
-            write to stderr and return None.)
-        StopIteration
-            For a BED file that is not SNP-major (third header byte not
-            ``0x01``): a message goes to stderr and a bare ``StopIteration``
-            is raised.  Because it is raised by ``iter(reader)`` itself, it
-            escapes a ``for g, name in reader`` loop as an exception instead
-            of ending the loop quietly.  TODO(5b): make this a ValueError.
+            If `type` is not a known format (the constructor already rejects
+            one; this catches a later reassignment), or the BED file is not
+            SNP-major (also checked by the constructor).
         """
+        self.close()
+        self._exhausted = False
         if self.type == "b":
-            return self._get_snp_iterator_bed()
+            return self._iter_snps_bed()
         elif self.type == "t":
-            return self._get_snp_iterator_tped()
+            return self._iter_snps_tped()
         elif self.type == "emma":
-            return self._get_snp_iterator_emma()
+            return self._iter_snps_emma()
         else:
             raise ValueError("unknown genotype file type %r" % (self.type,))
 
-    def _get_snp_iterator_emma(self) -> PlinkReader:
+    def _iter_snps_emma(self) -> PlinkReader:
         """Open the EMMA matrix; the number of SNPs is unknown (-1)."""
         self.have_read = 0
         self.num_snps = -1
-        file = self.fbase
-        self.fhandle = open(file)
+        self.fhandle = open(self.fbase)
 
         return self
 
-    def _get_snp_iterator_tped(self) -> PlinkReader:
+    @staticmethod
+    def _count_lines(fn: str) -> int:
+        with open(fn) as f:
+            return sum(1 for _ in f)
+
+    def _iter_snps_tped(self) -> PlinkReader:
         """Open ``.tped`` and the ``.bim`` (or ``.map``) used for SNP names."""
-        # get the number of snps
         file = self.fbase + ".bim"
         if not os.path.isfile(file):
             file = self.fbase + ".map"
-        i = 0
-        f = open(file)
-        for _ in f:
-            i += 1
-        f.close()
-        self.num_snps = i
+        self.num_snps = self._count_lines(file)
         self.have_read = 0
         self.snp_file_handle = open(file)
-
-        file = self.fbase + ".tped"
-        self.fhandle = open(file)
+        self.fhandle = open(self.fbase + ".tped")
 
         return self
 
-    def _get_snp_iterator_bed(self) -> PlinkReader:
+    def _iter_snps_bed(self) -> PlinkReader:
         """Open ``.bed`` (checking SNP-major order) and ``.bim``."""
-        # get the number of snps
+        self._check_bed_header()
         file = self.fbase + ".bim"
-        i = 0
-        f = open(file)
-        for _ in f:
-            i += 1
-        f.close()
-        self.num_snps = i
+        self.num_snps = self._count_lines(file)
         self.have_read = 0
-        self.snp_file_handle = open(file)
-
         self._bytes_to_read = self.N // 4 + ((self.N % 4 and 1) or 0)
-
-        file = self.fbase + ".bed"
-        self.fhandle = open(file, "rb")
-
-        self.fhandle.read(2)  # magic number
-        order = self.fhandle.read(1)
-        if order != b"\x01":
-            sys.stderr.write("This is not in SNP major order - you did not handle this case\n")
-            raise StopIteration
+        self.snp_file_handle = open(file)
+        self.fhandle = open(self.fbase + ".bed", "rb")
+        self.fhandle.read(3)  # magic number and SNP-major flag, checked above
 
         return self
 
     def __iter__(self) -> PlinkReader:
-        """Start (or restart) iteration over the SNPs; see `get_snp_iterator`."""
-        return self.get_snp_iterator()
+        """Start (or restart) iteration over the SNPs; see `iter_snps`."""
+        return self.iter_snps()
+
+    def _stop(self) -> StopIteration:
+        """End the iteration: close the files and return the StopIteration to raise."""
+        self.close()
+        self._exhausted = True
+        return StopIteration()
 
     def __next__(self) -> tuple[NDArray[np.float64], str]:
         """Return the next SNP as ``(genotypes, snp_name)``.
 
-        ``genotypes`` is a float64 array of length ``N``, the number of
-        individuals in the genotype file (NOT ``len(indivs)``; they differ
-        when a FaSTLMM kinship dropped individuals, and the vector is not
-        subset to match: TODO(5b)): the fraction of A2 alleles (0, 0.5, 1;
-        nan if missing), standardised if ``norm_genotype`` is true.  ``snp_name`` is the SNP id from the
+        ``genotypes`` is a float64 array of length ``len(indivs)``, in the
+        order of `indivs` (individuals dropped by a kinship with IDs or by
+        `subset` are left out): the fraction of A2 alleles (0, 0.5, 1; nan
+        if missing), standardised over those individuals if
+        ``norm_genotype`` is true.  ``snp_name`` is the SNP id from the
         ``.bim``/``.map`` file (``SNP_<k>`` for EMMA).
 
         Raises
         ------
         StopIteration
-            After the last SNP.
+            After the last SNP (the files are then closed).
         ValueError
-            If the BED file is truncated, or (``type="t"``) a TPED allele
+            If the BED file is truncated, (``type="t"``) a TPED allele
             code is not 0, 1 or 2 (see the module docstring; the message
-            names the SNP and gives the PLINK recode command).
+            names the SNP and gives the PLINK recode command), or
+            `iter_snps` was not called first.
         """
-        if self.have_read == self.num_snps:
+        if self._exhausted:
             raise StopIteration
-        self.have_read += 1
-        # Both are opened by get_snp_iterator, which sets have_read; calling
-        # next() without it fails on have_read above.
         fh = self.fhandle
-        assert fh is not None, "call get_snp_iterator() first"
+        if fh is None:
+            raise ValueError("no genotype file is open: call iter_snps() (or iterate) first")
+        if self.have_read == self.num_snps:
+            raise self._stop()
+        self.have_read += 1
 
         if self.type == "b":
             snp_names = self.snp_file_handle
@@ -433,7 +490,7 @@ class PlinkReader:
             xx = X.strip().split()
             chrm, rsid, pos1, pos2 = tuple(xx[:4])
             xx = xx[4:]
-            G = self._get_genos_tped(xx, rsid)
+            G = self._subset_genotypes(self._get_genos_tped(xx, rsid))
             if self.norm_genotype:
                 G = self.normalize_genotype(G)
             return G, snp_names.readline().strip().split()[1]
@@ -441,7 +498,7 @@ class PlinkReader:
         elif self.type == "emma":
             X = fh.readline()
             if X == "":
-                raise StopIteration
+                raise self._stop()
             xx = X.strip().split()
             vals: list[float] = []
             for x in xx:
@@ -449,14 +506,21 @@ class PlinkReader:
                     vals.append(float(x))
                 except Exception:  # noqa: PERF203 - per-value fallback to NaN
                     vals.append(np.nan)
-            G = np.array(vals)
+            G = self._subset_genotypes(np.array(vals))
             if self.norm_genotype:
                 G = self.normalize_genotype(G)
             return G, "SNP_%d" % self.have_read
 
         else:
-            # Unreachable unless `type` was reassigned after get_snp_iterator.
+            # Unreachable unless `type` was reassigned after iter_snps.
             raise ValueError("unknown genotype file type %r" % (self.type,))
+
+    def _subset_genotypes(self, G: NDArray[np.float64]) -> NDArray[np.float64]:
+        """The values of `indivs`, in their order, from a genotype-file-order vector."""
+        if self._geno_index is None:
+            return G
+        out: NDArray[np.float64] = G[self._geno_index]
+        return out
 
     # Allele codes of a 1/2-recoded TPED (PLINK 1.9 --recode 12 transpose):
     # 1 and 2 are the alleles, 0 is PLINK's default missing-genotype code.
@@ -465,8 +529,9 @@ class PlinkReader:
     def _get_genos_tped(self, X: list[str], snp: str = "?") -> NDArray[np.float64]:
         """Convert one TPED row's allele pairs to 0 / 0.5 / 1 / nan.
 
-        ``0 0`` is missing, ``1 1`` is 0, ``2 2`` is 1, mixed is 0.5 (so a
-        half-missing ``0 1`` / ``0 2`` is also 0.5, as before).
+        ``1 1`` is 0, ``2 2`` is 1, ``1 2`` / ``2 1`` is 0.5, and a pair with
+        a ``0`` (``0 0``, or half-missing ``0 1`` / ``2 0``) is missing, as
+        in PLINK.  (Before Phase 5b a half-missing pair was read as 0.5.)
 
         Raises
         ------
@@ -488,14 +553,14 @@ class PlinkReader:
         for i in range(0, len(X) - 1, 2):
             a = X[i]
             b = X[i + 1]
-            if a == b == "0":
+            if a == "0" or b == "0":
                 g = np.nan
-            if a == b == "1":
-                g = 0
-            if a == b == "2":
-                g = 1
-            if a != b:
+            elif a != b:
                 g = 0.5
+            elif a == "1":
+                g = 0.0
+            else:
+                g = 1.0
             G.append(g)
         return np.array(G)
 
@@ -510,13 +575,14 @@ class PlinkReader:
     def _format_binary_genotypes(self, X: bytes, norm: bool = True) -> NDArray[np.float64]:
         """Decode the raw BED bytes of one SNP (``_bytes_to_read`` of them).
 
-        Returns the fraction of A2 alleles (0, 0.5, 1, nan) for the first
-        ``N`` individuals, standardised if `norm`.
+        Returns the fraction of A2 alleles (0, 0.5, 1, nan) of `indivs`,
+        standardised if `norm`.
         """
         B = np.frombuffer(X, dtype=np.uint8)
         codes = (B[:, None] >> self._BED_SHIFTS) & 3
         # only take the leading values because whatever is left should be null
         G: NDArray[np.float64] = self._BED_CODE_VALUES[codes.reshape(-1)[: self.N]]
+        G = self._subset_genotypes(G)
         if norm:
             G = self.normalize_genotype(G)
         return G
@@ -563,47 +629,160 @@ class PlinkReader:
 
         return G
 
-    def get_phenos(self, pheno_file: str | None = None) -> NDArray[np.float64] | None:
+    # -- individuals --------------------------------------------------------
+
+    def subset(self, ids: Sequence[Any]) -> None:
+        """Keep only these individuals, in this order.
+
+        `indivs`, `phenos`, `K` and the genotype vectors of later SNPs are
+        all restricted and reordered together; the others are added to
+        `indivs_removed`.  Genotypes are standardised over the kept
+        individuals.
+
+        Parameters
+        ----------
+        ids : sequence
+            IDs from `indivs` (``(FID, IID)`` pairs, or positions for EMMA),
+            matched as ``id_match`` says.
+
+        Raises
+        ------
+        ValueError
+            If an ID is not in `indivs`, is listed twice, or `ids` is empty.
+        """
+        ids = list(ids)
+        if not ids:
+            raise ValueError("subset needs at least one individual")
+        idx = samples.match_index(
+            ids,
+            self.indivs,
+            match=self.id_match,
+            target_name="the requested individuals",
+            source_name="the genotype file",
+        )
+        absent = [s for s, i in zip(ids, idx) if i < 0]
+        if absent:
+            raise ValueError(
+                "%d of the requested individuals are not in the genotype file %s: %s"
+                % (len(absent), self.fbase, ", ".join(samples.format_id(s) for s in absent[:5]))
+            )
+        self._restrict(idx)
+
+    def _restrict(self, pos: NDArray[np.intp]) -> None:
+        """Keep the individuals at positions `pos` of `indivs` (in that order)."""
+        kept = set(pos.tolist())
+        self.indivs_removed = self.indivs_removed + [
+            s for i, s in enumerate(self.indivs) if i not in kept
+        ]
+        base = np.arange(self.N) if self._geno_index is None else self._geno_index
+        index = base[pos]
+        self._geno_index = (
+            None if len(index) == self.N and np.array_equal(index, np.arange(self.N)) else index
+        )
+        self.indivs = cast("list[Any]", [self.indivs[i] for i in pos])
+        if self.phenos is not None:
+            self.phenos = self.phenos[pos]
+        if self.K is not None:
+            self.K = self.K[np.ix_(pos, pos)]
+
+    # -- phenotypes and covariates -------------------------------------------
+
+    def read_phenos(
+        self, pheno_file: str | None = None, columns: Sequence[str | int] | None = None
+    ) -> NDArray[np.float64] | None:
         """Read a PLINK-style phenotype file into ``self.phenos``.
 
         The file has one individual per line, ``FID IID value [value ...]``,
-        with an optional ``FID IID ...`` header; ``NA`` and ``-9`` are
-        missing.  Rows are matched by ``(FID, IID)`` and returned in the
-        order of ``self.indivs``.  Individuals absent from the file get nan
-        (with a warning giving the count); the file's extra individuals are
-        ignored.  (Bug 10, fixed in Phase 5.2: absent individuals used to be
-        skipped, which shifted the rows of everyone after them.)  For EMMA
-        input, which has no IDs, rows are taken in order and their number
-        must equal the number of individuals.
+        with an optional ``FID IID name [name ...]`` header; ``NA`` and
+        ``-9`` are missing.  Rows are matched by ID (see ``id_match``) and
+        returned in the order of ``self.indivs``.  Individuals absent from
+        the file get nan (with a warning giving the count); the file's extra
+        individuals are ignored.  For EMMA input, which has no IDs, rows are
+        taken in order and their number must equal the number of
+        individuals.
 
         Parameters
         ----------
         pheno_file : str, optional
             Path of the phenotype file.  If omitted, ``fbase + ".phenos"`` is
             used (and recorded in ``self.pheno_file``).
+        columns : sequence of str or int, optional
+            The phenotypes to read: names from the header, or 0-based indices
+            of the value columns.  Default: all.
 
         Returns
         -------
         numpy.ndarray or None
             Shape ``(len(indivs), n_phenotypes)``, float64, also stored in
-            ``self.phenos``.  None (and ``self.phenos`` unchanged) if the file
-            does not exist.
+            ``self.phenos`` (and the names in ``self.pheno_names``).  None
+            (and ``self.phenos`` unchanged) if the file does not exist.
 
         Raises
         ------
         ValueError
-            On a malformed file, duplicate IDs, or when no individual matches.
+            On a malformed file, duplicate IDs, no matching individual, or
+            an unknown column.
         """
         if not pheno_file:
             self.pheno_file = pheno_file = self.fbase + ".phenos"
         if not os.path.isfile(pheno_file):
-            # sys.stderr.write("Could not find phenotype file: %s\n" % (pheno_file))
             return None
-        keys, P = self._read_table(pheno_file, lambda x: x == "NA" or x == "-9", "phenotype")
-        self.phenos = self._align_rows(keys, P, pheno_file, "phenotype")
+        table = samples.read_sample_table(
+            pheno_file,
+            what="phenotype",
+            is_missing=lambda x: x == "NA" or x == "-9",
+            columns=columns,
+        )
+        self.phenos = self._align_rows(table.ids, table.values, pheno_file, "phenotype")
+        self.pheno_names = table.names
         return self.phenos
 
-    def get_phenos_emma(self, emma_file: str) -> NDArray[np.float64]:
+    def read_covariates(
+        self, cov_file: str, columns: Sequence[str | int] | None = None
+    ) -> NDArray[np.float64]:
+        """Read a PLINK-style covariate file, aligned to ``self.indivs``.
+
+        Format ``FID IID c1 c2 ...`` with an optional ``FID IID name ...``
+        header; ``NA`` is missing (``-9`` is *not*).  Matched to
+        ``self.indivs`` by ID like `read_phenos`; absent individuals get nan
+        rows.
+
+        Parameters
+        ----------
+        cov_file : str
+            Path of the covariate file (required; there is no default file,
+            unlike `read_phenos`).
+        columns : sequence of str or int, optional
+            The covariates to read: names from the header, or 0-based
+            indices of the value columns.  Default: all.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(len(indivs), n_covariates)``, float64: the covariate
+            columns of the file only, WITHOUT an intercept column.  Passing
+            this alone as ``X0`` to `pylmm.lmm.gwas` or `pylmm.lmm.LMM`
+            silently fits a model with no intercept (test statistics can
+            change a lot).  Add one: ``X0 = np.column_stack([np.ones(n),
+            cov])``.  The names are stored in ``self.covariate_names``.
+
+        Raises
+        ------
+        ValueError
+            If `cov_file` is None, or the file is missing or malformed, has
+            duplicate IDs, no individual matches, or a column is unknown.
+        """
+        if cov_file is None:
+            raise ValueError("read_covariates needs the path of a covariate file; cov_file is None")
+        if not os.path.isfile(cov_file):
+            raise ValueError("Could not find covariate file: %s" % (cov_file))
+        table = samples.read_sample_table(
+            cov_file, what="covariate", is_missing=lambda x: x == "NA", columns=columns
+        )
+        self.covariate_names = table.names
+        return self._align_rows(table.ids, table.values, cov_file, "covariate")
+
+    def read_phenos_emma(self, emma_file: str) -> NDArray[np.float64]:
         """Read EMMA phenotypes: one phenotype per row, one column per individual.
 
         Columns are in genotype order (no IDs); anything that is not a number
@@ -640,221 +819,10 @@ class PlinkReader:
                 P.append(p)
         return self._emma_columns(P, emma_file, "phenotype")
 
-    def _emma_columns(self, rows: list[list[float]], fn: str, what: str) -> NDArray[np.float64]:
-        """Check that every row has one value per individual; return the transpose."""
-        n = len(self.indivs)
-        bad = [i for i, r in enumerate(rows) if len(r) != n]
-        if bad or not rows:
-            raise ValueError(
-                "EMMA %s file %s: expected rows of %d values (one per individual), %s"
-                % (
-                    what,
-                    fn,
-                    n,
-                    "found no rows"
-                    if not rows
-                    else "row %d has %d" % (bad[0] + 1, len(rows[bad[0]])),
-                )
-            )
-        return np.array(rows, dtype=np.float64).T
-
-    @staticmethod
-    def _read_table(
-        fn: str, is_missing: Callable[[str], bool], what: str
-    ) -> tuple[list[IndivKey], list[list[float]]]:
-        """(keys, values) of a FID IID v1 v2 ... file.  A first line whose first two
-        fields are FID IID (case-insensitive) is a header and is skipped."""
-        keys = []
-        P = []
-        with open(fn) as f:
-            first = True
-            for lineno, line in enumerate(f, 1):
-                v = line.strip().split()
-                if not v:
-                    continue
-                # a header line starting FID IID (any case) is skipped
-                if first and len(v) >= 2 and v[0].upper() == "FID" and v[1].upper() == "IID":
-                    first = False
-                    continue
-                first = False
-                if len(v) < 3:
-                    raise ValueError(
-                        "%s file %s, line %d: expected FID IID and at least one value"
-                        % (what, fn, lineno)
-                    )
-                try:
-                    P.append([np.nan if is_missing(x.strip()) else float(x) for x in v[2:]])
-                except ValueError:
-                    raise ValueError(
-                        "%s file %s, line %d: a value is not a number (missing values are "
-                        "NA%s)" % (what, fn, lineno, " or -9" if what == "phenotype" else "")
-                    ) from None
-                keys.append((v[0], v[1]))
-        widths = {len(p) for p in P}
-        if len(widths) > 1:
-            raise ValueError(
-                "%s file %s: rows have different numbers of values (%s)"
-                % (what, fn, ", ".join(str(w) for w in sorted(widths)))
-            )
-        return keys, P
-
-    def _align_rows(
-        self, keys: list[IndivKey], P: list[list[float]], fn: str, what: str
-    ) -> NDArray[np.float64]:
-        """Rows of P (keyed by (FID, IID)) in self.indivs order; nan rows for
-        absent individuals.  Raises ValueError for duplicate IDs or when no
-        individual matches."""
-        if not P:
-            raise ValueError("%s file %s has no data rows" % (what, fn))
-        if self.type == "emma":
-            if len(P) != len(self.indivs):
-                raise ValueError(
-                    "%s file %s has %d rows but the EMMA genotypes have %d individuals; "
-                    "with EMMA input the rows are matched by position"
-                    % (what, fn, len(P), len(self.indivs))
-                )
-            return np.array(P, dtype=np.float64)
-        indivs = self._id_keys()
-        D: dict[IndivKey, int] = {}
-        for i, k in enumerate(keys):
-            if k in D:
-                raise ValueError("%s file %s lists individual %s %s twice" % (what, fn, k[0], k[1]))
-            D[k] = i
-        idx = [D.get(k, -1) for k in indivs]
-        absent = [k for k, i in zip(indivs, idx) if i < 0]
-        if len(absent) == len(indivs):
-            raise ValueError(
-                "none of the %d individuals of the genotype file appear in the %s file %s "
-                "(matched on the first two columns, FID and IID; e.g. %s %s)"
-                % (len(indivs), what, fn, indivs[0][0], indivs[0][1])
-            )
-        ncol = len(P[0])
-        out = np.full((len(indivs), ncol), np.nan)
-        for r, i in enumerate(idx):
-            if i >= 0:
-                out[r] = P[i]
-        if absent:
-            warnings.warn(
-                "%d of %d individuals are not in the %s file %s and are treated as missing "
-                "(e.g. %s)"
-                % (
-                    len(absent),
-                    len(indivs),
-                    what,
-                    fn,
-                    ", ".join("%s %s" % k for k in absent[:5]),
-                ),
-                stacklevel=3,
-            )
-        return out
-
-    def _id_keys(self) -> list[IndivKey]:
-        """`indivs` as ``(FID, IID)`` pairs, for the "b"/"t" code paths.
-
-        Only a typing view: for EMMA input `indivs` holds ints, and the
-        callers either handle EMMA before (``_align_rows``) or, for a FaSTLMM
-        kinship with EMMA genotypes, match nothing, as before.
-        """
-        return cast("list[IndivKey]", self.indivs)
-
-    def _read_fam(self, base: str, type: str = "b") -> list[IndivKey]:
-        """Read ``(FID, IID)`` of each individual from ``.tfam`` ("t") or ``.fam``; sets ``N``."""
-        if type == "t":
-            fam_file = "%s.tfam" % base
-        else:
-            fam_file = "%s.fam" % base
-
-        keys = []
-        f = open(fam_file)
-        for line in f:
-            v = line.strip().split()
-            fam_id = v[0]
-            indiv_id = v[1]
-            k = (fam_id.strip(), indiv_id.strip())
-            keys.append(k)
-        f.close()
-
-        self.N = len(keys)
-        sys.stderr.write("Read %d individuals from %s\n" % (self.N, fam_file))
-
-        return keys
-
-    def read_kinship(self, k_file: str) -> NDArray[np.float64] | None:
-        """Read a kinship matrix from a text file.
-
-        Plain format: ``n`` lines of ``n`` whitespace-separated numbers in
-        genotype order.  FaSTLMM format (``fastlmm_kinship=True``): the first
-        line is a tab-separated header whose first field is ignored and
-        whose others are ``FID IID`` labels, and each following line starts
-        with a label field that is ignored.  The matrix is then reordered to
-        ``self.indivs`` and individuals absent from it are dropped: ``indivs``
-        is replaced by the kept individuals and the dropped ones are stored
-        in ``indivs_removed``.
-
-        Parameters
-        ----------
-        k_file : str
-            Path of the kinship file.
-
-        Returns
-        -------
-        numpy.ndarray or None
-            The kinship matrix, shape ``(n, n)``; None (with a message on
-            stderr) if no individuals were read.
-        """
-        if self.indivs is None or len(self.indivs) == 0:
-            sys.stderr.write("Did not read any individuals so can't load kinship\n")
-            return None
-
-        sys.stderr.write("Reading kinship matrix from %s\n" % (k_file))
-
-        f = open(k_file)
-        # read indivs
-        if self.fastlmm_kinship:
-            v = f.readline().strip().split("\t")[1:]
-            keys = [tuple(y.split()) for y in v]
-            D: dict[tuple[str, ...], int] = {}
-            for i in range(len(keys)):
-                D[keys[i]] = i
-
-        # read matrix
-        rows: list[list[float]] = []
-        if self.fastlmm_kinship:
-            for line in f:
-                rows.append([float(x) for x in line.strip().split("\t")[1:]])
-        else:
-            for line in f:
-                rows.append([float(x) for x in line.strip().split()])
-        f.close()
-        K = np.array(rows)
-
-        if self.fastlmm_kinship:
-            # reorder to match self.indivs
-            indivs = self._id_keys()
-            L = []
-            kept = []
-            X = []
-            for i in range(len(indivs)):
-                if indivs[i] not in D:
-                    X.append(indivs[i])
-                else:
-                    kept.append(indivs[i])
-                    L.append(D[indivs[i]])
-            K = K[L, :][:, L]
-            self.indivs = kept
-            self.indivs_removed = X
-            if len(self.indivs_removed):
-                sys.stderr.write(
-                    "Removed %d individuals that did not appear in Kinship\n"
-                    % (len(self.indivs_removed))
-                )
-
-        return K
-
-    def get_covariates_emma(self, emma_file: str) -> NDArray[np.float64]:
+    def read_covariates_emma(self, emma_file: str) -> NDArray[np.float64]:
         """Read EMMA covariates: one covariate per row, one column per individual.
 
-        Like `get_phenos_emma` but only ``NA`` is a missing value; any other
+        Like `read_phenos_emma` but only ``NA`` is a missing value; any other
         non-number raises.
 
         Parameters
@@ -888,39 +856,207 @@ class PlinkReader:
                     ) from None
         return self._emma_columns(P, emma_file, "covariate")
 
-    def get_covariates(self, cov_file: str) -> NDArray[np.float64]:
-        """Read a PLINK-style covariate file, aligned to ``self.indivs``.
+    def _emma_columns(self, rows: list[list[float]], fn: str, what: str) -> NDArray[np.float64]:
+        """Check that every row has one value per individual; return the transpose."""
+        n = len(self.indivs)
+        bad = [i for i, r in enumerate(rows) if len(r) != n]
+        if bad or not rows:
+            raise ValueError(
+                "EMMA %s file %s: expected rows of %d values (one per individual), %s"
+                % (
+                    what,
+                    fn,
+                    n,
+                    "found no rows"
+                    if not rows
+                    else "row %d has %d" % (bad[0] + 1, len(rows[bad[0]])),
+                )
+            )
+        return np.array(rows, dtype=np.float64).T
 
-        Format ``FID IID c1 c2 ...`` with an optional header; ``NA`` is
-        missing (``-9`` is *not*).  Matched to ``self.indivs`` by
-        ``(FID, IID)`` like `get_phenos`; absent individuals get nan rows.
+    def _align_rows(
+        self, keys: list[SampleID], P: NDArray[np.float64], fn: str, what: str
+    ) -> NDArray[np.float64]:
+        """Rows of P (keyed by ID) in self.indivs order; nan rows for absent
+        individuals.  Raises ValueError for duplicate IDs or when no
+        individual matches."""
+        if self.type == "emma":
+            if len(P) != len(self.indivs):
+                raise ValueError(
+                    "%s file %s has %d rows but the EMMA genotypes have %d individuals; "
+                    "with EMMA input the rows are matched by position"
+                    % (what, fn, len(P), len(self.indivs))
+                )
+            return np.array(P, dtype=np.float64)
+        indivs = cast("list[SampleID]", self.indivs)
+        idx = samples.match_index(
+            indivs,
+            keys,
+            match=self.id_match,
+            target_name="the genotype file %s" % self.fbase,
+            source_name="%s file %s" % (what, fn),
+        )
+        found = idx >= 0
+        if not found.any():
+            raise ValueError(
+                "none of the %d individuals of the genotype file appear in the %s file %s "
+                "(matched on %s; e.g. %s %s)"
+                % (
+                    len(indivs),
+                    what,
+                    fn,
+                    "the second column, IID"
+                    if self.id_match == "iid"
+                    else "the first two columns, FID and IID",
+                    indivs[0][0],
+                    indivs[0][1],
+                )
+            )
+        out = np.full((len(indivs), P.shape[1]), np.nan)
+        out[found] = P[idx[found]]
+        absent = [k for k, f in zip(indivs, found) if not f]
+        if absent:
+            warnings.warn(
+                "%d of %d individuals are not in the %s file %s and are treated as missing "
+                "(e.g. %s)"
+                % (
+                    len(absent),
+                    len(indivs),
+                    what,
+                    fn,
+                    ", ".join("%s %s" % k for k in absent[:5]),
+                ),
+                stacklevel=3,
+            )
+        return out
+
+    def _read_fam(self, base: str, type: str = "b") -> list[SampleID]:
+        """Read ``(FID, IID)`` of each individual from ``.tfam`` ("t") or ``.fam``; sets ``N``."""
+        if type == "t":
+            fam_file = "%s.tfam" % base
+        else:
+            fam_file = "%s.fam" % base
+
+        keys = []
+        with open(fam_file) as f:
+            for line in f:
+                v = line.strip().split()
+                keys.append((v[0].strip(), v[1].strip()))
+
+        self.N = len(keys)
+        sys.stderr.write("Read %d individuals from %s\n" % (self.N, fam_file))
+
+        return keys
+
+    # -- kinship ------------------------------------------------------------
+
+    def read_kinship(self, k_file: str) -> NDArray[np.float64] | None:
+        """Read a kinship matrix from a text file into ``self.K``.
+
+        Plain format: ``n`` lines of ``n`` whitespace-separated numbers.  The
+        rows are named by the ID sidecar ``k_file + ".id"`` (one ``FID IID``
+        per line, as ``pylmmKinship`` writes it) if it exists; otherwise they
+        must be the individuals of `indivs`, in that order.  For EMMA
+        genotypes, which have no IDs, a sidecar is ignored with a warning
+        (as in ``pylmmGWAS``) and the rows are in genotype order.  FaSTLMM format
+        (``fastlmm_kinship=True``): the first line is a tab-separated header
+        whose first field is ignored and whose others are ``FID IID`` labels,
+        and each following line starts with a label field that is ignored.
+
+        With IDs (a sidecar or FaSTLMM labels) the matrix is reordered to
+        `indivs`, and individuals absent from it are dropped from the reader
+        as by `subset`: from `indivs`, `phenos` and the genotype vectors, and
+        listed in `indivs_removed`, with a warning.  Its extra individuals
+        are ignored, with a warning.
 
         Parameters
         ----------
-        cov_file : str
-            Path of the covariate file (required; there is no default file,
-            unlike `get_phenos`).
+        k_file : str
+            Path of the kinship file.
 
         Returns
         -------
-        numpy.ndarray
-            Shape ``(len(indivs), n_covariates)``, float64: the covariate
-            columns of the file only, WITHOUT an intercept column.  Passing
-            this alone as ``X0`` to `pylmm.lmm.gwas` or `pylmm.lmm.LMM`
-            silently fits a model with no intercept (test statistics can
-            change a lot).  Add one: ``X0 = np.column_stack([np.ones(n),
-            cov])``.
+        numpy.ndarray or None
+            The kinship matrix, shape ``(len(indivs), len(indivs))``, also
+            stored in ``self.K``; None (with a message on stderr) if no
+            individuals were read.
 
         Raises
         ------
         ValueError
-            If `cov_file` is None (it used to raise TypeError), or the file
-            is missing or malformed, has duplicate IDs, or no individual
-            matches.
+            If a plain matrix without IDs is not ``len(indivs)`` square, the
+            IDs do not match the size of the matrix, an ID is listed twice,
+            no individual is in both, or FaSTLMM labels are given for EMMA
+            genotypes (which have none).
         """
-        if cov_file is None:
-            raise ValueError("get_covariates needs the path of a covariate file; cov_file is None")
-        if not os.path.isfile(cov_file):
-            raise ValueError("Could not find covariate file: %s" % (cov_file))
-        keys, P = self._read_table(cov_file, lambda x: x == "NA", "covariate")
-        return self._align_rows(keys, P, cov_file, "covariate")
+        if self.indivs is None or len(self.indivs) == 0:
+            sys.stderr.write("Did not read any individuals so can't load kinship\n")
+            return None
+
+        sys.stderr.write("Reading kinship matrix from %s\n" % (k_file))
+
+        kin_ids: list[SampleID] | None = None
+        rows: list[list[float]] = []
+        with open(k_file) as f:
+            if self.fastlmm_kinship:
+                header = f.readline().strip().split("\t")[1:]
+                kin_ids = []
+                for label in header:
+                    v = label.split()
+                    if len(v) != 2:
+                        raise ValueError(
+                            "FaSTLMM kinship %s: header label %r is not 'FID IID'" % (k_file, label)
+                        )
+                    kin_ids.append((v[0], v[1]))
+                for line in f:
+                    rows.append([float(x) for x in line.strip().split("\t")[1:]])
+            else:
+                for line in f:
+                    rows.append([float(x) for x in line.strip().split()])
+        K = np.array(rows)
+        if not self.fastlmm_kinship:
+            if self.type == "emma" and os.path.isfile(samples.kinship_id_path(k_file)):
+                # As in pylmmGWAS: EMMA genotypes have no IDs, so K is in genotype order.
+                warnings.warn(
+                    "%s is ignored: EMMA genotypes have no IDs, so K is in genotype order"
+                    % samples.kinship_id_path(k_file),
+                    stacklevel=2,
+                )
+            else:
+                kin_ids = samples.read_kinship_ids(k_file)
+
+        if kin_ids is None:
+            n = len(self.indivs)
+            if K.shape != (n, n):
+                raise ValueError(
+                    "kinship file %s is a %s matrix but there are %d individuals; without an ID "
+                    "file %s its rows must be the individuals of the genotype file, in order"
+                    % (
+                        k_file,
+                        "x".join(str(d) for d in K.shape),
+                        n,
+                        samples.kinship_id_path(k_file),
+                    )
+                )
+            self.K = K
+            return K
+
+        if self.type == "emma":
+            raise ValueError(
+                "kinship %s has sample IDs but EMMA genotypes have none, so they cannot be "
+                "matched" % k_file
+            )
+        if K.ndim != 2 or K.shape != (len(kin_ids), len(kin_ids)):
+            raise ValueError(
+                "kinship file %s is a %s matrix but names %d individuals"
+                % (k_file, "x".join(str(d) for d in K.shape), len(kin_ids))
+            )
+        al = samples.align_samples(
+            {"genotype file": self.indivs, "kinship": kin_ids}, match=self.id_match
+        )
+        for line in al.report():
+            warnings.warn(line, stacklevel=2)
+        self.K = None  # replaced below; do not subset the previous matrix
+        self._restrict(al.rows["genotype file"])
+        self.K = al.take_square("kinship", K)
+        return self.K

@@ -408,15 +408,23 @@ EXTRA_ROWS = [
 
 def write_csv():
     path = os.path.join(REPO, "docs", "migration", "name-map.csv")
+    # Rows of later phases (5b, ...) are kept as they are.
+    later = []
+    if os.path.isfile(path):
+        with open(path) as fh:
+            later = [r for r in csv.DictReader(fh) if r.get("phase", "5.4") != "5.4"]
+    cols = ["old_name", "new_name", "kind", "module", "phase", "notes"]
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh, lineterminator="\n")
-        w.writerow(["old_name", "new_name", "kind", "module"])
+        w.writerow(cols)
         for old, new, kind, mod, _ctx in RENAMES:
             for owner in mod.split(";"):
                 if owner.startswith("pylmm"):
-                    w.writerow([old, new, kind, owner])
+                    w.writerow([old, new, kind, owner, "5.4", ""])
         for row in EXTRA_ROWS:
-            w.writerow(row)
+            w.writerow([*row, "5.4", ""])
+        for r in later:
+            w.writerow([r[c] for c in cols])
     print("wrote", path)
 
 

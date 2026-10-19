@@ -687,7 +687,7 @@ def s2_lostmode():
         for pre, reml in (("r_", True), ("m_", False)):
 
             def ll(h, reml=reml, L=L):  # bind loop variables
-                return float(np.sum(L.log_likelihood(h, L.x0t, stack=False, reml=reml)[0]))
+                return L.log_likelihood(h, L.x0t, stack=False, reml=reml).ll
 
             with np.errstate(all="ignore"):
                 ll_201 = np.array([ll(h) for h in s2.LL_GRID])

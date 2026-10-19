@@ -30,7 +30,7 @@ L.fit()
 # Manually calculate the association at one SNP
 X = snps[:, 0]
 X[np.isnan(X)] = X[~np.isnan(X)].mean()  # Fill missing with MAF
-X = X.reshape(len(X), 1)
+# X is one SNP, shape (n,); an (n, 1) column works too
 if X.var() == 0:
     ts, ps = (np.nan, np.nan)
 else:

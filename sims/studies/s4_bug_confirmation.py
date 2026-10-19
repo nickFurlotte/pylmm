@@ -356,7 +356,7 @@ class SpyLMM:
         from pylmm.lmm import LMM
 
         class _Spy(LMM):
-            def _neg_log_likelihood(self, h, X=None, reml=False):
+            def _neg_log_likelihood(self, h, X=None, reml=True):
                 v = LMM._neg_log_likelihood(self, h, X, reml)
                 self.evals.append((float(h), float(v)))
                 return v

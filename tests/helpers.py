@@ -236,7 +236,7 @@ def read_bed_snps(nsnps, norm):
     from pylmm import plink_io
 
     reader = plink_io.PlinkReader(BED_BASE, type="b", norm_genotype=norm)
-    reader.get_snp_iterator()
+    reader.iter_snps()
     cols = []
     for _ in range(nsnps):
         g, _sid = next(reader)

@@ -26,6 +26,20 @@ ruff allows the symbols through `[tool.ruff.lint.pep8-naming] ignore-names`
 (`[A-Z]`, `[A-Z][0-9]`, `[A-Z][0-9][0-9]`), so they need no `noqa`. ruff does not check
 attribute names; the rule applies to them all the same.
 
+## Verbs, return values and defaults (Phase 5b)
+
+- `read_*` reads a file and returns (or stores) its data: `PlinkReader.read_phenos`,
+  `read_covariates`, `read_kinship`, `pylmm.samples.read_id_file`. `iter_*` returns an iterator:
+  `PlinkReader.iter_snps`. `write_*` writes a file. There are no `get_*` methods.
+- A scalar is returned as a float (`sigma`, `Q`, `beta_var`, a log-likelihood), never as a 1x1 array.
+  A result with more than two or three parts is a `NamedTuple` (`LogLikResult`), so tuple
+  unpacking keeps working.
+- Every function or method that takes `reml` defaults to `reml=True`.
+- "Not given" is `None` (`kva=None`), never an empty sequence.
+- One SNP may be passed as an `(n,)` vector or an `(n, 1)` column.
+- Individuals are matched by ID (`pylmm.samples`), never by row position, except for EMMA input,
+  which has no IDs.
+
 ## Exceptions that are not Python names
 
 These are data or user-facing interface and keep their spelling:
@@ -45,3 +59,9 @@ module, `module.Class`, or the function that takes the parameter);
 `docs/migration/rename_5_4.py` is the script that applied it and wrote the CSV (`--csv`).
 The row `next,__next__` records that the py2 `reader.next()` method is gone: callers should use
 `next(reader)`.
+
+Phase 5b.1 added its renames and signature changes to the same CSV, which now has a `phase`
+column (`5.4` or `5b.1`) and a `notes` column. Rows whose `old_name` equals `new_name`
+(`kind=signature`, or `parameter`) record a change of type or default, not of name. A name renamed
+twice has a row per phase (`getSNPIterator` -> `get_snp_iterator` in 5.4, -> `iter_snps` in 5b.1).
+`rename_5_4.py --csv` rewrites the 5.4 rows and keeps the later ones.

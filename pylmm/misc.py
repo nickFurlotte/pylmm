@@ -28,7 +28,7 @@ def fit_two(
     K2: NDArray[np.float64],
     X0: ArrayLike | None = None,
     ngrids: int = 100,
-) -> tuple[float, float, float, NDArray[np.float64], NDArray[np.float64], float]:
+) -> tuple[float, float, float, NDArray[np.float64], float, float]:
     """Fit a mixed model with two variance components over a grid of weights.
 
     The model is the usual LMM, ``Y = X0 b + g + e``, with ``g ~ N(0, h2_total
@@ -65,7 +65,7 @@ def fit_two(
         The residual fraction of the variance, ``1 - h``.
     beta : ndarray, shape (q, 1)
         Covariate coefficients at the optimum.
-    sigma : ndarray, shape (1, 1)
+    sigma : float
         The total variance estimate at the optimum.
     log_likelihood : float
         The (REML) log-likelihood at the optimum.

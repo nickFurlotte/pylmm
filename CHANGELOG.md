@@ -8,6 +8,38 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 
 ### Changed (breaking)
 
+#### Python API cleanups (Phase 5b.1)
+A clean break, with no aliases or shims; no number changes (the goldens and the README `pylmmGWAS` output
+are byte-identical). [`docs/migration/name-map.csv`](docs/migration/name-map.csv) has a row for each (now
+with `phase` and `notes` columns; `kind=signature` rows are changes of types or defaults, not names).
+- Return types: `LMM.ml_solution` returns `sigma` and `Q` as floats, `LMM.fit` returns `sigma` (and the
+  log-likelihood) as a float, and `LMM.association(return_beta=True)` returns `beta_var` as a float; they
+  were (1, 1) arrays. `misc.fit_two`'s `sigma` is a float too. `beta` stays a (q, 1) array.
+- `LMM.log_likelihood` returns `LogLikResult(ll, beta, sigma, xx_inv)`, a `NamedTuple` (so
+  `ll, beta, sigma, xx_inv = L.log_likelihood(h)` still works; `ll` and `sigma` are floats).
+- One `reml` rule: every function and method that takes `reml` defaults to `reml=True`.
+  `LMM.log_likelihood` (and the private `_neg_log_likelihood`, `_get_max`) defaulted to ML (`reml=False`);
+  pass `reml=False` for the ML log-likelihood.
+- `LMM()` and `gwas()`: `kva`/`kve` are `None` (compute the eigendecomposition) or both given. An empty
+  sequence (`[]`), which used to mean "compute", raises `ValueError` pointing to `None`, and so does giving
+  only one of them.
+- `PlinkReader` verbs: `read_*` reads a file, `iter_*` iterates. `get_phenos` -> `read_phenos`,
+  `get_covariates` -> `read_covariates`, `get_phenos_emma` -> `read_phenos_emma`, `get_covariates_emma` ->
+  `read_covariates_emma`, `get_snp_iterator` -> `iter_snps` (the private `_get_snp_iterator_*` ->
+  `_iter_snps_*`). `pylmm.plink_io.IndivKey` -> `pylmm.samples.SampleID`.
+- `PlinkReader` genotype vectors have `len(indivs)` values, in the order of `indivs`, also when a kinship
+  with IDs (FaSTLMM labels, or the new `.id` sidecar) or `subset()` dropped individuals; they used to keep
+  all `N` values (see Fixed). `N` is still the number of individuals in the genotype file.
+- `PlinkReader.read_kinship` also stores `self.K`; a plain kinship without IDs must be `len(indivs)` square
+  (`ValueError`; it was not checked), and a `k_file + ".id"` sidecar, if present, aligns it by ID.
+- `PlinkReader` checks the BED header at construction: a non-SNP-major BED (or a file that is not a BED)
+  raises `ValueError` there (see Fixed). Duplicate IDs in the genotype file now raise `ValueError` when
+  phenotypes, covariates or a kinship with IDs are matched to it.
+- A header line `FID IID name ...` of a phenotype or covariate file must name as many columns as the rows
+  have (`ValueError`; it used to be skipped unread).
+- `next(reader)` before `iter_snps()` raises `ValueError` (it was an `AttributeError` or a failed assert);
+  after the last SNP the files are closed and `next` keeps raising `StopIteration`.
+
 #### Python API: PEP 8 names (Phase 5.4)
 - Every Python name of the pylmm API follows PEP 8; a clean break, with no aliases or deprecation shims.
   [`docs/migration/name-map.csv`](docs/migration/name-map.csv) lists each changed name (`old_name`,
@@ -36,6 +68,26 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 
 ### Added
 
+#### Sample IDs and alignment (Phase 5b.1)
+- New module `pylmm.samples`: sample IDs are `(FID, IID)` pairs (`SampleID`); `align_samples()` aligns any
+  number of per-sample sources (genotypes, phenotypes, covariates, kinship) by ID and returns an `Alignment`
+  (the shared samples in the reference order, the rows of each source, and a report of the samples
+  dropped from each source and why); `match_index()`, `read_sample_table()` (header-aware
+  `FID IID v1 ...` tables), `read_id_file()` / `write_id_file()` / `read_kinship_ids()`. Matching is on
+  (FID, IID), or on the IID alone with `match="iid"`. Duplicate IDs are an error.
+- `PlinkReader(id_match="iid")` matches phenotype, covariate and kinship rows on the IID alone.
+- `PlinkReader.read_phenos(..., columns=)` / `read_covariates(..., columns=)` select columns by name (from a
+  `FID IID name ...` header) or by 0-based index; the names are in `pheno_names` / `covariate_names`
+  (None for a headerless file, which still works as before).
+- `PlinkReader.subset(ids)` keeps (and orders) individuals in `indivs`, `phenos`, `K` and the genotype
+  vectors together; `indivs_removed` is always set.
+- `PlinkReader` is a context manager (`with PlinkReader(...) as r:`) and has `close()`; `iter_snps()` closes
+  the files of the previous iteration, and the end of an iteration closes them too.
+- `LMM.association`, `LMM.fit(X=...)` and `LMM.log_likelihood(X=...)` accept a 1-D (n,) SNP as well as an
+  (n, 1) column (same numbers); a wrong shape is a `ValueError` naming the expected shape.
+- `pylmmKinship OUT` also writes `OUT.id`, the (FID, IID) of each row of the kinship, tab-separated (GCTA
+  `.grm.id` style; not for EMMA input, which has no IDs). The kinship file itself is unchanged.
+
 #### Types and docstrings (Phase 5.5/5.6)
 - Type hints on the library modules (`pylmm.lmm`, `pylmm.plink_io`, `pylmm.misc`; the CLI modules follow in
   Phase 5b), checked by mypy in CI (`just typecheck`), and a `py.typed` marker so type checkers use them.
@@ -46,6 +98,24 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
   `(FID, IID)` pairs, or column positions `0..n-1` for EMMA, which has no IDs.
 
 ### Changed
+
+#### pylmmGWAS: kinship IDs (Phase 5b.1)
+- `--kfile K` reads the ID file `K.id` if it exists and aligns the kinship to the genotype file by
+  (FID, IID): genotype individuals that are not in K are dropped (from the phenotype, the covariates and
+  every SNP vector) and K's extra individuals are ignored, each with a `pylmmGWAS: warning:` line listing
+  them. Without `K.id` it warns once and assumes, as before, that K's rows are the genotype individuals in
+  file order (not for EMMA input, which has no IDs). The shipped example kinship has a `.id` file, so the
+  README example prints no such warning; its output file is unchanged.
+- When K drops individuals, genotypes are imputed and standardised over the kept individuals, but
+  individuals dropped for a missing phenotype or covariate still count in the mean and SD (max |dt| 0.024
+  between the two rules; making them consistent is a Phase 6 item).
+- Individuals are matched by FID and IID; matching by IID alone is available in the library
+  (`PlinkReader(id_match="iid")`), and a CLI option comes with the 5b.2 CLI rewrite.
+- `PlinkReader.read_kinship` ignores, with a warning, a `.id` next to a kinship for EMMA genotypes, as
+  pylmmGWAS does. `pylmmKinship` on EMMA input removes a stale `OUT.id` (with a note on stderr).
+- `--eigen` is ignored (with a warning) when K was reordered or subset by its IDs, as when individuals are
+  dropped for a missing phenotype.
+- The kinship is read before the covariates (only the order of the `-v` messages changes).
 
 #### pylmmGWAS (CLI)
 - REML is the default everywhere. `--refit` and `--removeMissingGenotypes` used to refit each SNP by ML
@@ -122,6 +192,20 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 - `pylmmGWAS --kfile2`.
 
 ### Fixed
+
+#### `PlinkReader` (Phase 5b.1)
+- Silent misalignment: a FaSTLMM kinship (`fastlmm_kinship=True`) that lacked some individuals dropped them
+  from `indivs`, `K` and `phenos`, but every SNP vector kept all `N` values, so genotype row `i` no longer
+  belonged to individual `i` -> the SNP vectors are subset and reordered the same way (and standardised
+  over the kept individuals). Regression test
+  `tests/test_plink_io.py::test_fastlmm_kinship_that_drops_individuals_subsets_the_snp_vectors`.
+- TPED: a half-missing allele pair (`0 1`, `2 0`) was read as heterozygous (0.5) -> missing (nan), as in
+  PLINK. Output changes only for such malformed files.
+- A BED file that is not SNP-major made `get_snp_iterator()` write to stderr and raise a bare
+  `StopIteration`, which escaped a `for` loop as an exception -> `ValueError` at construction, with the
+  PLINK command to rewrite it. A file without the BED magic number is a `ValueError` too.
+- File handles: calling `get_snp_iterator()` again left the previous handles open until the reader was
+  garbage-collected -> `iter_snps()` closes them first.
 
 #### `PlinkReader` (Phase 5.5, found while adding type hints)
 - TPED: an allele code other than `0`/`1`/`2` (e.g. an un-recoded nucleotide letter) in a homozygous pair
