@@ -34,6 +34,10 @@ fmt:
 test *args:
     uv run --group sims pytest "$@"
 
+# Execute notebooks/pylmm_tour.ipynb top to bottom (needs the notebooks group)
+notebook-test:
+    uv run --locked --group sims --group notebooks pytest -q tests/test_notebook.py
+
 # Run only the executable docs: every code block of AGENTS.md, docs/guide.md, skills/
 docs-test *args:
     uv run --group sims pytest tests/test_docs.py "$@"

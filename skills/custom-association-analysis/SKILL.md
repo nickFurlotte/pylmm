@@ -108,7 +108,9 @@ for c in ZZ:
 print("lead SNP: p=%.1e with K from all SNPs, %.1e with LOCO" % (results["trait"][lead], p_loco[lead]))
 ```
 
-For a file too large for memory, accumulate `ZZ[c]` while streaming SNP blocks with
+With missing calls, this `K_loco` is not exactly `calculate_kinship` of the other chromosomes' SNPs (the two
+normalise missing calls differently, Phase 6.3 bug 8; max entry difference 0.16 with 10% missing calls in a
+check); with complete genotypes they agree. For a file too large for memory, accumulate `ZZ[c]` while streaming SNP blocks with
 `itertools.islice(reader.iter_snps(), block)`; alternatively split the BED per chromosome
 (`plink_tools.subset_bed(prefix, out, bim["chrom"] != c)`), run `pylmm kinship` on each complement and
 `pylmm gwas` on each chromosome. Each LOCO K needs its own eigendecomposition and gives its own null

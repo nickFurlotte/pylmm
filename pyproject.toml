@@ -45,6 +45,12 @@ sims = [
     "pandas>=1.4",
     "statsmodels>=0.13",
 ]
+# Executes notebooks/pylmm_tour.ipynb (tests/test_notebook.py); not installed by default.
+notebooks = [
+    "nbclient>=0.10",
+    "ipykernel>=6.29",
+    "nbformat>=5.10",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pylmm"]
@@ -84,6 +90,8 @@ extend-exclude = [
     "tests/golden/generate_golden.py",
     "tests/golden/py2_original",
     "data",
+    # Teaching notebook: scripts-style cells (imports mid-file, multiple statements per line).
+    "notebooks",
 ]
 
 [tool.ruff.lint]
