@@ -256,7 +256,7 @@ assert 0.4 < h < 0.8
 **Is `h` comparable with a published h²?** `h` is the share of `s2` on the scale of K. It equals the
 proportion of phenotypic variance explained only if K is scaled so that the average variance it implies is
 1 (Gower's centring: `trace(P K P) / (n - 1) = 1`, `P = I - 11'/n`); a mean diagonal of 1 is the usual
-approximation. A kinship from another tool, or one shrunk by monomorphic SNPs, may not be. Rescaling K by
+approximation. A kinship from another tool, or one shrunk by monomorphic SNPs, may not be. Dividing K by
 `c` changes `h` exactly as `h' = h c / (h c + 1 - h)`, and changes no test statistic:
 
 ```python
@@ -267,7 +267,8 @@ print("c=%.4f  h=%.4f  h(K/c)=%.4f  predicted=%.4f" % (c, h, h_gower, h * c / (h
 assert abs(h_gower - h * c / (h * c + 1 - h)) < 1e-4
 ```
 
-The `estimate-heritability` skill covers standard errors and profile-likelihood intervals for `h`.
+The `estimate-heritability` skill covers putting `h` on another tool's kinship scale (e.g. a GCTA GRM with
+diagonal ≈ 2 in inbred lines), PVE, standard errors and profile-likelihood intervals for `h`.
 
 ## 6. Testing one SNP
 

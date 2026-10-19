@@ -103,8 +103,10 @@ Checklist:
    covariate, not in the kinship). Unexpected drops usually mean an ID mismatch.
 2. **The null fit** line (`null model: heritability=..., sigma=...`): h at 0 or 0.99 is a boundary estimate
    (see `estimate-heritability`).
-3. **λ_GC** near 1 for a polygenic trait. Inflation (> 1.1) with an LMM suggests a missing covariate, a K
-   that does not match the samples, or a strongly polygenic trait (λ grows with n·h²/m). In inbred panels
+3. **λ_GC** near 1 for a polygenic trait. Inflation (> 1.1) with an LMM suggests a missing covariate or a
+   K that does not match the samples. (λ growing with n·h²/M is the linear-regression, no-LMM result; with
+   an LMM whose K includes the tested SNPs, polygenic signal tends to deflate λ, and LOCO is the remedy.)
+   In inbred panels
    with few effective tests, λ from one scan is noisy (Phase 4: 5–95% range 0.7–1.5 under the null). The
    example above prints λ ≈ 0.4: 3000 SNPs of one chromosome of an inbred panel are a handful of
    independent tests, and the planted SNP is also in K, which absorbs part of its signal (proximal

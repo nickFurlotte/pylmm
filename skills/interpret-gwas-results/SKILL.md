@@ -122,8 +122,11 @@ assert 0.8 < lam_gc < 1.25
 ```
 
 * λ > 1.1 with an LMM: missing covariates (batch, sex), a kinship that does not match the samples (wrong
-  order: check the `.id` file), or genuine polygenicity (expected λ grows with n·h²/M). Look at the QQ plot:
-  a lifted whole curve is inflation, a tail-only departure is signal.
+  order: check the `.id` file), or a K from too few or the wrong SNPs. Look at the QQ plot: a lifted whole
+  curve is inflation, a tail-only departure is signal. (The rule that λ grows with n·h²/M under
+  polygenicity is the linear-regression, no-LMM result. Under an LMM whose K includes the tested SNPs,
+  polygenic signal tends to *deflate* the test statistics instead, because K absorbs it; LOCO is the
+  remedy, see `custom-association-analysis`.)
 * λ < 1: K built from the tested SNPs absorbing signal (proximal contamination; LOCO helps), or h² = 0 fits
   (mildly conservative, Phase 4).
 * **Few effective tests** (inbred panels, small scans, one chromosome): λ from one scan is noise (Phase 4:
