@@ -129,7 +129,7 @@ def read_out(fn):
 
 
 def fake_lmm(ll):
-    """An LMM whose likelihood is the given function of h (for getMax logic)."""
+    """An LMM whose likelihood is the given function of h (for _get_max logic)."""
     G, K, y, _ = toy(n=20, m=10)
 
     class Fake(LMM):
@@ -153,7 +153,7 @@ def _ml_bounded_case():
 
 
 def test_bug1_gwas_reml_flag_changes_t():
-    """Regression (bug 1, fixed in Phase 5.2): REML=False used to give the
+    """Regression (bug 1, fixed in Phase 5.2): reml=False used to give the
     REML t and p exactly; it is now an ML scan."""
     g_test, K, y = _ml_bounded_case()
     with quiet():
@@ -240,7 +240,7 @@ def test_bug1_remove_missing_follows_reml_choice(bed_toy):
 
 def test_bug1_gwas_ml_equals_textbook_ml_wald():
     """Regression (bug 1 and, under ML only, bug 9; fixed in Phase 5.2):
-    GWAS(REML=False) is an ML null fit plus the textbook ML Wald test,
+    gwas(reml=False) is an ML null fit plus the textbook ML Wald test,
     sigma^2 = Q/n."""
     g_test, K, y = _ml_bounded_case()
     with quiet():
@@ -281,7 +281,7 @@ def test_bug3_h_search_reaches_one():
     assert L.fit()[0] == 1.0
 
 
-@pytest.mark.xfail(strict=True, reason="bug 3: misc.fitTwo's w grid excludes 1.0 (K1 alone)")
+@pytest.mark.xfail(strict=True, reason="bug 3: misc.fit_two's w grid excludes 1.0 (K1 alone)")
 def test_bug3_fittwo_can_select_k1_alone():
     rng = np.random.default_rng(5)
     n = 50
@@ -302,7 +302,7 @@ def test_bug4_ll_is_nan_above_one_but_ll_brent_guards_both_ends():
     with quiet():
         L = LMM(y, K)
     with np.errstate(invalid="ignore"):
-        assert np.isnan(L.log_likelihood(1.02)[0])  # log(h*Kva + 1 - h) of a negative number
+        assert np.isnan(L.log_likelihood(1.02)[0])  # log(h*kva + 1 - h) of a negative number
     assert L._neg_log_likelihood(-0.1) == 1e6
     assert L._neg_log_likelihood(1.02) == 1e6  # fixed in Phase 5.1: h > 1 guarded too
 
@@ -515,7 +515,7 @@ def test_bug8_current_monomorphic_snps_shrink_k():
 
 
 @pytest.mark.xfail(
-    strict=True, reason="bug 8: calculateKinship divides by m including dropped monomorphic SNPs"
+    strict=True, reason="bug 8: calculate_kinship divides by m including dropped monomorphic SNPs"
 )
 def test_bug8_monomorphic_snps_do_not_change_k():
     G, _, _, _ = toy(n=30, m=40)
@@ -539,7 +539,7 @@ def test_bug8_current_kinship_cli_counts_monomorphic_snps(tmp_path):
 
 @pytest.mark.xfail(
     strict=True,
-    reason="bug 8: lmm.calculateKinship and pylmmKinship normalise missing data differently",
+    reason="bug 8: lmm.calculate_kinship and pylmmKinship normalise missing data differently",
 )
 def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
     rng = np.random.default_rng(3)
@@ -560,7 +560,7 @@ def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
 
 
 def test_bug9_ml_wald_uses_q_over_n():
-    """Phase 5.2: association(REML=False) uses the ML sigma^2 = Q/n (it used
+    """Phase 5.2: association(reml=False) uses the ML sigma^2 = Q/n (it used
     Q/(n-q) in both modes); REML keeps Q/(n-q).  fit()'s reported sigma is
     unchanged (Phase 6.3)."""
     g_test, K, y = _ml_bounded_case()
@@ -857,7 +857,7 @@ def test_bug13_one_filter_for_both_branches(tmp_path):
 
 
 def test_bug15_current_fit_return_shapes():
-    """fit and association(returnBeta=True) still return 1x1 / qx1 arrays
+    """fit and association(return_beta=True) still return 1x1 / qx1 arrays
     (the rest of bug 15, open)."""
     G, K, y, _ = toy()
     with quiet():

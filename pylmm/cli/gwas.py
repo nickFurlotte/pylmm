@@ -131,7 +131,7 @@ def build_parser():
     basic_group = OptionGroup(parser, "Basic Options")
     advanced_group = OptionGroup(parser, "Advanced Options")
 
-    # basicGroup.add_option("--pfile", dest="pfile",
+    # basic_group.add_option("--pfile", dest="pfile",
     #                  help="The base for a PLINK ped file")
     basic_group.add_option("--tfile", dest="tfile", help="The base for a PLINK tped file")
     basic_group.add_option("--bfile", dest="bfile", help="The base for a PLINK binary bed file")
@@ -241,7 +241,7 @@ def _plain_warning(message, category, filename, lineno, file=None, line=None):
 
 
 def main(argv=None):
-    # Warnings of the library (input, lmm) are printed as one plain line, not
+    # Warnings of the library (plink_io, lmm) are printed as one plain line, not
     # as a UserWarning with a source line.
     with warnings.catch_warnings():
         warnings.showwarning = _plain_warning
@@ -288,7 +288,7 @@ def _main(argv=None):
                 pheno_file=options.phenoFile,
                 norm_genotype=options.normalizeGenotype,
             )
-        # elif options.pfile: IN = input.plink(options.pfile,type='p', phenoFile=options.phenoFile,normGenotype=options.normalizeGenotype)
+        # elif options.pfile: reader = plink_io.PlinkReader(options.pfile, type='p', pheno_file=options.phenoFile, norm_genotype=options.normalizeGenotype)
         elif options.emmaFile:
             reader = plink_io.PlinkReader(
                 options.emmaFile,
@@ -412,8 +412,8 @@ def _main(argv=None):
                 "--eigen is ignored: %d individuals were dropped, so the decomposition is recomputed"
                 % v.sum()
             )
-        kva = []
-        kve = []
+        kva = None
+        kve = None
 
     # CREATE LMM object for association
     n = K.shape[0]

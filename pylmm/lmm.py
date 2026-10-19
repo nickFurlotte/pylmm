@@ -158,7 +158,7 @@ def check_covariates(X0, n=None, what="covariate matrix X0"):
 
 
 def check_ids(ids, kinship_ids):
-    """Raise ValueError unless the individuals of K (K_ids) are those of Y
+    """Raise ValueError unless the individuals of K (kinship_ids) are those of Y
     (ids), in the same order.  Either may be None, then nothing is checked."""
     if ids is None or kinship_ids is None:
         return
@@ -207,7 +207,7 @@ def _check_design_size(n, q, what="model"):
         )
 
 
-def gwas(Y, X, K, kva=[], kve=[], X0=None, reml=True, refit=False, ids=None, kinship_ids=None):
+def gwas(Y, X, K, kva=None, kve=None, X0=None, reml=True, refit=False, ids=None, kinship_ids=None):
     """
 
     Performs a basic GWAS scan using the LMM.  This function
@@ -218,12 +218,13 @@ def gwas(Y, X, K, kva=[], kve=[], X0=None, reml=True, refit=False, ids=None, kin
     Y - n x 1 phenotype vector
     X - n x m SNP matrix
     K - n x n kinship matrix
-    Kva,Kve = linalg.eigh(K) - or the eigen vectors and values for K
+    kva, kve - optional eigenvalues and eigenvectors of K, as from
+           kva, kve = linalg.eigh(K); None (the default) computes them
     X0 - n x q covariate matrix
-    REML - use restricted maximum likelihood (the default) for the null
-           fit, every refit and the test; REML=False uses ML throughout
+    reml - use restricted maximum likelihood (the default) for the null
+           fit, every refit and the test; reml=False uses ML throughout
     refit - refit the variance component for each SNP
-    ids, K_ids - optional individual IDs of Y and of K; if both are given
+    ids, kinship_ids - optional individual IDs of Y and of K; if both are given
            they must match, in order
 
     Returns two lists (t-statistics, p-values), with nan for SNPs that
@@ -260,8 +261,8 @@ def gwas(Y, X, K, kva=[], kve=[], X0=None, reml=True, refit=False, ids=None, kin
         X = X[keep, :]
         X0 = X0[keep, :]
         K = K[keep, :][:, keep]
-        kva = []
-        kve = []
+        kva = None
+        kve = None
 
     if len(Y) == 0:
         return [np.nan] * m, [np.nan] * m
@@ -359,8 +360,8 @@ class LMM:
         self,
         Y,
         K,
-        kva=[],
-        kve=[],
+        kva=None,
+        kve=None,
         X0=None,
         verbose=False,
         ids=None,
@@ -369,15 +370,15 @@ class LMM:
     ):
         """
         The constructor takes a phenotype vector or array of size n.
-        It takes a kinship matrix of size n x n.  Kva and Kve can be computed as Kva,Kve = linalg.eigh(K) and cached.
-        If they are not provided, the constructor will calculate them.
+        It takes a kinship matrix of size n x n.  kva and kve can be computed as kva, kve = linalg.eigh(K) and cached.
+        If they are None (the default), the constructor will calculate them.
         X0 is an optional covariate matrix of size n x q, where there are q covariates.
         When this parameter is not provided, the constructor will set X0 to an n x 1 matrix of all ones to represent a mean effect.
-        ids and K_ids are optional individual IDs of Y and of K; if both are given they must match, in order.
+        ids and kinship_ids are optional individual IDs of Y and of K; if both are given they must match, in order.
 
         The inputs are checked (Phase 5.2): a ValueError for a nan/inf in K or X0, an infinite or constant
         phenotype, rank-deficient covariates, too few observations, or a K of the wrong shape; a warning for an
-        asymmetric K or one with clearly negative eigenvalues.  validate=False skips these checks (GWAS uses it
+        asymmetric K or one with clearly negative eigenvalues.  validate=False skips these checks (gwas uses it
         for the per-SNP subsets, which it checks itself).  The caller's arrays are not modified.
         """
 
@@ -409,8 +410,8 @@ class LMM:
             Y = Y[x]
             K = K[x, :][:, x]
             X0 = X0[x, :]
-            kva = []
-            kve = []
+            kva = None
+            kve = None
         self.nonmissing = x
         if validate:
             if len(Y) == 0:
@@ -422,7 +423,7 @@ class LMM:
                 + (" (individuals with a phenotype)" if x.sum() < len(x) else ""),
             )
 
-        if len(kva) == 0 or len(kve) == 0:
+        if kva is None or kve is None or len(kva) == 0 or len(kve) == 0:
             if self.verbose:
                 sys.stderr.write(
                     "Obtaining eigendecomposition for %dx%d matrix\n" % (K.shape[0], K.shape[1])
@@ -440,7 +441,7 @@ class LMM:
                     % (kva.shape, kve.shape, K.shape[0], K.shape)
                 )
             if not (np.isfinite(kva).all() and np.isfinite(kve).all()):
-                raise ValueError("eigendecomposition (Kva, Kve) has nan/inf values")
+                raise ValueError("eigendecomposition (kva, kve) has nan/inf values")
 
         if validate:
             self._warn_negative_eigenvalues(kva)
@@ -451,7 +452,7 @@ class LMM:
         self.Y = Y.reshape((self.N, 1))
         self.X0 = X0
 
-        # A new array: the caller's Kva is not clamped in place (bug 12).
+        # A new array: the caller's kva is not clamped in place (bug 12).
         self.kva = np.array(kva, dtype=np.float64)
         if sum(self.kva < 1e-6):
             if self.verbose:
@@ -534,10 +535,10 @@ class LMM:
         return beta, sigma, Q, xx_inv, xx
 
     def _neg_log_likelihood(self, h, X=None, reml=False):
-        # Objective (-LL) for the bounded search in getMax.  That search never
+        # Objective (-LL) for the bounded search in _get_max.  That search never
         # leaves its grid interval inside [0, 0.99], so the h > 1 guard is purely
         # defensive; it is kept so LL is never evaluated where it is nan:
-        # for h > 1, h*Kva + (1-h) can be negative and LL is nan (bug 4).
+        # for h > 1, h*kva + (1-h) can be negative and LL is nan (bug 4).
         if h < 0 or h > 1:
             return 1e6
         return -self.log_likelihood(h, X, stack=False, reml=reml)[0]
@@ -545,9 +546,9 @@ class LMM:
     def log_likelihood(self, h, X=None, stack=True, reml=False):
         """
         Computes the log-likelihood for a given heritability (h).  If X==None, then the
-        default X0t will be used.  If X is set and stack=True, then X0t will be matrix concatenated with
-        the input X.  If stack is false, then X is used in place of X0t in the LL calculation.
-        REML is computed by adding additional terms to the standard LL and can be computed by setting REML=True.
+        default x0t will be used.  If X is set and stack=True, then x0t will be matrix concatenated with
+        the input X.  If stack is false, then X is used in place of x0t in the LL calculation.
+        REML is computed by adding additional terms to the standard LL and can be computed by setting reml=True.
         """
 
         if X is None:
@@ -581,7 +582,7 @@ class LMM:
     def _get_max(self, H, X=None, reml=False):
         """
         Helper functions for .fit(...).
-        This function takes a set of LLs computed over a grid and finds possible regions
+        This function takes the LLs computed over a grid (self.ll_grid) and finds possible regions
         containing a maximum.  Within these regions, a bounded Brent search is performed
         to find the optimum.
 
@@ -609,8 +610,6 @@ class LMM:
                     options={"xatol": 1e-10},
                 )
                 h_opt.append(np.float64(res.x))
-                # if np.isnan(HOpt[-1]): HOpt[-1] = self.LLs[i-1]
-                # if np.isnan(HOpt[-1][0]): HOpt[-1][0] = [self.LLs[i-1]]
 
         if len(h_opt) > 1:
             if self.verbose:
@@ -626,17 +625,16 @@ class LMM:
     def fit(self, X=None, ngrids=100, reml=True):
         """
         Finds the maximum-likelihood solution for the heritability (h) given the current parameters.
-        X can be passed and will transformed and concatenated to X0t.  Otherwise, X0t is used as
+        X can be passed and will transformed and concatenated to x0t.  Otherwise, x0t is used as
         the covariate matrix.
 
-        This function calculates the LLs over a grid and then uses .getMax(...) to find the optimum.
+        This function calculates the LLs over a grid and then uses ._get_max(...) to find the optimum.
         Given this optimum, the function computes the LL and associated ML solutions.
         """
 
         if X is None:
             X = self.x0t
         else:
-            # X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
             self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
             X = self.x0t_stack
 
@@ -658,13 +656,12 @@ class LMM:
     def association(self, X, h=None, stack=True, reml=True, return_beta=False):
         """
         Calculates association statitics for the SNPs encoded in the vector X of size n.
-        If h == None, the optimal h stored in optH is used.
-        REML=True (the default) is the REML Wald test, sigma^2 = Q/(n-q); REML=False the ML one,
-        sigma^2 = Q/n.  Fit the null model with the same choice (fit(REML=...)).
+        If h == None, the optimal h stored in opt_h is used.
+        reml=True (the default) is the REML Wald test, sigma^2 = Q/(n-q); reml=False the ML one,
+        sigma^2 = Q/n.  Fit the null model with the same choice (fit(reml=...)).
 
         """
         if stack:
-            # X = np.hstack([self.X0t,matrixMult(self.Kve.T, X)])
             self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, X)[:, 0]
             X = self.x0t_stack
 

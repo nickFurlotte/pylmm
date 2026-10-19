@@ -8,18 +8,18 @@ docs/phase1-baseline.md (17 and 18 are new, see the .md).
 
 Experiments (the ``exp`` param; one cell = one experiment x regime):
 
-``remlml``   bugs 1, 9, 17.  The CLI default (``GWAS(REML=False)``) against
+``remlml``   bugs 1, 9, 17.  The CLI default (``gwas(reml=False)``) against
              pylmm REML, a textbook ML Wald (oracle ML h, sigma^2 = Q/n), the
              same with pylmm's Q/(n-q) sigma (isolates bug 9) and a textbook ML
              LRT; plus the ``--refit`` path, where the CLI fits h by ML per SNP
-             but the library's ``GWAS(refit=True)`` fits REML.
+             but the library's ``gwas(refit=True)`` fits REML.
 ``hgrid``    bugs 2, 3, 4.  High h2.  pylmm's REML search (instrumented: hits
              of the 0.99 cap, a skipped local max at grid index 98, Brent
              evaluations above h = 1 and scipy BracketError crashes) against
              the dense oracle (fine grid over [0, 1], with/without the
              eigenvalue clamp); t / -log10 p at pylmm's h vs the oracle's.
-``kinship``  bug 8.  K from ``lmm.calculateKinship`` vs the pylmmKinship CLI
-             normalisation (``input.normalizeGenotype``) vs the denominator
+``kinship``  bug 8.  K from ``lmm.calculate_kinship`` vs the pylmmKinship CLI
+             normalisation (``plink_io.PlinkReader.normalize_genotype``) vs the denominator
              fixed (divide by the SNPs actually used) vs the complete-data
              truth (synthetic); effect on h-hat and t.
 ``mlcent``   bug 17.  ML on the centred GRM: how often the textbook ML
@@ -443,8 +443,8 @@ def run_remlml(params, rng):
     if null_reml["crashed"]:  # bug 4: GWAS would raise too
         return out
     t_reml, p_reml = methods.pylmm_gwas(y, G, kin, reml=True)
-    # the pre-Phase-5.2 CLI default (REML null, Q/(n-q) Wald) == REML=True;
-    # since 5.2, REML=False would be a real ML scan (bug 1 fixed)
+    # the pre-Phase-5.2 CLI default (REML null, Q/(n-q) Wald) == reml=True;
+    # since 5.2, reml=False would be a real ML scan (bug 1 fixed)
     t_cli, p_cli = methods.pylmm_gwas(y, G, kin, reml=True)  # CLI default (pre-5.2)
     out["cli_vs_reml_max_abs_dt"] = float(np.nanmax(np.abs(t_cli - t_reml)))
     out.update(
@@ -487,7 +487,7 @@ def run_remlml(params, rng):
         )
     out.update(_counts(p_cli[null], "cli_"))
     out["dlogp_causal_cli"] = float(np.mean(mlogp(p_cli[cidx])))
-    # --refit: CLI fits h by ML per SNP (REML=options.REML), lib GWAS(refit) by REML
+    # --refit: CLI fits h by ML per SNP (reml=options.REML), lib gwas(refit) by REML
     sel = np.r_[cidx, rng.choice(null, size=4, replace=False)]
     h_r_cli, h_r_lib, t_r_cli, t_r_lib, crash = [], [], [], [], 0
     kva, kve = kin.eig_for_pylmm()
@@ -498,11 +498,11 @@ def run_remlml(params, rng):
         try:
             with np.errstate(all="ignore"):
                 # pre-Phase-5.2 CLI --refit: ML refit, Q/(n-q) Wald, which is
-                # association(REML=True) since 5.2 (REML=False now uses Q/n)
+                # association(reml=True) since 5.2 (reml=False now uses Q/n)
                 L.fit(X=x, reml=False)
                 h_r_cli.append(L.opt_h)
                 t_r_cli.append(L.association(x, reml=True)[0])
-                L.fit(X=x)  # lmm.GWAS(refit=True)
+                L.fit(X=x)  # lmm.gwas(refit=True)
                 h_r_lib.append(L.opt_h)
                 t_r_lib.append(L.association(x, reml=True)[0])
         except Exception:

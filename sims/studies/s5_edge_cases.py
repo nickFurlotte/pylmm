@@ -12,8 +12,8 @@ SNPs, K from 400 other SNPs), run pylmm on it, and record what happens:
                independent dense REML oracle (sims/oracle.py) where defined
 * runtime
 
-Paths:  lib         pylmm.lmm.GWAS on raw genotypes (missing = per-SNP removal)
-        lib_impute  user mean-imputes, then pylmm.lmm.GWAS
+Paths:  lib         pylmm.lmm.gwas on raw genotypes (missing = per-SNP removal)
+        lib_impute  user mean-imputes, then pylmm.lmm.gwas
         cli_impute  pylmm.cli.gwas through subprocess (BED/fam/pheno/kin files
                     written here), default behaviour: mean-impute + standardise
         cli_remove  same with --removeMissingGenotypes

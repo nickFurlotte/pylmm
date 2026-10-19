@@ -261,12 +261,12 @@ def test_pylmm_matches_oracle_on_easy_problem():
         ll_p = L.log_likelihood(f.h, reml=reml)[0]
         np.testing.assert_allclose(ll_p, f.ll + off, rtol=1e-9)
         t_p, _ = L.association(x.reshape(-1, 1), h=f.h, reml=reml)
-        # association(REML=False) is the ML Wald test, sigma^2 = Q/n (Phase 5.2)
+        # association(reml=False) is the ML Wald test, sigma^2 = Q/n (Phase 5.2)
         np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, null_reml=reml).t, rtol=1e-8)
 
 
 def test_ml_unbounded_with_centred_grm_and_intercept():
-    """calculateKinship's GRM has K 1 = 0, so with an intercept the ML profile
+    """calculate_kinship's GRM has K 1 = 0, so with an intercept the ML profile
     diverges as h -> 1 (the MLE does not exist); REML stays bounded."""
     n = 120
     g = genotypes.unrelated(n, 600, seed=4)
@@ -344,7 +344,7 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
 
 def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
     """Oracle with all pylmm switches vs pylmm: null fit (REML and ML) and
-    GWAS t (REML, and REML=False, which since Phase 5.2 is ML throughout:
+    GWAS t (REML, and reml=False, which since Phase 5.2 is ML throughout:
     ML null fit and ML Wald test with sigma^2 = Q/n)."""
     from pylmm.lmm import LMM
     from sims import methods

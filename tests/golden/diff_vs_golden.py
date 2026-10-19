@@ -73,7 +73,7 @@ _savetxt = gen.savetxt
 
 
 def savetxt(name, arr, header):
-    # association(returnBeta=True) returns beta_var as a (1,1) ndarray (sigma
+    # association(return_beta=True) returns beta_var as a (1,1) ndarray (sigma
     # is 1x1).  numpy 1.16 coerced the list of mixed rows; numpy >= 1.24
     # refuses ragged input, so flatten each entry to a float first.
     if isinstance(arr, list):

@@ -66,7 +66,7 @@ ATOL = 1e-12
 #
 # Measurement (Phase 2 review, py2.7 image): K -> K*(1 + eps*N), N a
 # symmetric standard-normal matrix, 200 seeds at eps=1e-15 and 100 seeds at
-# eps=1e-14, then the REML null fit, lmm.GWAS (REML, no refit, all 1000
+# eps=1e-14, then the REML null fit, lmm.gwas (REML, no refit, all 1000
 # SNPs; refit, first 200 SNPs) and the mean-imputed association were
 # compared with the goldens.  Worst case over all 300 runs:
 #   fitted h        5.7e-8 abs      (1.3e-7 rel)

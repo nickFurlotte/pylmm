@@ -1,4 +1,4 @@
-"""Kinship: lmm.calculateKinship (Python API) and scripts/pylmmKinship.py."""
+"""Kinship: lmm.calculate_kinship (Python API) and scripts/pylmmKinship.py."""
 
 import os
 
@@ -60,7 +60,7 @@ def test_calculate_kinship_bed():
     W = h.read_bed_snps(h.BED_KIN_NSNPS, norm=False)
     K = lmm.calculate_kinship(W)
     check_big_kinship(K, "kinship_bed_snps%d_calc" % h.BED_KIN_NSNPS)
-    check_kinship_invariants(K, "calculateKinship(bed)")
+    check_kinship_invariants(K, "calculate_kinship(bed)")
 
 
 def test_cli_kinship_bed(tmp_path):

@@ -40,7 +40,7 @@ Assumptions / limits (documented, by design)
   is -inf there (reported as such), so h = 1 is only selected when K is
   positive definite.  Near-singular K is fine for h < 1 (H is PD).
 * ML with a singular K whose null space lies inside col(X) has an UNBOUNDED
-  profile.  The common case: pylmm's ``calculateKinship`` GRM is centred
+  profile.  The common case: pylmm's ``calculate_kinship`` GRM is centred
   (K 1 = 0); built from more SNPs than individuals (outbred data) its null
   space is exactly span(1), which the intercept absorbs.  As h -> 1 the
   variance along 1 vanishes, the GLS fit takes up that direction, and
@@ -84,7 +84,7 @@ bounded to the bracketing grid
 interval (#4, fixed in Phase 5.1),
 endpoint fallback
 null fit always REML in ``GWAS``    wald ``null_reml``     ``null_reml=True,
-while the test uses REML=... (#1)   = ``test_reml``        test_reml=False``
+while the test uses reml=... (#1)   = ``test_reml``        test_reml=False``
 sigma reported/used as Q/(n-q)      fit reports both       ``sigma2_reml``;
 even under ML (#9)                  ``sigma2_ml`` and      wald
                                     ``sigma2_reml``;       ``sigma_convention
@@ -163,7 +163,7 @@ def _check(y, K, X):
 
 def clamp_kinship(K: np.ndarray, floor: float = 1e-6) -> np.ndarray:
     """K with eigenvalues below ``floor`` raised to ``floor`` (pylmm's
-    ``Kva[Kva < 1e-6] = 1e-6``), rebuilt densely as V diag(d) V'."""
+    ``kva[kva < 1e-6] = 1e-6``), rebuilt densely as V diag(d) V'."""
     K = np.asarray(K, dtype=np.float64)
     d, V = linalg.eigh(0.5 * (K + K.T))
     d = np.where(d < floor, floor, d)
@@ -256,7 +256,7 @@ def _search_fine(ll, n_grid):
 
 
 def _search_pylmm(ll):
-    """pylmm's LMM.fit/getMax search, step for step (lmm.py), on the oracle's
+    """pylmm's LMM.fit/_get_max search, step for step (lmm.py), on the oracle's
     likelihood.  The REML constant offset cannot change any comparison or
     Brent step, so the path is the same as pylmm's."""
     ngrids = 100
@@ -267,7 +267,7 @@ def _search_pylmm(ll):
         if h < 0 or h > 1:
             return 1e6  # pylmm's guard
         v = ll(h)
-        # pylmm takes log(h*Kva + 1 - h): any non-positive term (h > 1) gives nan
+        # pylmm takes log(h*kva + 1 - h): any non-positive term (h > 1) gives nan
         return np.nan if not np.isfinite(v) else -v
 
     n = len(L)
@@ -370,7 +370,7 @@ def wald(
     * ``sigma_convention='pylmm'``: sigma^2 = Q/(n-p) always (bug 9)
 
     se^2 = sigma^2 [(X'H^-1X)^-1]_xx, p from t with df = n - p (p includes x).
-    Before Phase 5.2, pylmm's ``GWAS(REML=False)`` was ``null_reml=True,
+    Before Phase 5.2, pylmm's ``gwas(reml=False)`` was ``null_reml=True,
     test_reml=False, sigma_convention='pylmm'`` (bugs 1 and 9); since 5.2 it
     is ``null_reml=False`` with the textbook convention.
     """

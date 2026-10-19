@@ -1,4 +1,4 @@
-"""The local h refinement in LMM.getMax (bug 4, fixed in Phase 5.1): a
+"""The local h refinement in LMM._get_max (bug 4, fixed in Phase 5.1): a
 bounded search inside the bracketing grid interval, never outside [0, 1]."""
 
 import contextlib

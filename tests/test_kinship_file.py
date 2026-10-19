@@ -1,5 +1,5 @@
 """--kfile validation (bug 16, fixed in Phase 5.1): pylmmGWAS's
-readKinshipFile and the CLI's usage error."""
+read_kinship_file and the CLI's usage error."""
 
 import contextlib
 import gzip

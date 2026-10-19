@@ -1,7 +1,7 @@
 """Thin, faithful wrappers around pylmm calls, plus an OLS baseline.
 
 The wrappers do *not* fix pylmm's behaviour (Phase 4 measures it); they only
-handle plumbing: passing a copy of the cached eigenvalues (pylmm clamps Kva
+handle plumbing: passing a copy of the cached eigenvalues (pylmm clamps kva
 in place, bug 12), silencing pylmm's stderr chatter, and returning numpy
 arrays / plain floats.
 """
@@ -20,7 +20,7 @@ def _quiet():
 
 
 def pylmm_null(y: np.ndarray, kin, X0: np.ndarray | None = None, reml: bool = True) -> dict:
-    """Null-model fit with ``pylmm.lmm.LMM(...).fit(REML=REML)``.
+    """Null-model fit with ``pylmm.lmm.LMM(...).fit(reml=reml)``.
 
     Returns {'h', 'sigma', 'll', 'beta'} (beta as an array).  Missing y are
     dropped by pylmm itself (which then recomputes the eigh).
@@ -49,11 +49,11 @@ def pylmm_gwas(
     reml: bool = True,
     refit: bool = False,
 ):
-    """``pylmm.lmm.GWAS`` on the columns of G -> (t, p) float arrays.
+    """``pylmm.lmm.gwas`` on the columns of G -> (t, p) float arrays.
 
     Note what GWAS does: since Phase 5.2 ``REML`` reaches the null fit,
     every refit and the test (before, it only reached ``association``, and
-    REML=False gave the REML Wald test: bugs 1 and 9).  SNPs with missing
+    reml=False gave the REML Wald test: bugs 1 and 9).  SNPs with missing
     genotypes are refit on the non-missing subset with a fresh eigh each.
     Non-estimable SNPs (monomorphic, collinear with X0) give nan.
     """

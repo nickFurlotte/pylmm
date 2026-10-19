@@ -44,7 +44,7 @@ def hmdp():
 
 @pytest.fixture(scope="session")
 def bed_null():
-    """(Y, K, Kva, Kve) for the README BED data (1219 individuals)."""
+    """(Y, K, kva, kve) for the README BED data (1219 individuals)."""
     from scipy import linalg
 
     from pylmm import plink_io

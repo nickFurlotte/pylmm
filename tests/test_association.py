@@ -1,4 +1,4 @@
-"""Per-SNP association through lmm.GWAS and LMM.association."""
+"""Per-SNP association through lmm.gwas and LMM.association."""
 
 import helpers as h
 import numpy as np
@@ -27,9 +27,9 @@ def gwas_golden():
 
 
 # Note: the golden ts/ps_ml_norefit columns equal the REML columns exactly:
-# in the original code REML never reached L.fit() in lmm.GWAS and the t-stat
+# in the original code REML never reached L.fit() in lmm.gwas and the t-stat
 # used N-q in both modes (bugs 1 and 9, docs/phase1-baseline.md).  Since
-# Phase 5.2 GWAS(REML=False) is a real ML scan, so it is checked against the
+# Phase 5.2 gwas(reml=False) is a real ML scan, so it is checked against the
 # oracle in test_gwas_hmdp_ml below, not against those columns.
 @pytest.mark.parametrize(
     ("reml", "refit", "tag", "nsnps"),
@@ -58,7 +58,7 @@ def test_gwas_hmdp_ml_golden_columns_were_reml(gwas_golden):
 
 
 def test_gwas_hmdp_ml(hmdp, gwas_golden):
-    """GWAS(REML=False) = ML null fit + ML Wald test (sigma^2 = Q/n), on the
+    """gwas(reml=False) = ML null fit + ML Wald test (sigma^2 = Q/n), on the
     first 60 hmdp SNPs, against the dense oracle with pylmm's grid/clamp, on
     each SNP's non-missing individuals.  It differs from the REML scan."""
     oracle = pytest.importorskip("sims.oracle")
@@ -88,7 +88,7 @@ def test_gwas_hmdp_ml(hmdp, gwas_golden):
 
 
 def test_association_imputed_with_beta(hmdp):
-    """Fixed REML null fit, mean-imputed SNPs, returnBeta=True."""
+    """Fixed REML null fit, mean-imputed SNPs, return_beta=True."""
     Y, K, snps = hmdp
     golden = h.load_golden_txt("assoc_hmdp_imputed.txt")
     L = lmm.LMM(Y, K)
@@ -102,7 +102,7 @@ def test_association_imputed_with_beta(hmdp):
             rows.append([i, np.nan, np.nan, np.nan, np.nan])
             continue
         ts, ps, beta, bvar = L.association(x, reml=True, return_beta=True)
-        # bvar comes back as a 1x1 array (betaVAR * sigma); flatten to scalars
+        # bvar comes back as a 1x1 array (beta_var * sigma); flatten to scalars
         rows.append([i, ts, ps, beta, np.asarray(bvar, dtype=np.float64).sum()])
     rows = np.array(rows, dtype=np.float64)
     for j, name in enumerate(["snp_index", "ts", "ps", "beta", "beta_var"]):

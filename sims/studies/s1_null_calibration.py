@@ -11,13 +11,13 @@ the "K SNPs"; every tested SNP is null):
 * test set A: a subset of the K SNPs themselves (tested SNPs are in K);
 * methods on each test set:
     ols      per-SNP OLS t-test (no kinship)
-    reml     pylmm GWAS(REML=True):  null h by REML, SNP test by REML Wald
+    reml     pylmm gwas(reml=True):  null h by REML, SNP test by REML Wald
     cli      what `pylmmGWAS` did by default before Phase 5.2 (no --REML, no
              --refit): null h by REML (bug 1), SNP test labelled ML but with
              sigma^2 = Q/(n-q) (bug 9), i.e. exactly the REML Wald test.
-             Since Phase 5.2 GWAS(REML=False) is a real ML scan, so this is
-             computed as GWAS(REML=True), which gives the same numbers as
-             the pre-5.2 GWAS(REML=False) that produced the results.
+             Since Phase 5.2 gwas(reml=False) is a real ML scan, so this is
+             computed as gwas(reml=True), which gives the same numbers as
+             the pre-5.2 gwas(reml=False) that produced the results.
   Suffix _in marks test set A (tested SNPs in K).
 * metrics per replicate: lambda_GC, and *counts* k (p <= alpha) and n (SNPs
   tested) so that report() can pool exact rates over replicates and give

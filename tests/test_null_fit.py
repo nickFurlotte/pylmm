@@ -71,7 +71,7 @@ def test_hmdp_covariate(hmdp):
 
 @pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
 def test_bed_null_fit(bed_null, reml):
-    """README data; fits at the h=0 boundary (getMax endpoint branch)."""
+    """README data; fits at the h=0 boundary (_get_max endpoint branch)."""
     Y, K, kva, kve = bed_null
     L = lmm.LMM(Y, K, kva.copy(), kve)
     L.fit(reml=reml)

@@ -10,7 +10,7 @@ Per replicate (one phenotype draw on a fixed per-cell genotype design):
    y = u + e + sum_j beta_j g_j with each causal SNP explaining ``vpe`` of the
    variance and the rest split h2 : 1 - h2 between K and noise;
 3. fit pylmm's null model once (REML) and scan all test SNPs with
-   ``L.association`` (the same call ``lmm.GWAS(refit=False)`` makes, but
+   ``L.association`` (the same call ``lmm.gwas(refit=False)`` makes, but
    keeping beta-hat); OLS on all test SNPs; "refit": ``L.fit(X=x)`` then
    ``association`` for the causal SNPs plus a random sample of N_NULL_SAMPLE
    null SNPs (a Brent/grid fit per SNP is the expensive part); optionally the
@@ -158,7 +158,7 @@ def ols_beta(y, G):
 
 def _lmm_scan(L, G, idx, refit):
     """pylmm per-SNP (t, p, beta) for columns idx; refit=True refits h per SNP
-    exactly as lmm.GWAS(refit=True) does (L.fit(X=x) then L.association)."""
+    exactly as lmm.gwas(refit=True) does (L.fit(X=x) then L.association)."""
     t = np.empty(len(idx))
     p = np.empty(len(idx))
     b = np.empty(len(idx))
@@ -218,7 +218,7 @@ def run_cell(params, seed):
     all_idx = np.arange(m)
     out = {"h_hat": null["h"], "n_causal_obs": int(k)}
 
-    # pylmm, fixed null h (identical to lmm.GWAS(refit=False))
+    # pylmm, fixed null h (identical to lmm.gwas(refit=False))
     t, pl, bl = _lmm_scan(L, g_test, all_idx, refit=False)
     _record(out, "lmm", pl[cidx], bl[cidx], beta, pl[nulls], thresholds)
     out["lam_lmm"] = metrics.lambda_gc(pl[nulls])

@@ -29,9 +29,9 @@ def build_parser():
     parser = OptionParser(usage=usage)
 
     basic_group = OptionGroup(parser, "Basic Options")
-    # advancedGroup = OptionGroup(parser, "Advanced Options")
+    # advanced_group = OptionGroup(parser, "Advanced Options")
 
-    # basicGroup.add_option("--pfile", dest="pfile",
+    # basic_group.add_option("--pfile", dest="pfile",
     #                  help="The base for a PLINK ped file")
     basic_group.add_option("--tfile", dest="tfile", help="The base for a PLINK tped file")
     basic_group.add_option("--bfile", dest="bfile", help="The base for a PLINK binary ped file")
@@ -81,7 +81,7 @@ def build_parser():
     )
 
     parser.add_option_group(basic_group)
-    # parser.add_option_group(advancedGroup)
+    # parser.add_option_group(advanced_group)
     return parser
 
 
@@ -105,7 +105,7 @@ def main(argv=None):
         reader = plink_io.PlinkReader(options.bfile, type="b")
     elif options.tfile:
         reader = plink_io.PlinkReader(options.tfile, type="t")
-    # elif options.pfile: IN = input.plink(options.pfile,type='p')
+    # elif options.pfile: reader = plink_io.PlinkReader(options.pfile, type='p')
     elif options.emmaFile:
         if not options.numSNPs:
             parser.error(

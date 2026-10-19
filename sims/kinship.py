@@ -1,13 +1,13 @@
 """Kinship matrices the way pylmm builds them, plus cached eigendecompositions.
 
-``kinship(G)`` is ``pylmm.lmm.calculateKinship`` on a *copy* of G (the pylmm
+``kinship(G)`` is ``pylmm.lmm.calculate_kinship`` on a *copy* of G (the pylmm
 function mean-imputes and standardises its argument in place).  Note its
 known quirks, which simulations inherit on purpose because they are what
 pylmm users get (docs/phase1-baseline.md, bug 8): monomorphic SNPs are
 dropped but still counted in the 1/m scale factor, and missing calls are
 mean-imputed before the variance is taken.
 
-``get(geno_spec, snps=...)`` caches (K, Kva, Kve) per process, keyed by the
+``get(geno_spec, snps=...)`` caches (K, kva, kve) per process, keyed by the
 genotype spec and the SNP subset, so replicates reuse one O(n^3) eigh.
 """
 
@@ -34,11 +34,11 @@ class Kinship:
         return self.K.shape[0]
 
     def eig_for_pylmm(self):
-        """(Kva, Kve) safe to hand to ``pylmm.lmm.LMM``.
+        """(kva, kve) safe to hand to ``pylmm.lmm.LMM``.
 
         LMM clamps eigenvalues < 1e-6 *in place* in the array it is given
         (docs/phase1-baseline.md bug 12), which would corrupt the cache (and
-        fails on the read-only cached array), so Kva is copied.  Kve is only
+        fails on the read-only cached array), so kva is copied.  kve is only
         read by pylmm and is passed as is.
         """
         return self.kva.copy(), self.kve
@@ -49,7 +49,7 @@ class Kinship:
 
 
 def kinship(G: np.ndarray, center: bool = False) -> np.ndarray:
-    """``pylmm.lmm.calculateKinship`` on a copy of G (G is left untouched)."""
+    """``pylmm.lmm.calculate_kinship`` on a copy of G (G is left untouched)."""
     from pylmm.lmm import calculate_kinship
 
     return calculate_kinship(np.array(G, dtype=np.float64), center=center)

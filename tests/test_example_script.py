@@ -69,7 +69,7 @@ def test_example_py(monkeypatch):
     )
     h.assert_pvalues_valid(p_values, "example.py")
 
-    # SNPs 1..999 equal the lmm.GWAS REML+refit golden (SNP 0 was imputed
+    # SNPs 1..999 equal the lmm.gwas REML+refit golden (SNP 0 was imputed
     # in place by example.py, see docs/phase1-baseline.md).
     gw = h.load_golden_txt("assoc_hmdp_GWAS.txt")
     h.assert_fit_close(t_stats[1:], gw[1:, 4], what="example.py TS[1:]")

@@ -15,7 +15,7 @@ Variance bookkeeping (``var_total`` defaults to 1):
 So ``h2`` is the variance-component parameter an LMM estimates when the
 causal SNPs are fitted as fixed effects; when they are not, they inflate the
 apparent h2.  The scale of sigma_g^2 is relative to K as given: with pylmm's
-``calculateKinship`` the mean diagonal is ~1 for outbred synthetic data but
+``calculate_kinship`` the mean diagonal is ~1 for outbred synthetic data but
 can differ for inbred data or when monomorphic SNPs shrink the scale.
 Covariate effects come on top of var_total.
 
@@ -94,7 +94,7 @@ def simulate(
 ) -> Phenotype:
     """Simulate one phenotype vector.
 
-    kin            a :class:`sims.kinship.Kinship` (or any object with Kva, Kve)
+    kin            a :class:`sims.kinship.Kinship` (or any object with kva, kve)
     h2             polygenic heritability in [0, 1]
     G, causal_idx  genotype matrix (n x m, complete) and the columns that are
                    causal; ``causal_var`` is their joint variance explained

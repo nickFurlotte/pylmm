@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
+"""Readers for PLINK (BED, TPED) and EMMA genotype, phenotype and covariate
+files: PlinkReader.  (This module was pylmm.input before Phase 5.4.)"""
+
 import os
 import sys
 import warnings
@@ -176,7 +179,7 @@ class PlinkReader:
         else:
             sys.stderr.write("Do not understand type %s\n" % (self.type))
 
-    # Python 2 spelling, kept so existing callers of IN.next() keep working.
+    # Python 2 spelling, kept so existing callers of reader.next() keep working.
     next = __next__
 
     def _get_genos_tped(self, X):
@@ -204,7 +207,7 @@ class PlinkReader:
     _BED_SHIFTS = np.array([0, 2, 4, 6], dtype=np.uint8)
 
     def _format_binary_genotypes(self, X, norm=True):
-        # X is the raw bytes for one SNP (self.BytestoRead bytes).
+        # X is the raw bytes for one SNP (self._bytes_to_read bytes).
         B = np.frombuffer(X, dtype=np.uint8)
         codes = (B[:, None] >> self._BED_SHIFTS) & 3
         # only take the leading values because whatever is left should be null
@@ -251,7 +254,7 @@ class PlinkReader:
         if not pheno_file:
             self.pheno_file = pheno_file = self.fbase + ".phenos"
         if not os.path.isfile(pheno_file):
-            # sys.stderr.write("Could not find phenotype file: %s\n" % (phenoFile))
+            # sys.stderr.write("Could not find phenotype file: %s\n" % (pheno_file))
             return
         keys, P = self._read_table(pheno_file, lambda x: x == "NA" or x == "-9", "phenotype")
         self.phenos = self._align_rows(keys, P, pheno_file, "phenotype")
@@ -469,7 +472,7 @@ class PlinkReader:
 
     def get_covariates(self, cov_file=None):
         """A PLINK-style covariate file (FID IID c1 c2 ...; NA is missing),
-        matched to self.indivs by (FID, IID) like getPhenos; absent
+        matched to self.indivs by (FID, IID) like get_phenos; absent
         individuals get nan rows."""
         if not os.path.isfile(cov_file):
             raise ValueError("Could not find covariate file: %s" % (cov_file))

@@ -2,7 +2,7 @@
 
 Every source returns a :class:`Genotypes` (an n x m float64 matrix with nan
 for missing calls, plus ids).  Encodings differ by source and do not matter
-to pylmm (``calculateKinship`` standardises each SNP, and t-statistics are
+to pylmm (``calculate_kinship`` standardises each SNP, and t-statistics are
 scale invariant):
 
 =================  ==========================================================
@@ -158,7 +158,7 @@ def bed(
     base: str = BED_BASE,
 ) -> Genotypes:
     """The bundled PLINK BED data (1219 mice x 98,740 SNPs), read with
-    ``pylmm.input.plink`` (unnormalised: 0/0.5/1/nan).
+    ``pylmm.plink_io.PlinkReader`` (unnormalised: 0/0.5/1/nan).
 
     Subset SNPs with ``n_snps`` (+ ``select`` = first/even/random) or explicit
     ``snps`` indices, and individuals likewise with ``n_indivs``/``indivs``.

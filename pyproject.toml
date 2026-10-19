@@ -116,7 +116,3 @@ ignore-names = ["[A-Z]", "[A-Z][0-9]", "[A-Z][0-9][0-9]"]
 # The optparse `usage` text has trailing whitespace inside the triple-quoted
 # string; it is part of the --help output, so leave it.
 "pylmm/cli/gwas.py" = ["W291"]
-# Kva=[] / Kve=[] are public signatures (GWAS, LMM.__init__) meaning "compute
-# the eigendecomposition"; they are only tested for emptiness, never mutated.
-# Changing the defaults to None is an API change, deferred to the 5.4 rename.
-"pylmm/lmm.py" = ["B006"]
