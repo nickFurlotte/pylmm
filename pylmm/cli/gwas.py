@@ -4,66 +4,302 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
-"""pylmmGWAS: genome-wide association with a linear mixed model.
+"""``pylmm gwas``: genome-wide association with a linear mixed model.
 
-This is the former scripts/pylmmGWAS.py, moved into the package so it can be
-installed as a console script.  scripts/pylmmGWAS.py is now a thin shim that
-calls main().
+Reads genotypes (PLINK BED or TPED, or an EMMA matrix), a phenotype, optional
+covariates and a precomputed kinship (``pylmm kinship``), fits the null model
+once (or per SNP with ``--refit``) and writes one tab-separated line per SNP:
+``SNP_ID BETA BETA_SD F_STAT P_VALUE``.
+
+The steps are separate functions: `load_inputs` (genotypes, phenotype,
+covariates, kinship and its eigendecomposition, aligned by sample ID),
+`fit_null_model` and `scan` (the per-SNP tests, written as they go).
 """
 
+from __future__ import annotations
+
+import argparse
 import gzip
 import os
-import sys
 import time
 import warnings
-from optparse import OptionGroup, OptionParser
+from dataclasses import dataclass
+from typing import IO, Any
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import linalg
 
 from pylmm import plink_io, samples
+from pylmm.cli._common import (
+    UsageError,
+    add_logging_options,
+    check_log_file,
+    check_writable,
+    genotype_source,
+    log,
+    positive_int,
+)
 from pylmm.lmm import LMM, check_covariates, snp_estimable, subset_testable
 
-usage = """usage: %prog [options] --kfile kinshipFile --[tfile | bfile] plinkFileBase outfileBase
+FloatArray = NDArray[np.float64]
 
-This program provides basic genome-wide association (GWAS) functionality.  You provide a phenotype and genotype file as well as a pre-computed (use pylmmKinship.py) kinship matrix and the program outputs a result file with information about each SNP, including the association p-value.  
-The input file are all standard plink formatted with the first two columns specifiying the individual and family ID.  For the phenotype file, we accept either NA or -9 to denote missing values.  
+OUTPUT_COLUMNS = ("SNP_ID", "BETA", "BETA_SD", "F_STAT", "P_VALUE")
+"""The header of the output file (tab-separated)."""
 
-Basic usage:
+ID_MATCH_CHOICES = {"fid-iid": "fid_iid", "iid": "iid"}
+"""``--id-match`` values and the `pylmm.plink_io.PlinkReader` ``id_match`` they select."""
 
-      python pylmmGWAS.py -v --bfile plinkFile --kfile preComputedKinship.kin --phenofile plinkFormattedPhenotypeFile resultFile
+_DESCRIPTION = """\
+Test each SNP for association with a phenotype under a linear mixed model.
 
-            """
+The kinship (--kinship, computed with `pylmm kinship`) accounts for
+relatedness.  Phenotype, covariate and kinship rows are matched to the
+genotype file by sample ID (FID and IID, or IID alone with --id-match iid),
+never by position; the kinship IDs come from its `<kinship>.id` file.
+The output has one tab-separated line per SNP:
+SNP_ID, BETA, BETA_SD, F_STAT and P_VALUE."""
+
+_EPILOG = """\
+examples:
+  # BED genotypes, the README example data
+  pylmm gwas --bfile data/snps.132k.clean.noX \\
+      --kinship data/snps.132k.clean.noX.pylmm.kin \\
+      --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv
+
+  # a named phenotype column and two named covariates, IDs matched on IID
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
+      --pheno-name bmi --covar study.cov --covar-name age sex \\
+      --id-match iid -o bmi.tsv
+
+  # EMMA-format inputs (no sample IDs: everything is in genotype order)
+  pylmm gwas --emma-geno snps.emma --emma-pheno pheno.emma \\
+      --kinship K.txt -o results.tsv"""
 
 
-def _print_out_head(out):
-    out.write("\t".join(["SNP_ID", "BETA", "BETA_SD", "F_STAT", "P_VALUE"]) + "\n")
+# ---------------------------------------------------------------------------
+# argument parsing
+# ---------------------------------------------------------------------------
 
 
-def _output_result(out, id, beta, beta_sd, ts, ps):
-    out.write("\t".join([str(x) for x in [id, beta, beta_sd, ts, ps]]) + "\n")
+def add_parser(commands: Any) -> argparse.ArgumentParser:
+    """Add the ``gwas`` subcommand to the ``pylmm`` parser.
+
+    Parameters
+    ----------
+    commands : argparse._SubParsersAction
+        The ``pylmm`` subparsers (``parser.add_subparsers()``).
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ``gwas`` parser.
+    """
+    p: argparse.ArgumentParser = commands.add_parser(
+        "gwas",
+        help="genome-wide association scan with a linear mixed model",
+        description=_DESCRIPTION,
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.set_defaults(run=run, check=check_args, parser=p)
+
+    geno = p.add_argument_group("genotypes (exactly one)")
+    source = geno.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--bfile", metavar="PREFIX", help="PLINK binary genotypes PREFIX.bed/.bim/.fam"
+    )
+    source.add_argument(
+        "--tfile", metavar="PREFIX", help="PLINK transposed text genotypes PREFIX.tped/.tfam"
+    )
+    source.add_argument(
+        "--emma-geno",
+        metavar="FILE",
+        help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
+    )
+
+    pheno = p.add_argument_group("phenotype")
+    pheno_file = pheno.add_mutually_exclusive_group()
+    pheno_file.add_argument(
+        "--pheno",
+        metavar="FILE",
+        help="PLINK-style phenotype file: FID IID value ..., with an optional FID IID name ... "
+        "header; NA and -9 are missing (default: PREFIX.phenos of the genotype input)",
+    )
+    pheno_file.add_argument(
+        "--emma-pheno",
+        metavar="FILE",
+        help="EMMA phenotype file: one phenotype per row, individuals in genotype order",
+    )
+    pheno_col = pheno.add_mutually_exclusive_group()
+    pheno_col.add_argument(
+        "--pheno-name",
+        metavar="NAME",
+        help="the phenotype column to test, by its name in the --pheno header",
+    )
+    pheno_col.add_argument(
+        "--pheno-col",
+        metavar="N",
+        type=positive_int,
+        help="the phenotype column to test, by its number among the value columns after "
+        "FID IID; 1-based, like plink2 --pheno-col-nums (default: 1, the first)",
+    )
+
+    covar = p.add_argument_group("covariates")
+    covar_file = covar.add_mutually_exclusive_group()
+    covar_file.add_argument(
+        "--covar",
+        metavar="FILE",
+        help="PLINK-style covariate file: FID IID value ..., with an optional header; NA is "
+        "missing.  An intercept is added unless --no-intercept",
+    )
+    covar_file.add_argument(
+        "--emma-covar",
+        metavar="FILE",
+        help="EMMA covariate file: one covariate per row, individuals in genotype order",
+    )
+    covar.add_argument(
+        "--covar-name",
+        metavar="NAME",
+        nargs="+",
+        help="use only these --covar columns, by their header names (space- or comma-separated)",
+    )
+    covar.add_argument(
+        "--no-intercept",
+        action="store_true",
+        help="do not add an intercept column to the covariates (use when the covariate file "
+        "has its own)",
+    )
+
+    kin = p.add_argument_group("kinship")
+    kin.add_argument(
+        "--kinship",
+        metavar="FILE",
+        required=True,
+        help="(required) n x n kinship matrix, whitespace-separated text (or .gz), from "
+        "`pylmm kinship`.  "
+        "Its rows are matched to the genotypes by the IDs in FILE.id if that exists; "
+        "otherwise they are assumed to be in genotype order (with a warning)",
+    )
+    kin.add_argument(
+        "--eigen",
+        metavar="PATH",
+        help="precomputed eigendecomposition of the kinship: a .npz file (`pylmm kinship "
+        "--eigen-npz`) or the PATH.kva/PATH.kve text files (`pylmm kinship --eigen-text`).  "
+        "Used only when no individual is dropped or reordered",
+    )
+    kin.add_argument(
+        "--id-match",
+        choices=sorted(ID_MATCH_CHOICES),
+        default="fid-iid",
+        help="match sample IDs on FID and IID (default) or on the IID alone (PLINK input only)",
+    )
+
+    model = p.add_argument_group("model")
+    method = model.add_mutually_exclusive_group()
+    method.add_argument(
+        "--reml",
+        dest="reml",
+        action="store_true",
+        default=True,
+        help="restricted maximum likelihood, for the null fit, the per-SNP fits and the test "
+        "(the default)",
+    )
+    method.add_argument(
+        "--ml",
+        dest="reml",
+        action="store_false",
+        help="maximum likelihood instead of REML (sigma^2 = Q/n in the test).  With a centred "
+        "kinship built from more SNPs than individuals the ML estimate of h can be biased upward",
+    )
+    model.add_argument(
+        "--refit",
+        action="store_true",
+        help="refit the variance components at each SNP (default: fit them once, under the "
+        "null model)",
+    )
+    model.add_argument(
+        "--remove-missing-genotypes",
+        action="store_true",
+        help="test each SNP on the individuals with a called genotype (refitting the model on "
+        "them) instead of replacing missing calls by the mean.  Slower: one eigendecomposition "
+        "per SNP with missing calls",
+    )
+
+    output = p.add_argument_group("output")
+    output.add_argument(
+        "-o",
+        "--out",
+        metavar="FILE",
+        required=True,
+        help="(required) write the results to FILE (overwritten)",
+    )
+    add_logging_options(p)
+    return p
 
 
-def read_kinship_file(fn, n):
-    """Read a whitespace-separated n x n kinship (plain text, or gzip if fn
-    ends in .gz): n lines of n numbers, no header or comment lines.
+def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Check the option combinations argparse cannot express (exits 2 on an error).
 
-    Raises ValueError, naming the file, if a token is not a number, the file
-    is not exactly n rows of n values, or K has a nan/inf.  Warns (does not
-    fail) if K is noticeably asymmetric.  (Bug 16, fixed in Phase 5.1: the
-    old np.fromfile + resize read silently zero-filled or truncated K.)
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser
+        The ``gwas`` parser, for `argparse.ArgumentParser.error`.
+    args : argparse.Namespace
+        The parsed options; ``covar_name`` is flattened (comma-separated
+        values are split).
+    """
+    if args.covar_name is not None:
+        args.covar_name = [n for arg in args.covar_name for n in arg.split(",") if n]
+        if not args.covar_name:
+            parser.error("--covar-name: no column name given")
+        if not args.covar:
+            parser.error("--covar-name needs --covar (EMMA covariate files have no names)")
+    if args.pheno_name is not None and args.emma_pheno:
+        parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
+    if args.emma_geno and args.id_match != "fid-iid":
+        parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    check_log_file(parser, args)
+
+
+# ---------------------------------------------------------------------------
+# kinship and eigendecomposition files
+# ---------------------------------------------------------------------------
+
+
+def read_kinship_file(fn: str, n: int) -> FloatArray:
+    """Read an ``n x n`` kinship matrix from a text file.
+
+    Parameters
+    ----------
+    fn : str
+        Whitespace-separated text (gzip if ``fn`` ends in ``.gz``): ``n``
+        lines of ``n`` numbers, with no header or comment lines.
+    n : int
+        The expected number of rows and columns.
+
+    Returns
+    -------
+    numpy.ndarray
+        The ``(n, n)`` kinship.  A noticeably asymmetric matrix is accepted
+        with a warning.
+
+    Raises
+    ------
+    ValueError
+        Naming the file, if it cannot be read, a token is not a number, the
+        file is not exactly ``n`` rows of ``n`` values, or the matrix has a
+        nan/inf.  (Bug 16, fixed in Phase 5.1: the old ``np.fromfile`` +
+        ``resize`` read silently zero-filled or truncated K.)
     """
     try:
-        if fn[-3:] == ".gz":
-            f = gzip.open(fn, "rt")
-        else:
-            f = open(fn)
+        f: IO[str] = gzip.open(fn, "rt") if fn[-3:] == ".gz" else open(fn)
     except OSError as e:
         raise ValueError("kinship file %s: cannot read (%s)" % (fn, e)) from e
     K = np.zeros((n, n))
     nrows = 0
     nvalues = 0
-    lengths = set()
+    lengths: set[int] = set()
     try:
         with f:
             for lineno, line in enumerate(f, 1):
@@ -88,7 +324,7 @@ def read_kinship_file(fn, n):
         # missing file, bad gzip, binary content: a usage-style error, not a traceback
         raise ValueError("kinship file %s: cannot read (%s: %s)" % (fn, type(e).__name__, e)) from e
     if nrows != n or lengths != {n}:
-        lengths = sorted(lengths)
+        found = sorted(lengths)
         raise ValueError(
             "kinship file %s: expected a %d x %d matrix (%d values, one row and column per "
             "individual in the genotype input), found %d values in %d rows (row lengths: %s)"
@@ -99,15 +335,15 @@ def read_kinship_file(fn, n):
                 n * n,
                 nvalues,
                 nrows,
-                ", ".join(str(x) for x in lengths[:5]) + (", ..." if len(lengths) > 5 else ""),
+                ", ".join(str(x) for x in found[:5]) + (", ..." if len(found) > 5 else ""),
             )
         )
-    bad = ~np.isfinite(K)
-    if bad.any():
-        i, j = np.argwhere(bad)[0]
+    bad_values = ~np.isfinite(K)
+    if bad_values.any():
+        i, j = np.argwhere(bad_values)[0]
         raise ValueError(
             "kinship file %s: %d non-finite values (nan/inf), the first at row %d, column %d"
-            % (fn, bad.sum(), i + 1, j + 1)
+            % (fn, bad_values.sum(), i + 1, j + 1)
         )
     asym = np.abs(K - K.T).max() if n else 0.0
     if asym > 1e-6 * max(1.0, np.abs(K).max()):
@@ -117,7 +353,7 @@ def read_kinship_file(fn, n):
     return K
 
 
-def _is_number(x):
+def _is_number(x: str) -> bool:
     try:
         float(x)
         return True
@@ -125,437 +361,31 @@ def _is_number(x):
         return False
 
 
-def build_parser():
-    parser = OptionParser(usage=usage)
+def read_eigen_file(fn: str, K: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Read the eigendecomposition given to ``--eigen`` and check it against ``K``.
 
-    basic_group = OptionGroup(parser, "Basic Options")
-    advanced_group = OptionGroup(parser, "Advanced Options")
+    Parameters
+    ----------
+    fn : str
+        A ``.npz`` file with arrays ``Kva`` and ``Kve`` (``pylmm kinship
+        --eigen-npz``), or the base name of the text files ``fn.kva`` and
+        ``fn.kve`` (``pylmm kinship --eigen-text``).
+    K : numpy.ndarray
+        The ``(n, n)`` kinship the decomposition must belong to.
 
-    # basic_group.add_option("--pfile", dest="pfile",
-    #                  help="The base for a PLINK ped file")
-    basic_group.add_option("--tfile", dest="tfile", help="The base for a PLINK tped file")
-    basic_group.add_option("--bfile", dest="bfile", help="The base for a PLINK binary bed file")
-    basic_group.add_option(
-        "--phenofile",
-        dest="phenoFile",
-        default=None,
-        help="Without this argument the program will look for a file with .pheno that has the plinkFileBase root.  If you want to specify an alternative phenotype file, then use this argument.  This file should be in plink format. ",
-    )
+    Returns
+    -------
+    kva, kve : numpy.ndarray
+        Eigenvalues ``(n,)`` and eigenvectors ``(n, n)``.
 
-    # EMMA Options
-    basic_group.add_option(
-        "--emmaSNP",
-        dest="emmaFile",
-        default=None,
-        help='For backwards compatibility with emma, we allow for "EMMA" file formats.  This is just a text file with individuals on the columns and snps on the rows.',
-    )
-    basic_group.add_option(
-        "--emmaPHENO",
-        dest="emmaPheno",
-        default=None,
-        help='For backwards compatibility with emma, we allow for "EMMA" file formats.  This is just a text file with each phenotype as one row.',
-    )
-    basic_group.add_option(
-        "--emmaCOV",
-        dest="emmaCov",
-        default=None,
-        help='For backwards compatibility with emma, we allow for "EMMA" file formats.  This is just a text file with each covariate as one row.',
-    )
-
-    basic_group.add_option(
-        "--kfile",
-        dest="kfile",
-        help='The location of a kinship file.  This is an nxn plain text file and can be computed with the pylmmKinship program.  Individuals are matched to the genotype file by FID and IID, using the ID file KINSHIP.id if it exists (the library can match by IID alone: PlinkReader(id_match="iid"); a CLI option comes later).',
-    )
-    basic_group.add_option(
-        "--covfile",
-        dest="covfile",
-        help="The location of a covariate file file.  This is a plink formatted covariate file.",
-    )
-    basic_group.add_option(
-        "-p",
-        type="int",
-        dest="pheno",
-        help="The phenotype index to be used in association.",
-        default=0,
-    )
-
-    advanced_group.add_option(
-        "--removeMissingGenotypes",
-        action="store_false",
-        dest="normalizeGenotype",
-        default=True,
-        help="By default the program replaces missing genotypes with the minor allele frequency.  This option overrides that behavior making the program remove missing individuals.  NOTE: This can increase running time due to the need to recompute the eigendecomposition for each SNP with missing values.",
-    )
-    advanced_group.add_option(
-        "--refit",
-        action="store_true",
-        dest="refit",
-        default=False,
-        help="Refit the variance components at each SNP (default is to lock in the variance components under the null).",
-    )
-
-    advanced_group.add_option(
-        "--REML",
-        action="store_true",
-        dest="REML",
-        default=False,
-        help="Use restricted maximum-likelihood (REML).  This is the default; the flag is accepted for backward compatibility and does nothing.",
-    )
-    advanced_group.add_option(
-        "--ML",
-        action="store_true",
-        dest="ML",
-        default=False,
-        help="Use maximum likelihood instead of REML, for the null fit, every per-SNP fit (--refit, --removeMissingGenotypes) and the test (sigma^2 = Q/n).  Note: with a centred kinship built from more SNPs than individuals the ML estimate of h can be biased upward.",
-    )
-    advanced_group.add_option(
-        "--eigen",
-        dest="eigenfile",
-        help="A precomputed eigendecomposition of the kinship: either a .npz file with arrays Kva and Kve (pylmmKinship --eigenNpz) or the base name B of the text files B.kva and B.kve (pylmmKinship -e, where B is the kinship output file).  Used only when no individuals are dropped.",
-    )
-    advanced_group.add_option(
-        "--noMean",
-        dest="noMean",
-        default=False,
-        action="store_true",
-        help="This option only applies when --cofile is used.  When covfile is provided, the program will automatically add a global mean covariate to the model unless this option is specified.",
-    )
-
-    advanced_group.add_option(
-        "-v",
-        "--verbose",
-        action="store_true",
-        dest="verbose",
-        default=False,
-        help="Print extra info",
-    )
-
-    parser.add_option_group(basic_group)
-    parser.add_option_group(advanced_group)
-    return parser
-
-
-def _plain_warning(message, category, filename, lineno, file=None, line=None):
-    sys.stderr.write("pylmmGWAS: warning: %s\n" % message)
-
-
-def main(argv=None):
-    # Warnings of the library (plink_io, lmm) are printed as one plain line, not
-    # as a UserWarning with a source line.
-    with warnings.catch_warnings():
-        warnings.showwarning = _plain_warning
-        _main(argv)
-
-
-def _warn(msg):
-    sys.stderr.write("pylmmGWAS: warning: %s\n" % msg)
-
-
-def _main(argv=None):
-    parser = build_parser()
-    (options, args) = parser.parse_args(argv)
-
-    if len(args) != 1:
-        parser.print_help()
-        sys.exit()
-
-    out_file = args[0]
-
-    if not options.tfile and not options.bfile and not options.emmaFile:
-        # if not options.pfile and not options.tfile and not options.bfile:
-        parser.error(
-            "You must provide at least one PLINK input file base (--tfile or --bfile) or an EMMA formatted file (--emmaSNP)."
-        )
-    if not options.kfile:
-        parser.error("Please provide a pre-computed kinship file")
-
-    # READING PLINK input
-    if options.verbose:
-        sys.stderr.write("Reading SNP input...\n")
-    try:
-        if options.bfile:
-            reader = plink_io.PlinkReader(
-                options.bfile,
-                type="b",
-                pheno_file=options.phenoFile,
-                norm_genotype=options.normalizeGenotype,
-            )
-        elif options.tfile:
-            reader = plink_io.PlinkReader(
-                options.tfile,
-                type="t",
-                pheno_file=options.phenoFile,
-                norm_genotype=options.normalizeGenotype,
-            )
-        # elif options.pfile: reader = plink_io.PlinkReader(options.pfile, type='p', pheno_file=options.phenoFile, norm_genotype=options.normalizeGenotype)
-        elif options.emmaFile:
-            reader = plink_io.PlinkReader(
-                options.emmaFile,
-                type="emma",
-                pheno_file=options.phenoFile,
-                norm_genotype=options.normalizeGenotype,
-            )
-        else:
-            parser.error("You must provide at least one PLINK input file base")
-    except ValueError as e:
-        parser.error(str(e))
-
-    if options.REML and options.ML:
-        parser.error("--REML and --ML are mutually exclusive (REML is the default)")
-    reml = not options.ML
-
-    # No phenotype file is a usage error (bug 14, fixed in Phase 5.2: this
-    # used to be os.path.isfile(None), a TypeError).
-    pheno_file = options.phenoFile or reader.fbase + ".phenos"
-    if options.emmaPheno:
-        if not os.path.isfile(options.emmaPheno):
-            parser.error("The --emmaPHENO file %s does not exist." % options.emmaPheno)
-    elif not os.path.isfile(pheno_file):
-        parser.error(
-            "No .pheno file exist for %s.  Please provide a phenotype file using the --phenofile or --emmaPHENO argument."
-            % pheno_file
-        )
-    if options.covfile and not os.path.isfile(options.covfile):
-        parser.error("The --covfile file %s does not exist." % options.covfile)
-
-    # READING Kinship - major bottleneck for large datasets.  Read before the
-    # covariates: when the kinship has IDs, the genotype individuals that are
-    # not in it are dropped from the reader (indivs, phenos, SNP vectors).
-    if options.verbose:
-        sys.stderr.write("Reading kinship...\n")
-    begin = time.time()
-    try:
-        K, kinship_aligned = _read_aligned_kinship(options.kfile, reader)
-    except ValueError as e:
-        parser.error(str(e))
-    end = time.time()
-    if options.verbose:
-        sys.stderr.write(
-            "Read the %d x %d kinship matrix in %0.3fs \n" % (K.shape[0], K.shape[1], end - begin)
-        )
-
-    try:
-        # Read the emma phenotype file if provided.
-        # Format should be rows are phenotypes and columns are individuals.
-        if options.emmaPheno:
-            reader.phenos = reader.read_phenos_emma(options.emmaPheno)
-
-        # READING Covariate File
-        P = None
-        if options.covfile:
-            if options.verbose:
-                sys.stderr.write("Reading covariate file...\n")
-            P = reader.read_covariates(options.covfile)
-        elif options.emmaCov:
-            if options.verbose:
-                sys.stderr.write("Reading covariate file...\n")
-            P = reader.read_covariates_emma(options.emmaCov)
-    except ValueError as e:
-        parser.error(str(e))
-
-    if not 0 <= options.pheno < reader.phenos.shape[1]:
-        parser.error(
-            "-p %d: the phenotype file has %d phenotype column(s) (0-based index)"
-            % (options.pheno, reader.phenos.shape[1])
-        )
-
-    if P is None or options.noMean:
-        X0 = np.ones((reader.phenos.shape[0], 1)) if P is None else P
-    else:
-        X0 = np.hstack([np.ones((reader.phenos.shape[0], 1)), P])
-
-    # PROCESS the phenotype data -- Remove individuals with a missing
-    # phenotype or a missing covariate (Phase 5.2: individuals with missing
-    # covariates used to be a fatal error).
-    # Keep will now index into the "full" data to select what we keep (either everything or a subset of non missing data
-    Y = reader.phenos[:, options.pheno]
-    missing_cov = np.isnan(X0).any(axis=1)
-    v = np.isnan(Y) | missing_cov
-    keep = ~v
-    if np.isnan(Y).sum():
-        _warn(
-            "%d of %d individuals have a missing phenotype and are dropped"
-            % (np.isnan(Y).sum(), len(Y))
-        )
-    if (missing_cov & ~np.isnan(Y)).sum():
-        _warn(
-            "%d individuals with a phenotype have a missing covariate value and are dropped"
-            % (missing_cov & ~np.isnan(Y)).sum()
-        )
-    if v.sum():
-        Y = Y[keep]
-        X0 = X0[keep, :]
-        K = K[keep, :][:, keep]
-    if not len(Y):
-        parser.error("No individual has both a phenotype and all covariates.")
-    try:
-        name = "the covariates" + (
-            ""
-            if options.noMean or (P is None)
-            else " (column 0 is the intercept pylmmGWAS adds; use --noMean if your file has its own)"
-        )
-        check_covariates(X0, what=name)
-    except ValueError as e:
-        parser.error(str(e))
-
-    # Only load the decomposition if we did not remove or reorder individuals.
-    # Otherwise it would not be correct and we would have to compute it again.
-    if not v.sum() and not kinship_aligned and options.eigenfile:
-        if options.verbose:
-            sys.stderr.write("Loading pre-computed eigendecomposition...\n")
-        try:
-            kva, kve = read_eigen_file(options.eigenfile, K)
-        except ValueError as e:
-            parser.error(str(e))
-    else:
-        if options.eigenfile and v.sum():
-            _warn(
-                "--eigen is ignored: %d individuals were dropped, so the decomposition is recomputed"
-                % v.sum()
-            )
-        elif options.eigenfile:
-            _warn(
-                "--eigen is ignored: the kinship was reordered to the genotype individuals by "
-                "its IDs, so the decomposition is recomputed"
-            )
-        kva = None
-        kve = None
-
-    # CREATE LMM object for association
-    n = K.shape[0]
-    try:
-        L = LMM(Y, K, kva, kve, X0, verbose=options.verbose)
-    except ValueError as e:
-        parser.error(str(e))
-
-    # Fit the null model -- if refit is true we will refit for each SNP, so no reason to run here
-    # REML by default, ML with --ML, here and in every per-SNP fit (bug 1,
-    # fixed in Phase 5.2: --refit and --removeMissingGenotypes used to fit ML).
-    if not options.refit:
-        if options.verbose:
-            sys.stderr.write("Computing fit for null model\n")
-        L.fit(reml=reml)
-        if options.verbose:
-            sys.stderr.write("\t heritability=%0.3f, sigma=%0.3f\n" % (L.opt_h, L.opt_sigma))
-    Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
-
-    # Buffers for pvalues and t-stats
-    p_values = []
-    t_stats = []
-    count = 0
-    counts = {}
-    with open(out_file, "w") as out:
-        _print_out_head(out)
-
-        for snp, id in reader:
-            count += 1
-            if options.verbose and count % 1000 == 0:
-                sys.stderr.write("At SNP %d\n" % count)
-
-            x = snp[keep].reshape((n, 1))
-            v = np.isnan(x).reshape((-1,))
-            # Check SNPs for missing values
-            if v.sum():
-                keeps = ~v
-                xs = x[keeps, :]
-                ys = Y[keeps]
-                x0s = X0[keeps, :]
-                # One estimability check for both branches (bug 13, issue 19)
-                if not subset_testable(xs, ys, x0s, counts):
-                    p_values.append(np.nan)
-                    t_stats.append(np.nan)
-                    _output_result(out, id, np.nan, np.nan, np.nan, np.nan)
-                    continue
-
-                # Its ok to center the genotype -  I used options.normalizeGenotype to
-                # force the removal of missing genotypes as opposed to replacing them with MAF.
-                if not options.normalizeGenotype:
-                    xs = (xs - xs.mean()) / np.sqrt(xs.var())
-                ks = K[keeps, :][:, keeps]
-                ls = LMM(ys, ks, X0=x0s, verbose=options.verbose, validate=False)
-                if options.refit:
-                    ls.fit(X=xs, reml=reml)
-                else:
-                    ls.fit(reml=reml)
-                ts, ps, beta, beta_var = ls.association(xs, reml=reml, return_beta=True)
-            else:
-                if not snp_estimable(x, X0, Q=Q0):
-                    p_values.append(np.nan)
-                    t_stats.append(np.nan)
-                    _output_result(out, id, np.nan, np.nan, np.nan, np.nan)
-                    continue
-
-                if options.refit:
-                    L.fit(X=x, reml=reml)
-                ts, ps, beta, beta_var = L.association(x, reml=reml, return_beta=True)
-
-            _output_result(out, id, beta, np.sqrt(beta_var), ts, ps)
-            p_values.append(ps)
-            t_stats.append(ts)
-
-    if options.verbose and counts.get("collinear"):
-        sys.stderr.write(
-            "%d of %d SNPs are nan because, on the individuals with a called genotype, "
-            "the covariates are no longer of full rank\n" % (counts["collinear"], count)
-        )
-
-
-def _read_aligned_kinship(k_file, reader):
-    """The --kfile kinship, in the order of reader.indivs, and whether it was realigned.
-
-    With an ID sidecar k_file + ".id" (pylmmKinship writes one), K is matched
-    to the genotype individuals by (FID, IID): genotype individuals that are not
-    in K are dropped from the reader (indivs, phenotypes and SNP vectors) and
-    K's extra individuals are ignored, each with a warning.  Without one, K's
-    rows are assumed to be the genotype individuals in file order, with a
-    warning (not for EMMA input, which has no IDs).  Raises ValueError.
-
-    Note: when K drops individuals, genotypes are imputed and standardised
-    over the KEPT individuals, but individuals dropped for a missing phenotype
-    or covariate still count in the mean and SD (max |dt| 0.024 between the
-    two rules; making them consistent is a Phase 6 item).
+    Raises
+    ------
+    ValueError
+        If the files are missing, have the wrong shape or nan/inf values, or
+        are not the eigendecomposition of ``K`` (checked on a random
+        vector).  (Bug 7, fixed in Phase 5.2: this used to read files that
+        the kinship program never wrote.)
     """
-    id_file = samples.kinship_id_path(k_file)
-    if reader.type == "emma":
-        if os.path.isfile(id_file):
-            _warn("%s is ignored: EMMA genotypes have no IDs, so K is in genotype order" % id_file)
-        return read_kinship_file(k_file, len(reader.indivs)), False
-    kin_ids = samples.read_kinship_ids(k_file)
-    if kin_ids is None:
-        _warn(
-            "no kinship ID file %s; assuming the rows of %s are the individuals of the "
-            "genotype file, in its order (pylmmKinship writes the ID file)" % (id_file, k_file)
-        )
-        return read_kinship_file(k_file, len(reader.indivs)), False
-    try:
-        K = read_kinship_file(k_file, len(kin_ids))
-    except ValueError as e:
-        raise ValueError(
-            "%s (its ID file %s lists %d individuals)" % (e, id_file, len(kin_ids))
-        ) from e
-    al = samples.align_samples(
-        {"genotype file": reader.indivs, "kinship": kin_ids}, match=reader.id_match
-    )
-    for line in al.report():
-        _warn(line)
-    aligned = False
-    if not al.is_identity("genotype file"):
-        reader.subset(al.ids)
-        aligned = True
-    if not al.is_identity("kinship"):
-        K = al.take_square("kinship", K)
-        aligned = True
-    return K, aligned
-
-
-def read_eigen_file(fn, K):
-    """The eigendecomposition for --eigen: a .npz with arrays Kva and Kve
-    (pylmmKinship --eigenNpz), or text files fn.kva / fn.kve (pylmmKinship
-    -e).  Raises ValueError if it is missing, has the wrong shape or nan/inf,
-    or is not the eigendecomposition of K (checked on a random vector).
-    (Bug 7, fixed in Phase 5.2: this used to np.load fn.Kva / fn.Kve, which
-    pylmmKinship never wrote.)"""
     n = K.shape[0]
     try:
         if fn.endswith(".npz"):
@@ -585,11 +415,484 @@ def read_eigen_file(fn, K):
     err = np.abs(kve.dot(kva * kve.T.dot(u)) - K.dot(u)).max()
     if err > 1e-6 * max(1.0, np.abs(K.dot(u)).max()):
         raise ValueError(
-            "--eigen %s is not the eigendecomposition of the --kfile kinship (max error %g)"
+            "--eigen %s is not the eigendecomposition of the --kinship matrix (max error %g)"
             % (fn, err)
         )
     return kva, kve
 
 
-if __name__ == "__main__":
-    main()
+def read_aligned_kinship(k_file: str, reader: plink_io.PlinkReader) -> tuple[FloatArray, bool]:
+    """Read the ``--kinship`` matrix in the order of ``reader.indivs``.
+
+    With an ID file ``k_file + ".id"`` (``pylmm kinship`` writes one), K is
+    matched to the genotype individuals by ID (as ``reader.id_match`` says):
+    genotype individuals that are not in K are dropped from the reader
+    (indivs, phenotypes and SNP vectors) and K's extra individuals are
+    ignored, each with a warning.  Without one, K's rows are assumed to be
+    the genotype individuals in file order, with a warning (not for EMMA
+    input, which has no IDs).
+
+    Note: when K drops individuals, genotypes are imputed and standardised
+    over the KEPT individuals, but individuals dropped for a missing
+    phenotype or covariate still count in the mean and SD (max |dt| 0.024
+    between the two rules; making them consistent is a Phase 6 item).
+
+    Parameters
+    ----------
+    k_file : str
+        The kinship file.
+    reader : pylmm.plink_io.PlinkReader
+        The genotype reader; individuals not in K are dropped from it.
+
+    Returns
+    -------
+    K : numpy.ndarray
+        The kinship, ``(len(reader.indivs), len(reader.indivs))``.
+    aligned : bool
+        Whether K or the reader was reordered or subset (a precomputed
+        eigendecomposition no longer applies).
+
+    Raises
+    ------
+    ValueError
+        If the kinship or its ID file is malformed or they disagree.
+    """
+    id_file = samples.kinship_id_path(k_file)
+    if reader.type == "emma":
+        if os.path.isfile(id_file):
+            log.warning(
+                "%s is ignored: EMMA genotypes have no IDs, so K is in genotype order", id_file
+            )
+        return read_kinship_file(k_file, len(reader.indivs)), False
+    kin_ids = samples.read_kinship_ids(k_file)
+    if kin_ids is None:
+        log.warning(
+            "no kinship ID file %s; assuming the rows of %s are the individuals of the "
+            "genotype file, in its order (pylmm kinship writes the ID file)",
+            id_file,
+            k_file,
+        )
+        return read_kinship_file(k_file, len(reader.indivs)), False
+    try:
+        K = read_kinship_file(k_file, len(kin_ids))
+    except ValueError as e:
+        raise ValueError(
+            "%s (its ID file %s lists %d individuals)" % (e, id_file, len(kin_ids))
+        ) from e
+    al = samples.align_samples(
+        {"genotype file": reader.indivs, "kinship": kin_ids}, match=reader.id_match
+    )
+    for line in al.report():
+        log.warning("%s", line)
+    aligned = False
+    if not al.is_identity("genotype file"):
+        reader.subset(al.ids)
+        aligned = True
+    if not al.is_identity("kinship"):
+        K = al.take_square("kinship", K)
+        aligned = True
+    return K, aligned
+
+
+# ---------------------------------------------------------------------------
+# inputs
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GwasInputs:
+    """Everything the scan needs, aligned to the tested individuals.
+
+    Attributes
+    ----------
+    reader : pylmm.plink_io.PlinkReader
+        The genotype reader (its SNP vectors have ``len(reader.indivs)``
+        values; `keep` selects the tested individuals among them).
+    Y : numpy.ndarray
+        The phenotype of the tested individuals, ``(n,)``.
+    X0 : numpy.ndarray
+        Covariates (with the intercept, unless ``--no-intercept``), ``(n, q)``.
+    K : numpy.ndarray
+        The kinship of the tested individuals, ``(n, n)``.
+    keep : numpy.ndarray
+        Boolean mask over ``reader.indivs``: individuals with a phenotype and
+        all covariates.
+    kva, kve : numpy.ndarray or None
+        The ``--eigen`` decomposition of K, or None to compute it.
+    """
+
+    reader: plink_io.PlinkReader
+    Y: FloatArray
+    X0: FloatArray
+    K: FloatArray
+    keep: NDArray[np.bool_]
+    kva: FloatArray | None
+    kve: FloatArray | None
+
+
+def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
+    """Call ``fn``, turning a ValueError (invalid input) into a `UsageError`."""
+    try:
+        return fn(*a, **kw)
+    except ValueError as e:
+        raise UsageError(str(e)) from e
+
+
+def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
+    """Open the genotype input (``--bfile``, ``--tfile`` or ``--emma-geno``).
+
+    The reader also reads the ``--pheno`` file (or ``PREFIX.phenos``).
+
+    Raises
+    ------
+    UsageError
+        On an invalid genotype or phenotype file.
+    """
+    flag, base, kind = genotype_source(args)
+    try:
+        return plink_io.PlinkReader(
+            base,
+            type=kind,
+            pheno_file=args.pheno,
+            norm_genotype=not args.remove_missing_genotypes,
+            id_match=ID_MATCH_CHOICES[args.id_match],
+        )
+    except OSError as e:  # e.g. a missing .fam: name the option
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
+    except ValueError as e:  # the message names the file (genotype or phenotype)
+        raise UsageError(str(e)) from e
+
+
+def _check_input_files(args: argparse.Namespace, reader: plink_io.PlinkReader) -> None:
+    """Fail early, before the kinship is read, if it or a phenotype or covariate file is missing."""
+    if not os.path.isfile(args.kinship):
+        raise UsageError("--kinship %s: no such file" % args.kinship)
+    # No phenotype file is a usage error (bug 14, fixed in Phase 5.2: this
+    # used to be os.path.isfile(None), a TypeError).
+    pheno_file = args.pheno or reader.fbase + ".phenos"
+    if args.emma_pheno:
+        if not os.path.isfile(args.emma_pheno):
+            raise UsageError("--emma-pheno: the file %s does not exist" % args.emma_pheno)
+    elif not os.path.isfile(pheno_file):
+        raise UsageError("no phenotype file %s; give one with --pheno or --emma-pheno" % pheno_file)
+    if args.covar and not os.path.isfile(args.covar):
+        raise UsageError("--covar: the file %s does not exist" % args.covar)
+
+
+def _read_covariates(args: argparse.Namespace, reader: plink_io.PlinkReader) -> FloatArray | None:
+    """The ``--covar`` / ``--emma-covar`` columns (no intercept), or None."""
+    if args.covar:
+        log.info("Reading covariate file...")
+        cov: FloatArray = _usage(reader.read_covariates, args.covar, columns=args.covar_name)
+        return cov
+    if args.emma_covar:
+        log.info("Reading covariate file...")
+        cov = _usage(reader.read_covariates_emma, args.emma_covar)
+        return cov
+    return None
+
+
+def _pheno_column(args: argparse.Namespace, reader: plink_io.PlinkReader) -> int:
+    """The index of the tested phenotype among ``reader.phenos``' columns."""
+    assert reader.phenos is not None
+    n_cols = reader.phenos.shape[1]
+    if args.pheno_name is not None:
+        names = reader.pheno_names
+        if names is None:
+            raise UsageError(
+                "--pheno-name %s: the phenotype file has no FID IID name ... header; "
+                "use --pheno-col" % args.pheno_name
+            )
+        if args.pheno_name not in names:
+            raise UsageError(
+                "--pheno-name %s: no such column in the phenotype file (it has %s)"
+                % (args.pheno_name, ", ".join(names))
+            )
+        return names.index(args.pheno_name)
+    # The default (None) is the first column.  (argparse's default of a
+    # mutually exclusive option must be None, or an explicit `--pheno-col 1`
+    # would not conflict with --pheno-name.)  --pheno-col is 1-based.
+    col: int = 1 if args.pheno_col is None else args.pheno_col
+    if col > n_cols:
+        raise UsageError(
+            "--pheno-col %d: the phenotype file has %d phenotype column(s) (1-based, like "
+            "plink2 --pheno-col-nums)" % (col, n_cols)
+        )
+    return col - 1
+
+
+def _design_matrix(n: int, P: FloatArray | None, no_intercept: bool) -> FloatArray:
+    """The covariate matrix X0: an intercept (unless ``no_intercept``), then the covariates ``P``."""
+    if P is None:
+        return np.ones((n, 1))
+    if no_intercept:
+        return P
+    return np.hstack([np.ones((n, 1)), P])
+
+
+def _drop_incomplete(
+    Y: FloatArray, X0: FloatArray, K: FloatArray
+) -> tuple[FloatArray, FloatArray, FloatArray, NDArray[np.bool_]]:
+    """Drop the individuals with a missing phenotype or covariate, with a warning.
+
+    (Phase 5.2: a missing covariate used to be a fatal error.)
+
+    Returns
+    -------
+    Y, X0, K : numpy.ndarray
+        Restricted to the kept individuals.
+    keep : numpy.ndarray
+        Boolean mask of the kept individuals (over the reader's ``indivs``).
+
+    Raises
+    ------
+    UsageError
+        If no individual is left.
+    """
+    missing_y = np.isnan(Y)
+    missing_cov = np.isnan(X0).any(axis=1)
+    dropped = missing_y | missing_cov
+    keep = ~dropped
+    if missing_y.sum():
+        log.warning(
+            "%d of %d individuals have a missing phenotype and are dropped", missing_y.sum(), len(Y)
+        )
+    if (missing_cov & ~missing_y).sum():
+        log.warning(
+            "%d individuals with a phenotype have a missing covariate value and are dropped",
+            (missing_cov & ~missing_y).sum(),
+        )
+    if dropped.sum():
+        Y = Y[keep]
+        X0 = X0[keep, :]
+        K = K[keep, :][:, keep]
+    if not len(Y):
+        raise UsageError("No individual has both a phenotype and all covariates.")
+    return Y, X0, K, keep
+
+
+def load_inputs(args: argparse.Namespace) -> GwasInputs:
+    """Read and align the genotypes, phenotype, covariates and kinship.
+
+    Individuals with a missing phenotype or covariate are dropped (with a
+    warning), and so are genotype individuals that are not in a kinship with
+    IDs.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The parsed ``pylmm gwas`` options.
+
+    Returns
+    -------
+    GwasInputs
+
+    Raises
+    ------
+    UsageError
+        On a missing or invalid input, or when no individual is left.
+    """
+    log.info("Reading SNP input...")
+    reader = open_genotypes(args)
+    _check_input_files(args, reader)
+
+    # The kinship is read before the covariates: when it has IDs, the
+    # genotype individuals that are not in it are dropped from the reader
+    # (indivs, phenos, SNP vectors).
+    log.info("Reading kinship...")
+    begin = time.time()
+    K, kinship_aligned = _usage(read_aligned_kinship, args.kinship, reader)
+    log.info(
+        "Read the %d x %d kinship matrix in %0.3fs", K.shape[0], K.shape[1], time.time() - begin
+    )
+
+    if args.emma_pheno:
+        # rows are phenotypes, columns are individuals
+        reader.phenos = _usage(reader.read_phenos_emma, args.emma_pheno)
+    P = _read_covariates(args, reader)
+    column = _pheno_column(args, reader)
+    assert reader.phenos is not None
+    n_all = reader.phenos.shape[0]
+    X0 = _design_matrix(n_all, P, args.no_intercept)
+
+    Y, X0, K, keep = _drop_incomplete(reader.phenos[:, column], X0, K)
+    name = "the covariates" + (
+        ""
+        if args.no_intercept or (P is None)
+        else " (column 0 is the intercept pylmm gwas adds; use --no-intercept if your file has its own)"
+    )
+    _usage(check_covariates, X0, what=name)
+
+    kva, kve = _eigen(args, K, int((~keep).sum()), kinship_aligned)
+    return GwasInputs(reader=reader, Y=Y, X0=X0, K=K, keep=keep, kva=kva, kve=kve)
+
+
+def _eigen(
+    args: argparse.Namespace, K: FloatArray, n_dropped: int, kinship_aligned: bool
+) -> tuple[FloatArray | None, FloatArray | None]:
+    """The ``--eigen`` decomposition, if given and still valid for K; else (None, None).
+
+    It is valid only if no individual was dropped or reordered; otherwise it
+    is ignored, with a warning, and recomputed.
+    """
+    if not args.eigen:
+        return None, None
+    if n_dropped:
+        log.warning(
+            "--eigen is ignored: %d individuals were dropped, so the decomposition is recomputed",
+            n_dropped,
+        )
+        return None, None
+    if kinship_aligned:
+        log.warning(
+            "--eigen is ignored: the kinship was reordered to the genotype individuals by "
+            "its IDs, so the decomposition is recomputed"
+        )
+        return None, None
+    log.info("Loading pre-computed eigendecomposition...")
+    kva, kve = _usage(read_eigen_file, args.eigen, K)
+    return kva, kve
+
+
+# ---------------------------------------------------------------------------
+# model fitting and the scan
+# ---------------------------------------------------------------------------
+
+
+def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
+    """Build the LMM of the tested individuals and fit its null model.
+
+    With ``--refit`` the variance components are fitted per SNP instead,
+    so the null model is not fitted here.  REML by default, ML with
+    ``--ml``, here and in every per-SNP fit (bug 1, fixed in Phase 5.2).
+
+    Raises
+    ------
+    UsageError
+        If the model inputs are invalid.
+    """
+    # LMM(verbose=True) prints its own diagnostic lines (eigendecomposition
+    # timing, clamped eigenvalues) straight to stderr; show them with --debug.
+    verbose: bool = args.debug
+    L: LMM = _usage(LMM, inputs.Y, inputs.K, inputs.kva, inputs.kve, inputs.X0, verbose=verbose)
+    if not args.refit:
+        log.info("Computing fit for null model")
+        L.fit(reml=args.reml)
+        log.info("null model: heritability=%0.3f, sigma=%0.3f", L.opt_h, L.opt_sigma)
+    return L
+
+
+def write_header(out: IO[str]) -> None:
+    """Write the output header line (`OUTPUT_COLUMNS`, tab-separated)."""
+    out.write("\t".join(OUTPUT_COLUMNS) + "\n")
+
+
+def write_result(out: IO[str], snp_id: str, beta: Any, beta_sd: Any, ts: Any, ps: Any) -> None:
+    """Write one SNP's result line; the values are formatted with `str`."""
+    out.write("\t".join([str(x) for x in [snp_id, beta, beta_sd, ts, ps]]) + "\n")
+
+
+def _test_snp(
+    snp: FloatArray,
+    inputs: GwasInputs,
+    L: LMM,
+    Q0: FloatArray,
+    args: argparse.Namespace,
+    counts: dict[str, int],
+) -> tuple[Any, Any, Any, Any] | None:
+    """Test one SNP; ``(beta, beta_sd, t, p)``, or None if it is not estimable."""
+    n = inputs.K.shape[0]
+    x = snp[inputs.keep].reshape((n, 1))
+    missing = np.isnan(x).reshape((-1,))
+    if missing.sum():
+        called = ~missing
+        xs = x[called, :]
+        ys = inputs.Y[called]
+        x0s = inputs.X0[called, :]
+        # One estimability check for both branches (bug 13, issue 19)
+        if not subset_testable(xs, ys, x0s, counts):
+            return None
+        # Only reached with --remove-missing-genotypes (otherwise missing
+        # calls are imputed by the reader): standardise over the called individuals.
+        if args.remove_missing_genotypes:
+            xs = (xs - xs.mean()) / np.sqrt(xs.var())
+        ks = inputs.K[called, :][:, called]
+        ls = LMM(ys, ks, X0=x0s, verbose=L.verbose, validate=False)
+        if args.refit:
+            ls.fit(X=xs, reml=args.reml)
+        else:
+            ls.fit(reml=args.reml)
+        ts, ps, beta, beta_var = ls.association(xs, reml=args.reml, return_beta=True)
+    else:
+        if not snp_estimable(x, inputs.X0, Q=Q0):
+            return None
+        if args.refit:
+            L.fit(X=x, reml=args.reml)
+        ts, ps, beta, beta_var = L.association(x, reml=args.reml, return_beta=True)
+    return beta, np.sqrt(beta_var), ts, ps
+
+
+def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> int:
+    """Test every SNP of ``inputs.reader`` and write a result line for each.
+
+    A SNP that cannot be tested (constant, collinear with the covariates, or
+    too few called individuals) gets a line of ``nan``.
+
+    Returns
+    -------
+    int
+        The number of SNPs.
+    """
+    X0 = inputs.X0
+    Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
+    counts: dict[str, int] = {}
+    count = 0
+    write_header(out)
+    for snp, snp_id in inputs.reader:
+        count += 1
+        if count % 1000 == 0:
+            log.info("At SNP %d", count)
+        result = _test_snp(snp, inputs, L, Q0, args, counts)
+        if result is None:
+            write_result(out, snp_id, np.nan, np.nan, np.nan, np.nan)
+        else:
+            write_result(out, snp_id, *result)
+    if counts.get("collinear"):
+        log.info(
+            "%d of %d SNPs are nan because, on the individuals with a called genotype, "
+            "the covariates are no longer of full rank",
+            counts["collinear"],
+            count,
+        )
+    return count
+
+
+def run(args: argparse.Namespace) -> None:
+    """Run ``pylmm gwas`` with parsed options.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        From the ``pylmm`` parser (`pylmm.cli.build_parser`).
+
+    Raises
+    ------
+    UsageError
+        On a usage or input error.
+    """
+    check_writable("--out", args.out)
+    inputs = load_inputs(args)
+    L = fit_null_model(inputs, args)
+    try:
+        out = open(args.out, "w")
+    except OSError as e:
+        raise UsageError("--out %s: cannot write it (%s)" % (args.out, e)) from e
+    with out:
+        n = scan(inputs, L, args, out)
+    log.info("Wrote the results for %d SNPs to %s", n, args.out)
+
+
+if __name__ == "__main__":  # the removed pre-5b.2 invocation; see removed_module_main
+    from pylmm.cli._common import removed_module_main
+
+    raise SystemExit(removed_module_main("gwas"))

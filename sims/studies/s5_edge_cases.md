@@ -19,7 +19,7 @@ four paths:
 |---|---|
 | `lib` | `lmm.LMM(...).fit()` plus `lmm.gwas(...)` on raw genotypes (missing calls are removed per SNP) |
 | `lib_impute` | the caller mean-imputes first, then `lmm.gwas` |
-| `cli_impute` | `python -m pylmm.cli.gwas` through a subprocess on BED/fam/phenos/kin files written by the study. This is the CLI default (the BED reader mean-imputes and standardizes) |
+| `cli_impute` | `python -m pylmm gwas` (`python -m pylmm.cli.gwas` before Phase 5b.2; the reproducers below use the CLI flags of the time) through a subprocess on BED/fam/phenos/kin files written by the study. This is the CLI default (the BED reader mean-imputes and standardizes) |
 | `cli_remove` | the same with `--removeMissingGenotypes` |
 
 For each case it records: exception type and message, nan/inf outputs, warnings, runtime,

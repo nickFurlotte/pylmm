@@ -1,0 +1,43 @@
+old_command,old_flag,old_takes_value,new_command,new_flag,new_takes_value,kind,notes
+pylmmGWAS,,,pylmm gwas,,,renamed,the program; also `python -m pylmm gwas`. No alias for the old name
+python scripts/pylmmGWAS.py,,,pylmm gwas,,,removed,the scripts/ shim is removed; from a source checkout use `uv run pylmm gwas`
+python -m pylmm.cli.gwas,,,pylmm gwas,,,removed,a tombstone: exits 2 with `pylmm: error: python -m pylmm.cli.gwas was removed; use pylmm gwas ...`. Use `python -m pylmm gwas`
+pylmmKinship,,,pylmm kinship,,,renamed,the program; also `python -m pylmm kinship`. No alias for the old name
+python scripts/pylmmKinship.py,,,pylmm kinship,,,removed,the scripts/ shim is removed; from a source checkout use `uv run pylmm kinship`
+python -m pylmm.cli.kinship,,,pylmm kinship,,,removed,a tombstone: exits 2 with `pylmm: error: python -m pylmm.cli.kinship was removed; use pylmm kinship ...`. Use `python -m pylmm kinship`
+pylmmGWAS,,yes,pylmm gwas,-o/--out,yes,renamed,was the positional OUTFILE argument; the output file is a required option now
+pylmmGWAS,--bfile,yes,pylmm gwas,--bfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
+pylmmGWAS,--tfile,yes,pylmm gwas,--tfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
+pylmmGWAS,--emmaSNP,yes,pylmm gwas,--emma-geno,yes,renamed,
+pylmmGWAS,--phenofile,yes,pylmm gwas,--pheno,yes,renamed,default still PREFIX.phenos of the genotype input
+pylmmGWAS,--emmaPHENO,yes,pylmm gwas,--emma-pheno,yes,behaviour-changed,"renamed, and now mutually exclusive with --pheno (it used to override it)"
+pylmmGWAS,-p,yes,pylmm gwas,--pheno-col,yes,semantics-changed,"now 1-based, like plink2 --pheno-col-nums, GCTA --mpheno and GEMMA -n: old `-p N` is `--pheno-col N+1` (`-p 0`, the default, is `--pheno-col 1`); or select by name with --pheno-name"
+pylmmGWAS,--covfile,yes,pylmm gwas,--covar,yes,renamed,
+pylmmGWAS,--emmaCOV,yes,pylmm gwas,--emma-covar,yes,behaviour-changed,"renamed, and now mutually exclusive with --covar (--covfile used to win)"
+pylmmGWAS,--noMean,no,pylmm gwas,--no-intercept,no,renamed,
+pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,required; its rows are aligned by the IDs of FILE.id if that exists
+pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,unchanged,
+pylmmGWAS,--removeMissingGenotypes,no,pylmm gwas,--remove-missing-genotypes,no,renamed,
+pylmmGWAS,--refit,no,pylmm gwas,--refit,no,unchanged,
+pylmmGWAS,--REML,no,pylmm gwas,--reml,no,renamed,"REML is the default, so the flag can be dropped; --reml and --ml are mutually exclusive"
+pylmmGWAS,--ML,no,pylmm gwas,--ml,no,renamed,
+pylmmGWAS,-v/--verbose,no,pylmm gwas,-v/--verbose,no,behaviour-changed,"logs INFO messages as `pylmm: info: ...`; the null fit line is now `null model: heritability=..., sigma=...`; the library's own eigendecomposition diagnostics need --debug"
+pylmmGWAS,-h/--help,no,pylmm gwas,-h/--help,no,unchanged,
+pylmmGWAS,--kfile2,yes,pylmm gwas,,,removed-earlier,removed in Phase 5.2 (it never worked: bug 6); no replacement
+pylmmKinship,,yes,pylmm kinship,-o/--out,yes,renamed,was the positional OUTFILE argument; the output file is a required option now
+pylmmKinship,--bfile,yes,pylmm kinship,--bfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
+pylmmKinship,--tfile,yes,pylmm kinship,--tfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
+pylmmKinship,--emmaSNP,yes,pylmm kinship,--emma-geno,yes,renamed,
+pylmmKinship,--emmaNumSNPs,yes,pylmm kinship,--emma-num-snps,yes,behaviour-changed,optional now: the SNPs of --emma-geno are counted; a given value that differs from the count is a usage error (exit 2). A wrong value used to compute K from the first M SNPs or crash
+pylmmKinship,-e/--efile,yes,pylmm kinship,--eigen-text,no,value→flag,the old value was ignored; still writes OUT.kva and OUT.kve
+pylmmKinship,--eigenNpz,yes,pylmm kinship,--eigen-npz,yes,renamed,the .npz arrays are still named Kva and Kve
+pylmmKinship,-n,yes,pylmm kinship,--block-size,yes,renamed,"same meaning (SNPs held in memory at once), default 1000"
+pylmmKinship,-v/--verbose,no,pylmm kinship,-v/--verbose,no,behaviour-changed,logs INFO messages as `pylmm: info: ...`; progress every 10000 SNPs
+pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
+,,,pylmm gwas,--pheno-name,yes,new,the phenotype column by its header name
+,,,pylmm gwas,--covar-name,yes,new,covariate columns by their header names (space- or comma-separated)
+,,,pylmm gwas,--id-match,yes,new,"{fid-iid,iid}; default fid-iid (the old behaviour)"
+,,,pylmm,--version,no,new,
+,,,"pylmm gwas, pylmm kinship",-q/--quiet,no,new,log errors only (warnings still go to --log-file)
+,,,"pylmm gwas, pylmm kinship",--log-file,yes,new,"also log to a file (timestamped, at least INFO)"
+,,,"pylmm gwas, pylmm kinship",--debug,no,new,DEBUG messages and tracebacks

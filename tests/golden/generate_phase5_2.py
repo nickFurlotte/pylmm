@@ -9,6 +9,10 @@ silently fitted the per-SNP model by ML while the default null fit was REML
 are recomputed with the current (Python 3) code.  Everything else in
 tests/golden/ is still the Phase 1 Python 2.7 output; the py2 versions of
 these two files are kept in tests/golden/py2_original/.  See README.md.
+
+Since Phase 5b.2 it runs the same models through the new command line,
+`pylmm gwas --refit` / `--remove-missing-genotypes` (byte-identical output);
+the golden file names keep the old flag names.
 """
 
 import os
@@ -20,18 +24,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import helpers as h  # noqa: E402
 
-FILES = ((["--refit"], "refit"), (["--removeMissingGenotypes"], "removeMissing"))
+FILES = ((["--refit"], "refit"), (["--remove-missing-genotypes"], "removeMissing"))
 
 
 def main(outdir=HERE):
     work = tempfile.mkdtemp()
     try:
         base = h.write_bed_subset(work, h.BED_GWAS_SMALL_NSNPS)
-        common = ["-v", "--bfile", base, "--kfile", h.README_KIN, "--phenofile", h.FAKE_PHENOS]
+        common = [
+            "gwas",
+            "-v",
+            "--bfile",
+            base,
+            "--kinship",
+            h.README_KIN,
+            "--pheno",
+            h.FAKE_PHENOS,
+        ]
         for flags, tag in FILES:
             name = "gwas_cli_bed_snps%d_%s.out" % (h.BED_GWAS_SMALL_NSNPS, tag)
             out = os.path.join(work, name)
-            h.run_script("pylmmGWAS.py", common + flags + [out], cwd=work)
+            h.run_cli([*common, *flags, "-o", out], cwd=work)
             shutil.copy(out, os.path.join(outdir, name))
             print("wrote", os.path.join(outdir, name))
     finally:

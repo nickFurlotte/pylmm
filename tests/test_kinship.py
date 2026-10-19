@@ -1,4 +1,4 @@
-"""Kinship: lmm.calculate_kinship (Python API) and scripts/pylmmKinship.py."""
+"""Kinship: lmm.calculate_kinship (Python API) and `pylmm kinship`."""
 
 import os
 
@@ -66,41 +66,60 @@ def test_calculate_kinship_bed():
 def test_cli_kinship_bed(tmp_path):
     base = h.write_bed_subset(tmp_path, h.BED_KIN_NSNPS)
     out = str(tmp_path / "kin.txt")
-    h.run_script("pylmmKinship.py", ["-v", "--bfile", base, out], cwd=tmp_path)
+    h.run_cli(["kinship", "-v", "--bfile", base, "-o", out], cwd=tmp_path)
     K = np.loadtxt(out)
     check_big_kinship(K, "kinship_cli_bed_snps%d" % h.BED_KIN_NSNPS)
-    check_kinship_invariants(K, "pylmmKinship.py --bfile")
+    check_kinship_invariants(K, "pylmm kinship --bfile")
 
 
 def test_cli_kinship_emma(tmp_path):
     emma = h.write_emma_subset(tmp_path)
     out = str(tmp_path / "kin.txt")
-    h.run_script(
-        "pylmmKinship.py",
-        ["-v", "--emmaSNP", emma, "--emmaNumSNPs", h.HMDP_NSNPS, "-n", 300, "-e", "x", out],
+    h.run_cli(
+        [
+            "kinship",
+            "-v",
+            "--emma-geno",
+            emma,
+            "--emma-num-snps",
+            h.HMDP_NSNPS,
+            "--block-size",
+            300,
+            "--eigen-text",
+            "-o",
+            out,
+        ],
         cwd=tmp_path,
     )
     K = np.loadtxt(out)
     h.assert_close(
-        K, h.load_golden_txt("kinship_cli_emma_hmdp_snps1000.txt"), what="pylmmKinship.py --emmaSNP"
+        K, h.load_golden_txt("kinship_cli_emma_hmdp_snps1000.txt"), what="pylmm kinship --emma-geno"
     )
-    check_kinship_invariants(K, "pylmmKinship.py --emmaSNP")
+    check_kinship_invariants(K, "pylmm kinship --emma-geno")
     assert_eigenvalues_close(
         np.loadtxt(out + ".kva"),
         h.load_golden_txt("kinship_cli_emma_hmdp_snps1000.kva.txt"),
-        "pylmmKinship.py -e (.kva)",
+        "pylmm kinship --eigen-text (.kva)",
     )
 
 
 def test_cli_kinship_emma_removes_stale_id_file(tmp_path):
+    """(Also: without --emma-num-snps the SNPs are counted.)"""
     emma = h.write_emma_subset(tmp_path)
     out = str(tmp_path / "kin.txt")
     stale = out + ".id"
     with open(stale, "w") as f:
         f.write("1\t1\n")
-    log = h.run_script(
-        "pylmmKinship.py",
-        ["--emmaSNP", emma, "--emmaNumSNPs", h.HMDP_NSNPS, "-n", 300, out],
+    log = h.run_cli(
+        [
+            "kinship",
+            "--emma-geno",
+            emma,
+            "--block-size",
+            300,
+            "-o",
+            out,
+        ],
         cwd=tmp_path,
     )
     assert not os.path.exists(stale)
@@ -139,8 +158,8 @@ def test_npdump_pickles_match_text_equivalents(hmdp):
 def test_cli_kinship_full_bed_reproduces_readme_kin(tmp_path):
     """README kinship command on all 98,740 SNPs (~1 min emulated)."""
     out = str(tmp_path / "kin.txt")
-    h.run_script("pylmmKinship.py", ["--bfile", h.BED_BASE, out], cwd=tmp_path)
+    h.run_cli(["kinship", "--bfile", h.BED_BASE, "-o", out], cwd=tmp_path)
     K = np.loadtxt(out)
     h.assert_close(
-        K, h.load_readme_kinship(K.shape[0]), what="pylmmKinship.py full BED vs data/*.pylmm.kin"
+        K, h.load_readme_kinship(K.shape[0]), what="pylmm kinship full BED vs data/*.pylmm.kin"
     )

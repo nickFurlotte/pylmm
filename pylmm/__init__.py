@@ -32,7 +32,7 @@ Module map
 ``pylmm.misc``
     :func:`~pylmm.misc.fit_two`, a two-kinship variance-component fit.
 ``pylmm.cli``
-    The command-line tools (``pylmmGWAS``, ``pylmmKinship``).
+    The ``pylmm`` command line (``pylmm gwas``, ``pylmm kinship``).
 
 Quick start
 -----------
@@ -68,7 +68,7 @@ A BED -> genotype matrix ``W`` (n x m) recipe, for the first ``m`` SNPs
 Phenotype, covariate and kinship rows are matched to the genotype file by
 ``(FID, IID)``, never by position (see ``pylmm.plink_io`` and
 ``pylmm.samples``); a kinship with an ID file ``<kinship>.id`` (written by
-``pylmmKinship``) is reordered to the genotypes, and individuals missing
+``pylmm kinship``) is reordered to the genotypes, and individuals missing
 from it are dropped from the phenotypes and the genotype vectors alike.
 
 ``gwas`` handles missing genotype calls (``nan``); ``LMM.association`` does

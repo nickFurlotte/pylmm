@@ -1,4 +1,4 @@
-"""--kfile validation (bug 16, fixed in Phase 5.1): pylmmGWAS's
+"""--kinship validation (bug 16, fixed in Phase 5.1): `pylmm gwas`'s
 read_kinship_file and the CLI's usage error."""
 
 import contextlib
@@ -10,6 +10,7 @@ import helpers as h
 import numpy as np
 import pytest
 
+from pylmm import cli
 from pylmm.cli import gwas as cli_gwas
 
 
@@ -108,21 +109,32 @@ def test_asymmetric_warns_but_loads(tmp_path):
     np.testing.assert_array_equal(got, K)
 
 
-def test_cli_wrong_size_kfile_is_a_usage_error(tmp_path):
-    """The CLI turns the ValueError into optparse's usage error (exit 2)
-    naming the file and the expected size."""
+def test_cli_wrong_size_kinship_is_a_usage_error(tmp_path):
+    """The CLI turns the ValueError into a usage error (exit 2, one
+    `pylmm: error:` line, no traceback) naming the file and the expected size."""
     emma = h.write_emma_subset(tmp_path, 5)
     n = len(np.loadtxt(h.HMDP_Y))
     fn = str(tmp_path / "k.txt")
     np.savetxt(fn, np.eye(n - 1))
     err = io.StringIO()
-    with pytest.raises(SystemExit) as e, contextlib.redirect_stderr(err):
-        cli_gwas.main(
-            ["--emmaSNP", emma, "--emmaPHENO", h.HMDP_Y, "--kfile", fn, str(tmp_path / "out")]
+    with contextlib.redirect_stderr(err):
+        rc = cli.main(
+            [
+                "gwas",
+                "--emma-geno",
+                emma,
+                "--emma-pheno",
+                h.HMDP_Y,
+                "--kinship",
+                fn,
+                "-o",
+                str(tmp_path / "out"),
+            ]
         )
-    assert e.value.code == 2
+    assert rc == 2
     out = err.getvalue()
-    assert "usage:" in out and fn in out and "expected a %d x %d matrix" % (n, n) in out
+    assert "pylmm: error:" in out and fn in out and "expected a %d x %d matrix" % (n, n) in out
+    assert "Traceback" not in out
 
 
 def test_missing_file_rejected(tmp_path):

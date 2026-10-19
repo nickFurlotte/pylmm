@@ -32,8 +32,7 @@ classifiers = [
 Homepage = "https://github.com/nickFurlotte/pylmm"
 
 [project.scripts]
-pylmmGWAS = "pylmm.cli.gwas:main"
-pylmmKinship = "pylmm.cli.kinship:main"
+pylmm = "pylmm.cli:main"
 
 [dependency-groups]
 dev = [
@@ -52,18 +51,16 @@ packages = ["pylmm"]
 
 [tool.hatch.build.targets.sdist]
 # tests/ needs tests/golden and data/ (~215MB), and scripts/ only holds
-# source-checkout shims, so the sdist ships the package alone.
+# the example script, so the sdist ships the package alone.
 exclude = ["/data", "/docker", "/docs", "/tests", "/scripts", "/.github"]
 
 [tool.mypy]
-# Library modules only: pylmm/cli/ is rewritten (with types) in Phase 5b and
-# is excluded until then.  numpy ships its own stubs; scipy has none (the
+# The whole package, including the command line (pylmm/cli/).  numpy ships its own stubs; scipy has none (the
 # third-party scipy-stubs package requires a newer numpy than the
 # numpy>=1.22 floor), so its imports are untyped.  Run it under Python 3.10
 # (`just typecheck`): numpy >= 2.3, which the lock resolves for newer
 # Pythons, ships stubs that do not support python_version = "3.10".
 files = ["pylmm"]
-exclude = ["^pylmm/cli/"]
 python_version = "3.10"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
@@ -105,7 +102,7 @@ select = [
     "N",       # pep8-naming (see docs/conventions.md)
 ]
 ignore = [
-    # Long lines: `ruff format` wraps code; what is left is argparse/optparse help
+    # Long lines: `ruff format` wraps code; what is left is argparse help
     # text, docstrings and URLs, which are user-facing output and stay as written.
     "E501",
     # %-formatting -> f-strings.  ~280 sites, many build the tab-separated result
@@ -135,8 +132,3 @@ ignore = [
 # and may be used as a parameter, local variable or attribute.  Every other
 # name follows PEP 8.
 ignore-names = ["[A-Z]", "[A-Z][0-9]", "[A-Z][0-9][0-9]"]
-
-[tool.ruff.lint.per-file-ignores]
-# The optparse `usage` text has trailing whitespace inside the triple-quoted
-# string; it is part of the --help output, so leave it.
-"pylmm/cli/gwas.py" = ["W291"]

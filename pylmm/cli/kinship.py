@@ -4,140 +4,207 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
-"""pylmmKinship: compute a realized-relationship kinship matrix.
+"""``pylmm kinship``: compute a realized-relationship kinship matrix.
 
-This is the former scripts/pylmmKinship.py, moved into the package so it can
-be installed as a console script.  scripts/pylmmKinship.py is now a thin shim
-that calls main().
+``K = W W' / m`` over the ``m`` SNPs of the genotype input, with ``W`` the
+standardised genotypes (mean-imputed); monomorphic SNPs and SNPs with no
+called genotype are skipped, but still counted in ``m``.  The SNPs are read
+in blocks of ``--block-size``.
 
-Next to the kinship ``outfile`` it writes ``outfile.id``, the (FID, IID) of
-each row (one ``FID IID`` per line), which ``pylmmGWAS --kfile outfile`` uses
-to align the matrix to its genotype file by ID.  EMMA input has no IDs, so no
-ID file is written for it.
+Next to the kinship ``FILE`` (``-o``) it writes ``FILE.id``, the (FID, IID) of each row
+(one ``FID IID`` per line), which ``pylmm gwas --kinship FILE`` uses to align
+the matrix to its genotype file by ID.  EMMA input has no IDs, so no ID file
+is written for it (and a stale one is removed).
 """
 
+from __future__ import annotations
+
+import argparse
 import os
-import sys
-import warnings
-from optparse import OptionGroup, OptionParser
+from typing import Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import linalg
 
 from pylmm import plink_io, samples
+from pylmm.cli._common import (
+    UsageError,
+    add_logging_options,
+    check_log_file,
+    check_writable,
+    genotype_source,
+    log,
+    positive_int,
+)
 
-usage = """usage: %prog [options] --[tfile | bfile] plinkFileBase outfile
+FloatArray = NDArray[np.float64]
 
-"""
+_REPORT_EVERY = 10000
+"""Log the progress of `compute_kinship` at INFO every this many SNPs."""
+
+_DESCRIPTION = """\
+Compute a realized-relationship kinship matrix K = W W'/m from genotypes,
+for `pylmm gwas --kinship`.  Writes K as whitespace-separated text to FILE
+(-o) and the sample IDs of its rows to FILE.id (not for EMMA input, which
+has no IDs)."""
+
+_EPILOG = """\
+examples:
+  pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
+  pylmm kinship --bfile study -o study.kin --eigen-npz study.eig.npz
+  pylmm kinship --emma-geno snps.emma -o K.txt"""
 
 
-def build_parser():
-    parser = OptionParser(usage=usage)
+def add_parser(commands: Any) -> argparse.ArgumentParser:
+    """Add the ``kinship`` subcommand to the ``pylmm`` parser.
 
-    basic_group = OptionGroup(parser, "Basic Options")
-    # advanced_group = OptionGroup(parser, "Advanced Options")
+    Parameters
+    ----------
+    commands : argparse._SubParsersAction
+        The ``pylmm`` subparsers (``parser.add_subparsers()``).
 
-    # basic_group.add_option("--pfile", dest="pfile",
-    #                  help="The base for a PLINK ped file")
-    basic_group.add_option("--tfile", dest="tfile", help="The base for a PLINK tped file")
-    basic_group.add_option("--bfile", dest="bfile", help="The base for a PLINK binary ped file")
-    basic_group.add_option(
-        "--emmaSNP",
-        dest="emmaFile",
-        default=None,
-        help='For backwards compatibility with emma, we allow for "EMMA" file formats.  This is just a text file with individuals on the rows and snps on the columns.',
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ``kinship`` parser.
+    """
+    p: argparse.ArgumentParser = commands.add_parser(
+        "kinship",
+        help="compute a kinship matrix from genotypes",
+        description=_DESCRIPTION,
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    basic_group.add_option(
-        "--emmaNumSNPs",
-        dest="numSNPs",
-        type="int",
-        default=0,
-        help="When providing the emmaSNP file you need to specify how many snps are in the file",
+    p.set_defaults(run=run, check=check_args, parser=p)
+
+    geno = p.add_argument_group("genotypes (exactly one)")
+    source = geno.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--bfile", metavar="PREFIX", help="PLINK binary genotypes PREFIX.bed/.bim/.fam"
+    )
+    source.add_argument(
+        "--tfile", metavar="PREFIX", help="PLINK transposed text genotypes PREFIX.tped/.tfam"
+    )
+    source.add_argument(
+        "--emma-geno",
+        metavar="FILE",
+        help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
+    )
+    geno.add_argument(
+        "--emma-num-snps",
+        metavar="M",
+        type=positive_int,
+        help="optional check: the number of SNPs (non-blank rows) of the --emma-geno file; "
+        "it is counted from the file, and a different M is an error",
     )
 
-    # NOTE (kept): the value given to -e is ignored; output always goes to
-    # <outfile>.kva / <outfile>.kve.
-    basic_group.add_option(
-        "-e",
-        "--efile",
-        dest="saveEig",
-        help="Save the eigendecomposition as text files <outfile>.kva and <outfile>.kve (the value of this option is ignored).  pylmmGWAS --eigen <outfile> reads them.",
+    output = p.add_argument_group("output")
+    output.add_argument(
+        "-o",
+        "--out",
+        metavar="FILE",
+        required=True,
+        help="(required) write the kinship to FILE and its sample IDs to FILE.id (both "
+        "overwritten)",
     )
-    basic_group.add_option(
-        "--eigenNpz",
-        dest="eigenNpz",
-        default=None,
-        help="Save the eigendecomposition to this .npz file (arrays Kva and Kve), which pylmmGWAS --eigen reads.  Binary and exact, and faster to read than -e.",
-    )
-    basic_group.add_option(
-        "-n",
-        default=1000,
-        dest="computeSize",
-        type="int",
-        help="The maximum number of SNPs to read into memory at once (default 1000).  This is important when there is a large number of SNPs, because memory could be an issue.",
-    )
-
-    basic_group.add_option(
-        "-v",
-        "--verbose",
+    output.add_argument(
+        "--eigen-text",
         action="store_true",
-        dest="verbose",
-        default=False,
-        help="Print extra info",
+        help="also write the eigendecomposition as text, FILE.kva and FILE.kve (for "
+        "`pylmm gwas --eigen FILE`)",
     )
+    output.add_argument(
+        "--eigen-npz",
+        metavar="NPZ",
+        help="also write the eigendecomposition to NPZ, arrays Kva and Kve (for "
+        "`pylmm gwas --eigen NPZ`; binary, exact and faster to read than --eigen-text)",
+    )
+    performance = p.add_argument_group("performance")
+    performance.add_argument(
+        "--block-size",
+        metavar="N",
+        type=positive_int,
+        default=1000,
+        help="the number of SNPs held in memory at once (default: 1000)",
+    )
+    add_logging_options(p)
+    return p
 
-    parser.add_option_group(basic_group)
-    # parser.add_option_group(advanced_group)
-    return parser
+
+def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Check the option combinations argparse cannot express (exits 2 on an error).
+
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser
+        The ``kinship`` parser, for `argparse.ArgumentParser.error`.
+    args : argparse.Namespace
+        The parsed options.
+    """
+    if args.emma_num_snps is not None and not args.emma_geno:
+        parser.error("--emma-num-snps applies only to --emma-geno")
+    check_log_file(parser, args)
 
 
-def main(argv=None):
-    parser = build_parser()
-    (options, args) = parser.parse_args(argv)
-    if len(args) != 1:
-        parser.print_help()
-        sys.exit()
+def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
+    """Open the genotype input (``--bfile``, ``--tfile`` or ``--emma-geno``).
 
-    out_file = args[0]
+    Raises
+    ------
+    UsageError
+        On an invalid genotype file.
+    """
+    flag, base, kind = genotype_source(args)
+    try:
+        return plink_io.PlinkReader(base, type=kind)
+    except OSError as e:  # e.g. a missing .fam: name the option
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
+    except ValueError as e:  # the message names the file
+        raise UsageError(str(e)) from e
 
-    if not options.tfile and not options.bfile and not options.emmaFile:
-        parser.error(
-            "You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP)."
-        )
 
-    if options.verbose:
-        sys.stderr.write("Reading PLINK input...\n")
-    if options.bfile:
-        reader = plink_io.PlinkReader(options.bfile, type="b")
-    elif options.tfile:
-        reader = plink_io.PlinkReader(options.tfile, type="t")
-    # elif options.pfile: reader = plink_io.PlinkReader(options.pfile, type='p')
-    elif options.emmaFile:
-        if not options.numSNPs:
-            parser.error(
-                "You must provide the number of SNPs when specifying an emma formatted file."
-            )
-        reader = plink_io.PlinkReader(options.emmaFile, type="emma")
-    else:
-        parser.error(
-            "You must provide at least one PLINK input file base (--tfile or --bfile) or an emma formatted file (--emmaSNP)."
-        )
+def count_emma_snps(fn: str) -> int:
+    """The number of SNPs of an EMMA genotype file: its non-blank lines."""
+    with open(fn) as f:
+        return sum(1 for line in f if line.strip())
 
+
+def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray:
+    """``K = W W' / m`` over all SNPs of ``reader``, ``block_size`` SNPs at a time.
+
+    SNPs that are monomorphic or have a missing value (after the reader's
+    imputation: no called genotype at all) are skipped but still counted in
+    ``m`` (bug 8 in docs/phase4-simulations.md; unchanged here).
+
+    Parameters
+    ----------
+    reader : pylmm.plink_io.PlinkReader
+        The genotype reader, with standardised SNPs (the default).  For EMMA
+        input, ``reader.num_snps`` must be set after `iter_snps`.
+    block_size : int
+        The number of SNPs in memory at once.
+
+    Returns
+    -------
+    numpy.ndarray
+        The ``(n, n)`` kinship.
+
+    Raises
+    ------
+    UsageError
+        If no SNP with a non-constant genotype was read.
+    """
     n = len(reader.indivs)
-    m = options.computeSize
-    W = np.ones((n, m)) * np.nan
-
-    reader.iter_snps()
-    # Annoying hack to get around the fact that it is expensive to determine the number of SNPs in an emma file
-    if options.emmaFile:
-        reader.num_snps = options.numSNPs
+    W = np.ones((n, block_size)) * np.nan
     i = 0
-    K = None
+    K: FloatArray | None = None
     n_all_missing = 0
+    next_report = _REPORT_EVERY
     while i < reader.num_snps:
         j = 0
-        while j < options.computeSize and i < reader.num_snps:
-            snp, id = next(reader)
+        while j < block_size and i < reader.num_snps:
+            snp, _ = next(reader)
             # Skip monomorphic SNPs and SNPs with no called genotype (bug 11:
             # an all-missing SNP used to crash, or to make K all nan).
             if not np.isfinite(snp).all() or snp.var() == 0:
@@ -146,58 +213,100 @@ def main(argv=None):
                 i += 1
                 continue
             W[:, j] = snp
-
             i += 1
             j += 1
-        if j < options.computeSize:
+        if j < block_size:
             W = W[:, list(range(0, j))]
-
-        if options.verbose:
-            sys.stderr.write("Processing first %d SNPs\n" % i)
-        # The original tried scipy.linalg.fblas.dgemm first; scipy has had no
-        # linalg.fblas since 0.12, so it always fell back to np.dot.
-        if K is None:
-            K = np.dot(W, W.T)
+        # Progress at INFO every 10000 SNPs (and at the end), else at DEBUG.
+        if i >= next_report or i >= reader.num_snps:
+            log.info("Processing first %d SNPs", i)
+            next_report = (i // _REPORT_EVERY + 1) * _REPORT_EVERY
         else:
-            k_j = np.dot(W, W.T)
-            K = K + k_j
-
+            log.debug("Processing first %d SNPs", i)
+        K = np.dot(W, W.T) if K is None else K + np.dot(W, W.T)
     if n_all_missing:
-        warnings.warn("skipped %d SNPs with no called genotype" % n_all_missing, stacklevel=2)
+        log.warning("skipped %d SNPs with no called genotype", n_all_missing)
     if K is None:
-        parser.error("No SNP with a non-constant genotype was read; cannot compute a kinship.")
-    K = K / float(reader.num_snps)
-    if options.verbose:
-        sys.stderr.write("Saving Kinship file to %s\n" % out_file)
-    np.savetxt(out_file, K)
-    # The IDs of K's rows (FID IID per line, GCTA .grm.id style), which
-    # pylmmGWAS --kfile uses to align K by ID.  EMMA input has no IDs.
-    if reader.type != "emma":
-        samples.write_id_file(samples.kinship_id_path(out_file), reader.indivs)
-        if options.verbose:
-            sys.stderr.write("Saving kinship IDs to %s\n" % samples.kinship_id_path(out_file))
-    elif os.path.isfile(samples.kinship_id_path(out_file)):
-        # A stale ID file from an earlier run would be taken as the IDs of this K.
-        os.remove(samples.kinship_id_path(out_file))
-        sys.stderr.write(
-            "pylmmKinship: removed the stale ID file %s (EMMA input has no IDs)\n"
-            % samples.kinship_id_path(out_file)
-        )
+        raise UsageError("No SNP with a non-constant genotype was read; cannot compute a kinship.")
+    result: FloatArray = K / float(reader.num_snps)
+    return result
 
-    if options.saveEig or options.eigenNpz:
-        if options.verbose:
-            sys.stderr.write("Obtaining Eigendecomposition\n")
-        kva, kve = linalg.eigh(K)
-    if options.saveEig:
-        if options.verbose:
-            sys.stderr.write("Saving eigendecomposition to %s.[kva | kve]\n" % out_file)
+
+def write_kinship(K: FloatArray, reader: plink_io.PlinkReader, out_file: str) -> None:
+    """Write K to ``out_file`` and its row IDs to ``out_file.id``.
+
+    The ID file (``FID IID`` per line, GCTA ``.grm.id`` style) is what
+    ``pylmm gwas --kinship`` aligns K by.  EMMA input has no IDs: a stale ID
+    file from an earlier run is removed instead, since it would be taken as
+    the IDs of this K.
+    """
+    log.info("Saving Kinship file to %s", out_file)
+    np.savetxt(out_file, K)
+    id_file = samples.kinship_id_path(out_file)
+    if reader.type != "emma":
+        samples.write_id_file(id_file, cast(list[samples.SampleID], reader.indivs))
+        log.info("Saving kinship IDs to %s", id_file)
+    elif os.path.isfile(id_file):
+        os.remove(id_file)
+        log.warning("removed the stale ID file %s (EMMA input has no IDs)", id_file)
+
+
+def write_eigen(K: FloatArray, out_file: str, text: bool, npz: str | None) -> None:
+    """Write the eigendecomposition of K as text (``out_file.kva/.kve``) and/or ``npz``."""
+    if not (text or npz):
+        return
+    log.info("Obtaining Eigendecomposition")
+    kva, kve = linalg.eigh(K)
+    if text:
+        log.info("Saving eigendecomposition to %s.[kva | kve]", out_file)
         np.savetxt(out_file + ".kva", kva)
         np.savetxt(out_file + ".kve", kve)
-    if options.eigenNpz:
-        if options.verbose:
-            sys.stderr.write("Saving eigendecomposition to %s\n" % options.eigenNpz)
-        np.savez(options.eigenNpz, Kva=kva, Kve=kve)
+    if npz:
+        log.info("Saving eigendecomposition to %s", npz)
+        np.savez(npz, Kva=kva, Kve=kve)
 
 
-if __name__ == "__main__":
-    main()
+def run(args: argparse.Namespace) -> None:
+    """Run ``pylmm kinship`` with parsed options.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        From the ``pylmm`` parser (`pylmm.cli.build_parser`).
+
+    Raises
+    ------
+    UsageError
+        On a usage or input error.
+    """
+    check_writable("--out", args.out)
+    if args.eigen_npz:
+        # np.savez adds .npz to a name without it
+        npz = args.eigen_npz
+        check_writable("--eigen-npz", npz if npz.endswith(".npz") else npz + ".npz")
+    log.info("Reading PLINK input...")
+    reader = open_genotypes(args)
+    reader.iter_snps()
+    if reader.type == "emma":
+        # The EMMA reader does not know its number of SNPs; count them (one
+        # cheap pass).  A wrong --emma-num-snps used to compute K from the
+        # first M SNPs, or to crash with StopIteration.
+        reader.num_snps = count_emma_snps(args.emma_geno)
+        if args.emma_num_snps is not None and args.emma_num_snps != reader.num_snps:
+            raise UsageError(
+                "--emma-num-snps %d: the --emma-geno file %s has %d SNPs (non-blank lines); "
+                "fix the number or leave the option out"
+                % (args.emma_num_snps, args.emma_geno, reader.num_snps)
+            )
+    K = compute_kinship(reader, args.block_size)
+    try:
+        write_kinship(K, reader, args.out)
+        write_eigen(K, args.out, args.eigen_text, args.eigen_npz)
+    except OSError as e:
+        raise UsageError("cannot write the output: %s" % e) from e
+
+
+if __name__ == "__main__":  # the removed pre-5b.2 invocation; see removed_module_main
+    from pylmm.cli._common import removed_module_main
+
+    raise SystemExit(removed_module_main("kinship"))

@@ -28,7 +28,7 @@ jobs:
         run: uv run --locked ruff format --check
 
   typecheck:
-    # mypy on the library modules (pylmm/cli/ excluded until Phase 5b).  On
+    # mypy on the whole package, the command line (pylmm/cli/) included.  On
     # Python 3.10, the floor: the numpy stubs that the lock resolves for newer
     # Pythons (numpy >= 2.3) do not support mypy's python_version = "3.10".
     # A second run on the newest Python (3.14) catches numpy stub drift.
@@ -87,8 +87,10 @@ jobs:
 
       - name: Console entry points
         run: |
-          uv run --locked pylmmGWAS --help
-          uv run --locked pylmmKinship --help
+          uv run --locked pylmm --version
+          uv run --locked pylmm gwas --help
+          uv run --locked pylmm kinship --help
+          uv run --locked python -m pylmm --help
 
   lowest-direct:
     # Checks the numpy/scipy lower bounds in pyproject.toml.  Not --locked:

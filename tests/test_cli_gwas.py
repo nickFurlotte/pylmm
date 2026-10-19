@@ -1,11 +1,12 @@
-"""scripts/pylmmGWAS.py end to end, on subsets, outputs parsed numerically.
+"""`pylmm gwas` end to end, on subsets, outputs parsed numerically.
 
-Every run uses -v, and the null-model fit it prints ("heritability=%0.3f,
+Every run uses -v, and the null-model fit it logs ("heritability=%0.3f,
 sigma=%0.3f") is checked against gwas_cli_nullfit.kv.txt and, where the same
 model is in null_fits.kv.txt, against the Python API fit.  (The null fit is
-REML by default; --REML is a no-op since Phase 5.2, which also made --refit
-and --removeMissingGenotypes REML: bug 1, and their goldens were regenerated,
-see tests/golden/README.md.)  That
+REML by default, and --reml just says so; Phase 5.2 also made --refit and
+--remove-missing-genotypes REML: bug 1, and their goldens were regenerated,
+see tests/golden/README.md.  The golden file and key names keep the old flag
+names: "reml", "removeMissing", "covfile".)  That
 check is what catches a kinship that was read wrongly, e.g. silently
 zero-filled.
 """
@@ -55,14 +56,14 @@ def check_null_fit(output, key, api=None):
 
 
 def bed_args(base, phenofile=h.FAKE_PHENOS):
-    return ["-v", "--bfile", base, "--kfile", h.README_KIN, "--phenofile", phenofile]
+    return ["gwas", "-v", "--bfile", base, "--kinship", h.README_KIN, "--pheno", phenofile]
 
 
 def test_cli_bed_readme_command(tmp_path):
     """README command on the first 1000 SNPs (missing genotypes imputed)."""
     base = h.write_bed_subset(tmp_path, h.BED_GWAS_NSNPS)
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", [*bed_args(base), out], cwd=tmp_path)
+    log = h.run_cli([*bed_args(base), "-o", out], cwd=tmp_path)
     check_out(out, "gwas_cli_bed_snps1000.out", df=BED_N - 2)
     check_null_fit(log, "bed_snps1000", api="bed_reml")
 
@@ -75,26 +76,26 @@ def bed50(tmp_path_factory):
 @pytest.mark.parametrize(
     ("flags", "tag", "df"),
     [
-        (["--REML"], "reml", BED_N - 2),
+        (["--reml"], "reml", BED_N - 2),
         (["--refit"], "refit", BED_N - 2),
-        (["--REML", "--refit"], "reml_refit", BED_N - 2),
+        (["--reml", "--refit"], "reml_refit", BED_N - 2),
         # per-SNP N varies with missingness, so no df check here
-        (["--removeMissingGenotypes"], "removeMissing", None),
+        (["--remove-missing-genotypes"], "removeMissing", None),
     ],
 )
 def test_cli_bed_variants(tmp_path, bed50, flags, tag, df):
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", bed_args(bed50) + flags + [out], cwd=tmp_path)
+    log = h.run_cli([*bed_args(bed50), *flags, "-o", out], cwd=tmp_path)
     check_out(out, "gwas_cli_bed_snps50_%s.out" % tag, df=df)
     if "--refit" not in flags:  # no null fit (and no -v line) with --refit
         check_null_fit(log, "bed_snps50_" + tag, api="bed_reml")
 
 
 def test_cli_bed_covfile(tmp_path, bed50):
-    """--covfile (PlinkReader.read_covariates), rows in reverse order: X0 = [1, c1, c2]."""
+    """--covar (PlinkReader.read_covariates), rows in reverse order: X0 = [1, c1, c2]."""
     out = str(tmp_path / "out")
-    args = [*bed_args(bed50), "--covfile", h.write_covfile(tmp_path), out]
-    log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
+    args = [*bed_args(bed50), "--covar", h.write_covfile(tmp_path), "-o", out]
+    log = h.run_cli(args, cwd=tmp_path)
     check_out(out, "gwas_cli_bed_snps50_covfile.out", df=BED_N - 4)
     check_null_fit(log, "bed_snps50_covfile")
 
@@ -103,8 +104,8 @@ def test_cli_bed_missing_phenotypes(tmp_path, bed50):
     """'NA' and '-9' phenotypes (PlinkReader.read_phenos), rows in reverse order;
     the CLI drops those individuals from Y, X0 and K."""
     out = str(tmp_path / "out")
-    args = [*bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)), out]
-    log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
+    args = [*bed_args(bed50, phenofile=h.write_missing_phenofile(tmp_path)), "-o", out]
+    log = h.run_cli(args, cwd=tmp_path)
     nmiss = len(h.BED_MISSING_PHENO_NA) + len(h.BED_MISSING_PHENO_M9)
     assert "warning: %d of " % nmiss in log and "have a missing phenotype and are dropped" in log
     check_out(out, "gwas_cli_bed_snps50_missingpheno.out", df=BED_N - nmiss - 2)
@@ -116,9 +117,19 @@ def test_cli_tped(tmp_path):
     and the first 50 rows of the --bfile README run."""
     base = h.write_tped_subset(tmp_path, h.BED_GWAS_SMALL_NSNPS)
     out = str(tmp_path / "out")
-    log = h.run_script(
-        "pylmmGWAS.py",
-        ["-v", "--tfile", base, "--kfile", h.README_KIN, "--phenofile", h.FAKE_PHENOS, out],
+    log = h.run_cli(
+        [
+            "gwas",
+            "-v",
+            "--tfile",
+            base,
+            "--kinship",
+            h.README_KIN,
+            "--pheno",
+            h.FAKE_PHENOS,
+            "-o",
+            out,
+        ],
         cwd=tmp_path,
     )
     check_out(out, "gwas_cli_tped_snps50.out", df=BED_N - 2)
@@ -127,7 +138,7 @@ def test_cli_tped(tmp_path):
 
 
 def emma_args(emma, kfile, pheno=h.HMDP_Y):
-    return ["-v", "--emmaSNP", emma, "--emmaPHENO", pheno, "--kfile", kfile]
+    return ["gwas", "-v", "--emma-geno", emma, "--emma-pheno", pheno, "--kinship", kfile]
 
 
 @pytest.mark.parametrize("cov", [False, True], ids=["nocov", "cov"])
@@ -135,9 +146,9 @@ def test_cli_emma(tmp_path, cov):
     emma = h.write_emma_subset(tmp_path)
     args = emma_args(emma, h.write_headerless_kinship(tmp_path))
     if cov:
-        args += ["--emmaCOV", h.write_emma_cov(tmp_path)]
+        args += ["--emma-covar", h.write_emma_cov(tmp_path)]
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", [*args, out], cwd=tmp_path)
+    log = h.run_cli([*args, "-o", out], cwd=tmp_path)
     name = "gwas_cli_emma_hmdp_snps1000%s" % ("_cov" if cov else "")
     got = check_out(out, name + ".out", df=HMDP_N - (3 if cov else 2))
     check_null_fit(log, name[len("gwas_cli_") :], api=None if cov else "hmdp_reml")
@@ -150,26 +161,27 @@ def test_cli_emma(tmp_path, cov):
 
 
 def test_cli_emma_gzip_kfile(tmp_path):
-    """The .gz branch of the --kfile reader; same K as test_cli_emma."""
+    """The .gz branch of the --kinship reader; same K as test_cli_emma."""
     emma = h.write_emma_subset(tmp_path, h.HMDP_GZ_NSNPS)
     out = str(tmp_path / "out")
-    args = [*emma_args(emma, h.write_headerless_kinship(tmp_path, gz=True)), out]
-    log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
+    args = [*emma_args(emma, h.write_headerless_kinship(tmp_path, gz=True)), "-o", out]
+    log = h.run_cli(args, cwd=tmp_path)
     check_out(out, "gwas_cli_emma_hmdp_snps1000.out", df=HMDP_N - 2, nrows=h.HMDP_GZ_NSNPS)
     check_null_fit(log, "emma_hmdp_snps1000", api="hmdp_reml")
 
 
 def test_cli_emma_missing_phenotypes(tmp_path):
-    """'NA' entries in --emmaPHENO."""
+    """'NA' entries in --emma-pheno."""
     emma = h.write_emma_subset(tmp_path, h.HMDP_GZ_NSNPS)
     out = str(tmp_path / "out")
     args = [
         *emma_args(
             emma, h.write_headerless_kinship(tmp_path), pheno=h.write_emma_missing_pheno(tmp_path)
         ),
+        "-o",
         out,
     ]
-    log = h.run_script("pylmmGWAS.py", args, cwd=tmp_path)
+    log = h.run_cli(args, cwd=tmp_path)
     nmiss = len(h.HMDP_MISSING_Y)
     assert "warning: %d of " % nmiss in log and "have a missing phenotype and are dropped" in log
     check_out(out, "gwas_cli_emma_hmdp_snps100_missingpheno.out", df=HMDP_N - nmiss - 2)
@@ -181,7 +193,7 @@ def test_cli_bed_full_readme_command(tmp_path):
     """Full README GWAS (98,740 SNPs, ~2 min emulated); first 1000 rows must
     match the 1000-SNP golden."""
     out = str(tmp_path / "out")
-    log = h.run_script("pylmmGWAS.py", [*bed_args(h.BED_BASE), out], cwd=tmp_path)
+    log = h.run_cli([*bed_args(h.BED_BASE), "-o", out], cwd=tmp_path)
     ids, got = h.load_gwas_out(out)
     assert len(ids) == 98740
     gids, exp = h.load_gwas_out(h.golden_path("gwas_cli_bed_snps1000.out"))
