@@ -40,5 +40,6 @@ These are data or user-facing interface and keep their spelling:
 ## Renames
 
 The Phase 5.4 rename is a clean break (no aliases). `docs/migration/name-map.csv` maps
-every changed pylmm name, old to new; `docs/migration/rename_5_4.py` is the script that
-applied it.
+every changed pylmm name, old to new (`module` is where the name lives after the rename: the
+module, `module.Class`, or the function that takes the parameter);
+`docs/migration/rename_5_4.py` is the script that applied it and wrote the CSV (`--csv`).

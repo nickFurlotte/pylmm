@@ -35,6 +35,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 # (old, new, kind, module, context)  context: "both" | "attr" | "bare"
 # kind: function | method | class | attribute | parameter | module | local
+# module: where the name lives AFTER the rename -- the module for a function
+# or class, module.Class for a method or attribute, the function or method
+# for a parameter.  Several owners are separated by ";" (one CSV row each).
 LM, IO, M, CG, CK = (
     "pylmm.lmm",
     "pylmm.plink_io",
@@ -72,10 +75,25 @@ RENAMES = [
     ("H", "h_grid", "attribute", LM + ".LMM", "attr"),
     ("Kva", "kva", "attribute", LM + ".LMM", "both"),
     ("Kve", "kve", "attribute", LM + ".LMM", "both"),
-    ("Kva", "kva", "parameter", LM + ".LMM.__init__, " + LM + ".gwas", "-"),
-    ("Kve", "kve", "parameter", LM + ".LMM.__init__, " + LM + ".gwas", "-"),
-    ("REML", "reml", "parameter", LM + ".gwas, LMM.fit/log_likelihood/association/...", "both"),
-    ("K_ids", "kinship_ids", "parameter", LM + ".gwas, LMM.__init__, check_ids", "bare"),
+    (
+        "Kva",
+        "kva",
+        "parameter",
+        f"{LM}.gwas;{LM}.LMM.__init__;{LM}.LMM._warn_negative_eigenvalues",
+        "-",
+    ),
+    ("Kve", "kve", "parameter", f"{LM}.gwas;{LM}.LMM.__init__", "-"),
+    (
+        "REML",
+        "reml",
+        "parameter",
+        f"{LM}.gwas;{LM}.LMM.fit;{LM}.LMM.association;{LM}.LMM.log_likelihood;"
+        f"{LM}.LMM._neg_log_likelihood;{LM}.LMM._get_max",
+        "both",
+    ),
+    ("K_ids", "kinship_ids", "parameter", f"{LM}.gwas;{LM}.LMM.__init__;{LM}.check_ids", "bare"),
+    ("Ys", "ys", "parameter", f"{LM}.subset_testable", "-"),
+    ("X0s", "x0s", "parameter", f"{LM}.subset_testable", "-"),
     ("returnBeta", "return_beta", "parameter", LM + ".LMM.association", "bare"),
     # --- pylmm.misc --------------------------------------------------------
     ("fitTwo", "fit_two", "function", M, "both"),
@@ -97,16 +115,28 @@ RENAMES = [
     ("readKinship", "read_kinship", "method", IO + ".PlinkReader", "both"),
     ("getCovariatesEMMA", "get_covariates_emma", "method", IO + ".PlinkReader", "both"),
     ("getCovariates", "get_covariates", "method", IO + ".PlinkReader", "both"),
-    ("kFile", "k_file", "parameter", IO + ".PlinkReader", "bare"),
-    ("phenoFile", "pheno_file", "parameter", IO + ".PlinkReader, PlinkReader.get_phenos", "bare"),
-    ("normGenotype", "norm_genotype", "parameter", IO + ".PlinkReader", "bare"),
-    ("readKFile", "read_k_file", "parameter", IO + ".PlinkReader", "bare"),
-    ("fastLMM_kinship", "fastlmm_kinship", "parameter", IO + ".PlinkReader", "bare"),
+    (
+        "kFile",
+        "k_file",
+        "parameter",
+        f"{IO}.PlinkReader.__init__;{IO}.PlinkReader.read_kinship",
+        "bare",
+    ),
+    (
+        "phenoFile",
+        "pheno_file",
+        "parameter",
+        f"{IO}.PlinkReader.__init__;{IO}.PlinkReader.get_phenos",
+        "bare",
+    ),
+    ("normGenotype", "norm_genotype", "parameter", IO + ".PlinkReader.__init__", "bare"),
+    ("readKFile", "read_k_file", "parameter", IO + ".PlinkReader.__init__", "bare"),
+    ("fastLMM_kinship", "fastlmm_kinship", "parameter", IO + ".PlinkReader.__init__", "bare"),
     (
         "emmaFile",
         "emma_file",
         "parameter",
-        IO + ".PlinkReader.get_phenos_emma/get_covariates_emma",
+        f"{IO}.PlinkReader.get_phenos_emma;{IO}.PlinkReader.get_covariates_emma",
         "bare",
     ),
     ("covFile", "cov_file", "parameter", IO + ".PlinkReader.get_covariates", "bare"),
@@ -124,7 +154,7 @@ RENAMES = [
     ("outputResult", "_output_result", "function", CG, "both"),
     ("readKinshipFile", "read_kinship_file", "function", CG, "both"),
     ("_isNumber", "_is_number", "function", CG, "both"),
-    ("buildParser", "build_parser", "function", CG + ", " + CK, "both"),
+    ("buildParser", "build_parser", "function", f"{CG};{CK}", "both"),
     ("_plainWarning", "_plain_warning", "function", CG, "both"),
     ("readEigenFile", "read_eigen_file", "function", CG, "both"),
     ("betaSD", "beta_sd", "parameter", CG + "._output_result", "bare"),
@@ -372,8 +402,9 @@ def write_csv():
         w = csv.writer(fh, lineterminator="\n")
         w.writerow(["old_name", "new_name", "kind", "module"])
         for old, new, kind, mod, _ctx in RENAMES:
-            if mod.startswith("pylmm"):
-                w.writerow([old, new, kind, mod])
+            for owner in mod.split(";"):
+                if owner.startswith("pylmm"):
+                    w.writerow([old, new, kind, owner])
     print("wrote", path)
 
 

@@ -6,6 +6,32 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmmG
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+#### Python API: PEP 8 names (Phase 5.4)
+- Every Python name of the pylmm API follows PEP 8; a clean break, with no aliases or deprecation shims.
+  [`docs/migration/name-map.csv`](docs/migration/name-map.csv) lists each changed name (`old_name`,
+  `new_name`, `kind`, `module` = where it lives now): 1 module, 1 class, 15 functions, 24 methods,
+  19 attributes and 16 parameters (29 rows counting each function that takes a renamed parameter). The
+  rule is in [`docs/conventions.md`](docs/conventions.md).
+- Module `pylmm.input` -> `pylmm.plink_io` (`input` shadowed the builtin), class `plink` -> `PlinkReader`.
+- Examples: `lmm.calculateKinship` -> `calculate_kinship`, `lmm.GWAS` -> `gwas`, `LMM.LL` ->
+  `log_likelihood`, `LMM.getMLSoln` -> `ml_solution`, `misc.fitTwo` -> `fit_two`,
+  `PlinkReader.normalizeGenotype` -> `normalize_genotype`, `getPhenos` -> `get_phenos`,
+  `cli.gwas.readKinshipFile` -> `read_kinship_file`; attributes `optH`/`optSigma`/`optLL`/`optBeta` ->
+  `opt_h`/..., `Kva`/`Kve` -> `kva`/`kve`, `X0t` -> `x0t`, `LLs` -> `ll_grid`, `H` -> `h_grid`; parameters
+  `REML=` -> `reml=`, `K_ids=` -> `kinship_ids=`, `returnBeta=` -> `return_beta=`, `phenoFile=` ->
+  `pheno_file=`, `normGenotype=` -> `norm_genotype=`.
+- Helpers that are not public API are now private: `matrixMult` -> `_matrix_mult`, `LL_brent` ->
+  `_neg_log_likelihood`, `getMax` -> `_get_max`, the per-format SNP iterators and genotype decoders.
+- Math symbols keep their capitals: `K`, `X`, `Y`, `X0`, `K1`, `K2` as parameters, and `LMM.K`, `.Y`, `.X0`,
+  `.N`.
+- `gwas()` and `LMM()` take `kva=None, kve=None` (they were mutable `[]` defaults); `None` or an empty
+  sequence means "compute the eigendecomposition".
+- Unchanged: CLI commands, flags and output files (byte-identical), and the `.npz` array names `Kva`/`Kve`
+  written by `pylmmKinship --eigenNpz` and read by `pylmmGWAS --eigen`. The entries below use the names of
+  the time.
+
 ### Changed
 
 #### pylmmGWAS (CLI)

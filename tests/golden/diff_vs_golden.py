@@ -16,10 +16,15 @@ tests/helpers.py.
 Py3 shims applied here (generate_golden.py itself stays the py2 generator):
   * np.load of the py2 .npdump pickles needs encoding='latin1';
   * the CLI runner decodes the -v log to str (py2 Popen output was already
-    str), and a failing CLI run aborts with its output, as in the generator.
+    str), and a failing CLI run aborts with its output, as in the generator;
+  * generate_golden.py calls the pre-Phase-5.4 API (pylmm.input.plink,
+    lmm.GWAS(REML=...), L.optH, ...); a small adapter, local to this tool,
+    maps those names onto the current API through docs/migration/name-map.csv.
+    pylmm itself keeps no aliases.
 """
 
 import argparse
+import csv
 import functools
 import os
 import shutil
@@ -27,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 
 import numpy as np
 import scipy
@@ -49,7 +55,54 @@ def _load_py2_pickles(*a, **kw):
 
 np.load = _load_py2_pickles
 
+from pylmm import lmm, misc, plink_io  # noqa: E402
+
+with open(os.path.join(REPO, "docs", "migration", "name-map.csv")) as _f:
+    _NEW_NAME = {r["old_name"]: r["new_name"] for r in csv.DictReader(_f)}
+
+
+def _new_kw(kw):
+    return {_NEW_NAME.get(k, k): v for k, v in kw.items()}
+
+
+class _OldNames:
+    """Old attribute and method names (L.optH, IN.getSNPIterator) resolve to the new ones."""
+
+    def __getattr__(self, name):
+        if name in _NEW_NAME:
+            return getattr(self, _NEW_NAME[name])
+        raise AttributeError(name)
+
+
+class _OldLMM(_OldNames, lmm.LMM):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **_new_kw(kw))
+
+    def fit(self, *a, **kw):
+        return super().fit(*a, **_new_kw(kw))
+
+    def association(self, *a, **kw):
+        return super().association(*a, **_new_kw(kw))
+
+
+class _OldPlink(_OldNames, plink_io.PlinkReader):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **_new_kw(kw))
+
+
+_old_input = types.ModuleType("pylmm.input")
+_old_input.plink = _OldPlink
+sys.modules["pylmm.input"] = _old_input  # for generate_golden's `from pylmm import input`
+
 import generate_golden as gen  # noqa: E402
+
+gen.lmm = types.SimpleNamespace(
+    LMM=_OldLMM,
+    GWAS=lambda *a, **kw: lmm.gwas(*a, **_new_kw(kw)),
+    calculateKinship=lmm.calculate_kinship,
+    linalg=lmm.linalg,
+)
+gen.misc = types.SimpleNamespace(fitTwo=misc.fit_two)
 
 
 def run_cli(args, outfile, cwd):
