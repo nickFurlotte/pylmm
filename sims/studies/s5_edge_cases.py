@@ -14,7 +14,7 @@ SNPs, K from 400 other SNPs), run pylmm on it, and record what happens:
 
 Paths:  lib         pylmm.lmm.gwas on raw genotypes (missing = per-SNP removal)
         lib_impute  user mean-imputes, then pylmm.lmm.gwas
-        cli_impute  pylmm.cli.gwas through subprocess (BED/fam/pheno/kin files
+        cli_impute  `python -m pylmm gwas` through subprocess (BED/fam/pheno/kin files
                     written here), default behaviour: mean-impute + standardise
         cli_remove  same with --removeMissingGenotypes
 
@@ -562,25 +562,26 @@ def run_cli(P, remove):
         args = [
             sys.executable,
             "-m",
-            "pylmm.cli.gwas",
+            "pylmm",
+            "gwas",
             "-v",
             "--bfile",
             pre,
-            "--kfile",
+            "--kinship",
             pre + ".kin",
         ]
         if var != "nophenofile":
-            args += ["--phenofile", pre + ".phenos"]
+            args += ["--pheno", pre + ".phenos"]
         else:
             os.rename(pre + ".phenos", pre + ".other")  # no <base>.phenos either
         if P.cov.shape[1]:
             with open(pre + ".cov", "w") as f:
                 for i in range(n):
                     f.write("f%d i%d %s\n" % (i, i, " ".join(_fmt(v) for v in P.cov[i])))
-            args += ["--covfile", pre + ".cov"]
+            args += ["--covar", pre + ".cov"]
         if remove:
-            args += ["--removeMissingGenotypes"]
-        args += [os.path.join(d, "out.txt")]
+            args += ["--remove-missing-genotypes"]
+        args += ["-o", os.path.join(d, "out.txt")]
         env = dict(
             os.environ,
             OMP_NUM_THREADS="1",

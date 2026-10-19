@@ -13,7 +13,7 @@ import warnings
 import numpy as np
 import pytest
 
-from pylmm.cli import gwas as cli_gwas
+from pylmm import cli
 from pylmm.lmm import LMM, calculate_kinship, check_covariates, gwas, snp_estimable
 
 
@@ -95,9 +95,10 @@ def _write_emma(tmp_path, rows, y, K):
     return snps, ph, kf
 
 
-def _run(argv):
+def _run(argv, rc=0):
+    """`pylmm gwas <argv>` in-process, stderr silenced; check the exit code."""
     with quiet():
-        cli_gwas.main(argv)
+        assert cli.main(["gwas", *argv]) == rc
 
 
 def _read(fn):
@@ -122,8 +123,8 @@ def test_cli_non_estimable_snps_are_nan_in_both_branches(tmp_path, prob, remove)
     snps, ph, kf = _write_emma(tmp_path, [ok, only_na, const, const_miss], y, K)
     out = str(tmp_path / "o")
     _run(
-        ["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, out]
-        + (["--removeMissingGenotypes"] if remove else [])
+        ["--emma-geno", snps, "--emma-pheno", ph, "--kinship", kf, "-o", out]
+        + (["--remove-missing-genotypes"] if remove else [])
     )
     r = _read(out)
     assert np.isfinite(r[0]).all()
@@ -257,8 +258,9 @@ def test_all_missing_phenotype(prob):
 def test_cli_constant_phenotype_is_a_usage_error(tmp_path, prob):
     rng, n, K, y, X = prob
     snps, ph, kf = _write_emma(tmp_path, [X[:, 0]], np.full(n, 1.0), K)
-    with pytest.raises(SystemExit):
-        _run(["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, str(tmp_path / "o")])
+    _run(
+        ["--emma-geno", snps, "--emma-pheno", ph, "--kinship", kf, "-o", str(tmp_path / "o")], rc=2
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +309,7 @@ def test_covariate_collinear_only_after_dropping_missing_y(prob):
 
 def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
     """A covariate column of ones next to the intercept the CLI adds: the
-    usage error names the columns and --noMean."""
+    usage error names the columns and --no-mean."""
     rng = np.random.default_rng(3)
     n = 30
     G = rng.binomial(2, 0.4, (n, 3)).astype(float)
@@ -317,23 +319,40 @@ def test_cli_covariate_file_with_intercept_points_at_nomean(tmp_path):
         f.write(" ".join(["1"] * n) + "\n")
         f.write(" ".join("%.6f" % v for v in rng.standard_normal(n)) + "\n")
     err = io.StringIO()
-    with pytest.raises(SystemExit), contextlib.redirect_stderr(err):
-        cli_gwas.main(
+    with contextlib.redirect_stderr(err):
+        rc = cli.main(
             [
-                "--emmaSNP",
+                "gwas",
+                "--emma-geno",
                 snps,
-                "--emmaPHENO",
+                "--emma-pheno",
                 ph,
-                "--kfile",
+                "--kinship",
                 kf,
-                "--emmaCOV",
+                "--emma-covar",
                 cov,
+                "-o",
                 str(tmp_path / "o"),
             ]
         )
-    assert "columns 0 and 1 are identical" in err.getvalue() and "--noMean" in err.getvalue()
+    assert rc == 2
+    assert "columns 0 and 1 are identical" in err.getvalue() and "--no-mean" in err.getvalue()
     out = str(tmp_path / "o")
-    _run(["--emmaSNP", snps, "--emmaPHENO", ph, "--kfile", kf, "--emmaCOV", cov, "--noMean", out])
+    _run(
+        [
+            "--emma-geno",
+            snps,
+            "--emma-pheno",
+            ph,
+            "--kinship",
+            kf,
+            "--emma-covar",
+            cov,
+            "--no-mean",
+            "-o",
+            out,
+        ]
+    )
     assert np.isfinite(_read(out)).all()
 
 

@@ -19,7 +19,7 @@ import numpy as np
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA = os.path.join(REPO, "data")
 GOLDEN = os.path.join(REPO, "tests", "golden")
-SCRIPTS = os.path.join(REPO, "scripts")
+SCRIPTS = os.path.join(REPO, "scripts")  # scripts/example.py
 
 BED_BASE = os.path.join(DATA, "snps.132k.clean.noX")
 README_KIN = BED_BASE + ".pylmm.kin"
@@ -84,7 +84,7 @@ RTOL_FIT = 1e-5
 ATOL_FIT = 5e-6
 RTOL_P = 1e-5
 
-# pylmmGWAS.py -v prints the null fit with %0.3f; allow one unit in the last
+# `pylmm gwas -v` logs the null fit with %0.3f; allow one unit in the last
 # printed digit (a value sitting on a rounding boundary may flip).
 CLI_PRINT_ATOL = 1.0e-3 + 1e-9
 
@@ -185,7 +185,7 @@ def load_kv(name):
 
 
 def load_gwas_out(fn, nrows=None):
-    """Parse a scripts/pylmmGWAS.py output file numerically.
+    """Parse a `pylmm gwas` output file numerically.
 
     Returns (snp_ids, values) where values is an (nsnps, 4) float array with
     columns BETA, BETA_SD, F_STAT, P_VALUE ('nan' parses to nan).  nrows
@@ -291,9 +291,9 @@ def write_emma_cov(workdir):
 
 def write_headerless_kinship(workdir, gz=False):
     """The hmdp kinship as a plain '%.17g' text file with NO '#' header,
-    byte-identical to what generate_golden.py feeds to --kfile.
+    byte-identical to what generate_golden.py fed to the old --kfile.
 
-    tests/golden/hmdp_K_npdump.txt cannot be passed to --kfile directly:
+    tests/golden/hmdp_K_npdump.txt cannot be passed to --kinship directly:
     before Phase 5.1 pylmmGWAS.py read K with np.fromfile(sep=' '), which
     stops at the first '#', and K.resize() then zero-filled the rest (an
     all-zero kinship); it now rejects the '#' lines (bug 16)."""
@@ -385,7 +385,7 @@ def write_emma_missing_pheno(workdir):
 
 def check_no_comment_header(args):
     """Refuse to feed a '#'-headed text file to a CLI (see
-    write_headerless_kinship for why that broke --kfile)."""
+    write_headerless_kinship for why that broke the old --kfile)."""
     for a in args:
         if os.path.isfile(a) and not a.endswith((".bed", ".gz")):
             with open(a, "rb") as f:
@@ -396,17 +396,19 @@ def check_no_comment_header(args):
             )
 
 
-def run_script(script, args, cwd, timeout=CLI_TIMEOUT):
-    """Run scripts/<script> with the current interpreter in cwd (normally the
-    test's tmp_path); fail on non-zero exit or after `timeout` seconds.
+def run_cli(args, cwd, timeout=CLI_TIMEOUT, expect_rc=0):
+    """Run `python -m pylmm <args>` with the current interpreter in cwd
+    (normally the test's tmp_path); fail if the exit code is not
+    `expect_rc` or after `timeout` seconds.
 
-    Returns the merged stdout+stderr (the -v log).  The timeout is a
-    threading.Timer watchdog, so it works the same on Python 2 and 3."""
+    `args` starts with the subcommand (`gwas`, `kinship`).  Returns the
+    merged stdout+stderr (the -v log).  The timeout is a threading.Timer
+    watchdog."""
     args = [str(a) for a in args]
     check_no_comment_header(args)
     env = dict(os.environ)
     env["PYTHONPATH"] = REPO + os.pathsep + env.get("PYTHONPATH", "")
-    cmd = [sys.executable, os.path.join(SCRIPTS, script), *args]
+    cmd = [sys.executable, "-m", "pylmm", *args]
     p = subprocess.Popen(
         cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
@@ -425,7 +427,12 @@ def run_script(script, args, cwd, timeout=CLI_TIMEOUT):
     if not isinstance(output, str):
         output = output.decode("utf-8", "replace")
     assert not killed, "command timed out after %ss: %s\n%s" % (timeout, " ".join(cmd), output)
-    assert p.returncode == 0, "command failed (%d): %s\n%s" % (p.returncode, " ".join(cmd), output)
+    assert p.returncode == expect_rc, "command exited %d, expected %d: %s\n%s" % (
+        p.returncode,
+        expect_rc,
+        " ".join(cmd),
+        output,
+    )
     return output
 
 
@@ -433,7 +440,7 @@ _HERIT_RE = re.compile(r"heritability=(\S+), sigma=(\S+)")
 
 
 def null_fit_from_log(output):
-    """(h, sigma) of the null fit as printed (%0.3f) by pylmmGWAS.py -v."""
+    """(h, sigma) of the null fit as logged (%0.3f) by `pylmm gwas -v`."""
     m = _HERIT_RE.findall(output)
     assert len(m) == 1, "expected one heritability line in the -v log, got %r\n%s" % (m, output)
     return float(m[0][0]), float(m[0][1])
