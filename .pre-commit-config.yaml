@@ -1,0 +1,10 @@
+# Optional: `pre-commit install` runs ruff on commit.  Not required; CI and
+# `just lint` are the source of truth.  Keep rev in step with the ruff pin in
+# pyproject.toml / uv.lock.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.22
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

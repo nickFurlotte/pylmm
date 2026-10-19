@@ -3,14 +3,14 @@
 import os
 import runpy
 
+import helpers as h
 import numpy as np
 
-import helpers as h
 from pylmm import lmm
 
 
 def test_example_py(monkeypatch):
-    monkeypatch.chdir(h.REPO)   # example.py uses relative data/ paths
+    monkeypatch.chdir(h.REPO)  # example.py uses relative data/ paths
 
     # example.py overwrites L, ts and ps, so record the intermediate results
     # (the null fit and the first, non-refit association) as they happen.
@@ -26,45 +26,51 @@ def test_example_py(monkeypatch):
         res = orig_assoc(self, *a, **kw)
         assocs.append(res)
         return res
-    monkeypatch.setattr(lmm.LMM, 'fit', fit)
-    monkeypatch.setattr(lmm.LMM, 'association', association)
 
-    g = runpy.run_path(os.path.join(h.SCRIPTS, 'example.py'), run_name='__main__')
-    exp = h.load_kv('example_py.kv.txt')
+    monkeypatch.setattr(lmm.LMM, "fit", fit)
+    monkeypatch.setattr(lmm.LMM, "association", association)
+
+    g = runpy.run_path(os.path.join(h.SCRIPTS, "example.py"), run_name="__main__")
+    exp = h.load_kv("example_py.kv.txt")
 
     def close(v, k):
-        if k.endswith('ps') or '_ps_' in k:
+        if k.endswith("ps") or "_ps_" in k:
             h.assert_pvalues_close(v, exp[k], what=k)
         else:
             h.assert_fit_close(v, exp[k], what=k)
 
-    null_h, null_sigma, null_LL = fits[0]   # L.fit()
-    close(null_h, 'null_h')
-    close(null_sigma, 'null_sigma')
-    close(null_LL, 'null_LL')
-    snp0_ts, snp0_ps = assocs[0]            # L.association(X), no refit
-    close(snp0_ts, 'snp0_ts')
-    close(snp0_ps, 'snp0_ps')
+    null_h, null_sigma, null_LL = fits[0]  # L.fit()
+    close(null_h, "null_h")
+    close(null_sigma, "null_sigma")
+    close(null_LL, "null_LL")
+    snp0_ts, snp0_ps = assocs[0]  # L.association(X), no refit
+    close(snp0_ts, "snp0_ts")
+    close(snp0_ps, "snp0_ps")
 
-    L = g['L']   # last fit is the refit on SNP 0
-    close(L.optH, 'snp0_refit_h')
-    close(g['ts'], 'snp0_refit_ts')
-    close(g['ps'], 'snp0_refit_ps')
+    L = g["L"]  # last fit is the refit on SNP 0
+    close(L.optH, "snp0_refit_h")
+    close(g["ts"], "snp0_refit_ts")
+    close(g["ps"], "snp0_refit_ps")
 
-    TS, PS = np.asarray(g['TS']), np.asarray(g['PS'])
-    assert len(PS) == exp['gwas_n']
-    assert np.isnan(PS).sum() == exp['gwas_n_nan']
-    close(TS[0], 'gwas_ts_0')
-    close(PS[0], 'gwas_ps_0')
-    close(np.nanmin(PS), 'gwas_ps_min')
-    assert np.nanargmin(PS) == exp['gwas_ps_argmin']
+    TS, PS = np.asarray(g["TS"]), np.asarray(g["PS"])
+    assert len(PS) == exp["gwas_n"]
+    assert np.isnan(PS).sum() == exp["gwas_n_nan"]
+    close(TS[0], "gwas_ts_0")
+    close(PS[0], "gwas_ps_0")
+    close(np.nanmin(PS), "gwas_ps_min")
+    assert np.nanargmin(PS) == exp["gwas_ps_argmin"]
     # a sum of ~930 log10(p) terms (about -286): relative tolerance only
-    h.assert_close(np.nansum(np.log10(PS)), exp['gwas_sum_log10_ps'],
-                   rtol=h.RTOL_FIT, atol=0, what='gwas_sum_log10_ps')
-    h.assert_pvalues_valid(PS, 'example.py')
+    h.assert_close(
+        np.nansum(np.log10(PS)),
+        exp["gwas_sum_log10_ps"],
+        rtol=h.RTOL_FIT,
+        atol=0,
+        what="gwas_sum_log10_ps",
+    )
+    h.assert_pvalues_valid(PS, "example.py")
 
     # SNPs 1..999 equal the lmm.GWAS REML+refit golden (SNP 0 was imputed
     # in place by example.py, see docs/phase1-baseline.md).
-    gw = h.load_golden_txt('assoc_hmdp_GWAS.txt')
-    h.assert_fit_close(TS[1:], gw[1:, 4], what='example.py TS[1:]')
-    h.assert_pvalues_close(PS[1:], gw[1:, 5], what='example.py PS[1:]')
+    gw = h.load_golden_txt("assoc_hmdp_GWAS.txt")
+    h.assert_fit_close(TS[1:], gw[1:, 4], what="example.py TS[1:]")
+    h.assert_pvalues_close(PS[1:], gw[1:, 5], what="example.py PS[1:]")

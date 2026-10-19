@@ -28,7 +28,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -39,10 +40,10 @@ HMDP_SNPS = os.path.join(REPO, "data", "hmdp.liver.snps")
 
 @dataclasses.dataclass
 class Genotypes:
-    G: np.ndarray                      # n x m float64, nan = missing
+    G: np.ndarray  # n x m float64, nan = missing
     snp_ids: list
     indiv_ids: list
-    pops: Optional[np.ndarray] = None  # population / family label per individual
+    pops: np.ndarray | None = None  # population / family label per individual
     meta: dict = dataclasses.field(default_factory=dict)
 
     @property
@@ -53,13 +54,15 @@ class Genotypes:
     def m(self) -> int:
         return self.G.shape[1]
 
-    def copy(self) -> "Genotypes":
+    def copy(self) -> Genotypes:
         return dataclasses.replace(
-            self, G=self.G.copy(),
+            self,
+            G=self.G.copy(),
             pops=None if self.pops is None else self.pops.copy(),
-            meta=dict(self.meta))
+            meta=dict(self.meta),
+        )
 
-    def subset(self, snps=None, indivs=None) -> "Genotypes":
+    def subset(self, snps=None, indivs=None) -> Genotypes:
         """Column/row subset (index arrays, slices or boolean masks); copies."""
         G = self.G
         snp_ids, indiv_ids, pops = self.snp_ids, self.indiv_ids, self.pops
@@ -72,17 +75,27 @@ class Genotypes:
             jj = np.arange(self.m)[snps]
             G = G[:, jj]
             snp_ids = [snp_ids[j] for j in jj]
-        return Genotypes(np.array(G, dtype=np.float64), list(snp_ids),
-                         list(indiv_ids), None if pops is None else pops.copy(),
-                         dict(self.meta))
+        return Genotypes(
+            np.array(G, dtype=np.float64),
+            list(snp_ids),
+            list(indiv_ids),
+            None if pops is None else pops.copy(),
+            dict(self.meta),
+        )
 
 
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 
-def _choose(total: int, count: Optional[int], idx: Optional[Sequence[int]],
-            select: str, rng: np.random.Generator) -> np.ndarray:
+
+def _choose(
+    total: int,
+    count: int | None,
+    idx: Sequence[int] | None,
+    select: str,
+    rng: np.random.Generator,
+) -> np.ndarray:
     """Sorted indices of a subset of range(total)."""
     if idx is not None:
         out = np.asarray(idx, dtype=np.int64)
@@ -134,9 +147,16 @@ def with_missing(G: np.ndarray, rate: float, rng: np.random.Generator) -> np.nda
 # real genotypes
 # ---------------------------------------------------------------------------
 
-def bed(n_snps: Optional[int] = None, snps: Optional[Sequence[int]] = None,
-        n_indivs: Optional[int] = None, indivs: Optional[Sequence[int]] = None,
-        select: str = "first", seed: int = 0, base: str = BED_BASE) -> Genotypes:
+
+def bed(
+    n_snps: int | None = None,
+    snps: Sequence[int] | None = None,
+    n_indivs: int | None = None,
+    indivs: Sequence[int] | None = None,
+    select: str = "first",
+    seed: int = 0,
+    base: str = BED_BASE,
+) -> Genotypes:
     """The bundled PLINK BED data (1219 mice x 98,740 SNPs), read with
     ``pylmm.input.plink`` (unnormalised: 0/0.5/1/nan).
 
@@ -154,7 +174,7 @@ def bed(n_snps: Optional[int] = None, snps: Optional[Sequence[int]] = None,
     from pylmm import input as pinput
 
     rng = np.random.default_rng(seed)
-    with contextlib.redirect_stderr(io.StringIO()):   # "Read N individuals"
+    with contextlib.redirect_stderr(io.StringIO()):  # "Read N individuals"
         IN = pinput.plink(base, type="b", normGenotype=False)
     n_total = len(IN.indivs)
     with open(base + ".bim") as f:
@@ -175,13 +195,23 @@ def bed(n_snps: Optional[int] = None, snps: Optional[Sequence[int]] = None,
     order = list(jj)
     G = np.column_stack([cols[j] for j in order]) if order else np.zeros((len(ii), 0))
     indiv_ids = ["%s:%s" % IN.indivs[i] for i in ii]
-    return Genotypes(G.astype(np.float64), [ids[j] for j in order], indiv_ids,
-                     meta={"source": "bed", "snp_index": jj, "indiv_index": ii})
+    return Genotypes(
+        G.astype(np.float64),
+        [ids[j] for j in order],
+        indiv_ids,
+        meta={"source": "bed", "snp_index": jj, "indiv_index": ii},
+    )
 
 
-def hmdp(n_snps: Optional[int] = None, snps: Optional[Sequence[int]] = None,
-         n_indivs: Optional[int] = None, indivs: Optional[Sequence[int]] = None,
-         select: str = "first", seed: int = 0, path: str = HMDP_SNPS) -> Genotypes:
+def hmdp(
+    n_snps: int | None = None,
+    snps: Sequence[int] | None = None,
+    n_indivs: int | None = None,
+    indivs: Sequence[int] | None = None,
+    select: str = "first",
+    seed: int = 0,
+    path: str = HMDP_SNPS,
+) -> Genotypes:
     """The HMDP liver SNP text file (EMMA layout: one SNP per row, 0/1/NA).
 
     ~132k SNPs x 94 inbred strains, ~2% missing calls.  Subsetting as in
@@ -198,30 +228,42 @@ def hmdp(n_snps: Optional[int] = None, snps: Optional[Sequence[int]] = None,
     for j in jj:
         rows.append([np.nan if x == "NA" else float(x) for x in lines[j].split()])
     G = np.array(rows, dtype=np.float64).reshape(len(jj), n_total).T[ii, :].copy()
-    return Genotypes(G, ["hmdp_%d" % j for j in jj], ["strain_%d" % i for i in ii],
-                     meta={"source": "hmdp", "snp_index": jj, "indiv_index": ii})
+    return Genotypes(
+        G,
+        ["hmdp_%d" % j for j in jj],
+        ["strain_%d" % i for i in ii],
+        meta={"source": "hmdp", "snp_index": jj, "indiv_index": ii},
+    )
 
 
 # ---------------------------------------------------------------------------
 # synthetic genotypes
 # ---------------------------------------------------------------------------
 
-def unrelated(n: int, m: int, maf: Any = ("uniform", 0.05, 0.5),
-              seed: int = 0) -> Genotypes:
+
+def unrelated(n: int, m: int, maf: Any = ("uniform", 0.05, 0.5), seed: int = 0) -> Genotypes:
     """n unrelated individuals, m independent SNPs in Hardy-Weinberg
     equilibrium: g_ij ~ Binomial(2, p_j), p_j drawn from ``maf``."""
     rng = np.random.default_rng(seed)
     p = sample_maf(maf, m, rng)
     G = rng.binomial(2, p, size=(n, m)).astype(np.float64)
-    return Genotypes(G, ["snp_%d" % j for j in range(m)],
-                     ["ind_%d" % i for i in range(n)],
-                     meta={"source": "unrelated", "maf": p})
+    return Genotypes(
+        G,
+        ["snp_%d" % j for j in range(m)],
+        ["ind_%d" % i for i in range(n)],
+        meta={"source": "unrelated", "maf": p},
+    )
 
 
-def balding_nichols(n: int, m: int, k: int = 2, fst: float = 0.1,
-                    maf: Any = ("uniform", 0.05, 0.5),
-                    admixture: Optional[float] = None,
-                    seed: int = 0) -> Genotypes:
+def balding_nichols(
+    n: int,
+    m: int,
+    k: int = 2,
+    fst: float = 0.1,
+    maf: Any = ("uniform", 0.05, 0.5),
+    admixture: float | None = None,
+    seed: int = 0,
+) -> Genotypes:
     """Structured population under the Balding-Nichols model.
 
     Ancestral frequencies p_j come from ``maf``; population frequencies are
@@ -238,25 +280,32 @@ def balding_nichols(n: int, m: int, k: int = 2, fst: float = 0.1,
     rng = np.random.default_rng(seed)
     p = sample_maf(maf, m, rng)
     c = (1.0 - fst) / fst
-    P = rng.beta(p * c, (1.0 - p) * c, size=(k, m))          # k x m
+    P = rng.beta(p * c, (1.0 - p) * c, size=(k, m))  # k x m
     if admixture is None:
         pops = np.repeat(np.arange(k), int(np.ceil(n / k)))[:n]
         F = P[pops, :]
         Q = None
     else:
-        Q = rng.dirichlet(np.full(k, float(admixture)), size=n)   # n x k
+        Q = rng.dirichlet(np.full(k, float(admixture)), size=n)  # n x k
         F = Q @ P
         pops = Q.argmax(axis=1)
     G = rng.binomial(2, F).astype(np.float64)
     meta = {"source": "balding_nichols", "maf": p, "pop_freqs": P, "fst": fst}
     if Q is not None:
         meta["Q"] = Q
-    return Genotypes(G, ["snp_%d" % j for j in range(m)],
-                     ["ind_%d" % i for i in range(n)], pops=pops, meta=meta)
+    return Genotypes(
+        G, ["snp_%d" % j for j in range(m)], ["ind_%d" % i for i in range(n)], pops=pops, meta=meta
+    )
 
 
-def family(n_families: int, n_sibs: int, m: int, include_parents: bool = False,
-           maf: Any = ("uniform", 0.05, 0.5), seed: int = 0) -> Genotypes:
+def family(
+    n_families: int,
+    n_sibs: int,
+    m: int,
+    include_parents: bool = False,
+    maf: Any = ("uniform", 0.05, 0.5),
+    seed: int = 0,
+) -> Genotypes:
     """Nuclear families: two unrelated HWE founders per family, ``n_sibs``
     full sibs each receiving one random allele from each parent (unlinked
     SNPs).  Expected relatedness is 0.5 between sibs (and parent-child),
@@ -283,9 +332,13 @@ def family(n_families: int, n_sibs: int, m: int, include_parents: bool = False,
         role = ["parent"] * (n_families * 2) + role
     G = np.vstack(rows).astype(np.float64)
     pops = np.concatenate(fam)
-    return Genotypes(G, ["snp_%d" % j for j in range(m)],
-                     ["ind_%d" % i for i in range(G.shape[0])], pops=pops,
-                     meta={"source": "family", "maf": p, "role": role})
+    return Genotypes(
+        G,
+        ["snp_%d" % j for j in range(m)],
+        ["ind_%d" % i for i in range(G.shape[0])],
+        pops=pops,
+        meta={"source": "family", "maf": p, "role": role},
+    )
 
 
 SOURCES = {

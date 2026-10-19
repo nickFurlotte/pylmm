@@ -10,6 +10,23 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Ruff check
+        run: uv run --locked ruff check
+
+      - name: Ruff format check
+        run: uv run --locked ruff format --check
+
   pytest:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

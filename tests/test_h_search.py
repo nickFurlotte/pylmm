@@ -40,16 +40,15 @@ def problem(seed, h2, n=60, m=30):
 
 def check_evals_inside_bracket(L):
     H = L.H
-    assert L.evals, 'the search never ran'
+    assert L.evals, "the search never ran"
     assert min(L.evals) >= 0.0 and max(L.evals) <= 1.0
-    peaks = [i for i in range(1, len(H) - 2)
-             if L.LLs[i - 1] < L.LLs[i] and L.LLs[i] > L.LLs[i + 1]]
+    peaks = [i for i in range(1, len(H) - 2) if L.LLs[i - 1] < L.LLs[i] and L.LLs[i] > L.LLs[i + 1]]
     for h in L.evals:
         assert any(H[i - 1] <= h <= H[i + 1] for i in peaks), h
 
 
-@pytest.mark.parametrize('h2', [0.05, 0.5, 0.9, 0.97])
-@pytest.mark.parametrize('reml', [True, False], ids=['reml', 'ml'])
+@pytest.mark.parametrize("h2", [0.05, 0.5, 0.9, 0.97])
+@pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
 def test_bounded_search_never_leaves_its_bracket(h2, reml):
     """Null fit and per-SNP refit, over seeds whose grid has an interior peak."""
     ran = 0
@@ -57,7 +56,9 @@ def test_bounded_search_never_leaves_its_bracket(h2, reml):
         y, K, x = problem(seed, h2)
         for X in (None, x):
             L = make(y, K)
-            with np.errstate(divide='raise', invalid='raise', over='raise'):          # no nan / log of a negative
+            with np.errstate(
+                divide="raise", invalid="raise", over="raise"
+            ):  # no nan / log of a negative
                 h = float(np.sum(L.fit(X=X, REML=reml)[0]))
             assert 0.0 <= h <= 0.99
             if L.evals:
@@ -70,11 +71,11 @@ def test_s5_seed1177_small_n_null_fit_does_not_crash():
     """S5 P1-7 reproducer (n = 10): the grid maximum is at 0.96 with a nearly
     flat profile to 0.99; on scipy >= 1.11 this raised BracketError."""
     rng = np.random.default_rng(1177)
-    W = rng.binomial(2, rng.uniform(.05, .5, 100), (10, 100)).astype(float)
+    W = rng.binomial(2, rng.uniform(0.05, 0.5, 100), (10, 100)).astype(float)
     K = calculateKinship(W)
     y = rng.standard_normal(10)
     L = make(y, K)
-    with np.errstate(divide='raise', invalid='raise', over='raise'):
+    with np.errstate(divide="raise", invalid="raise", over="raise"):
         hmax, beta, sigma, ll = L.fit()
     h = float(np.sum(hmax))
     assert 0.95 <= h <= 0.99 and np.isfinite(np.sum(ll))

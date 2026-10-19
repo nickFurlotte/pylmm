@@ -27,37 +27,39 @@ tiny negative round-off eigenvalues of rank-deficient kinships to 0.
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
 
 import numpy as np
 
 
 @dataclasses.dataclass
 class Phenotype:
-    y: np.ndarray               # length n, nan = missing
-    X0: np.ndarray              # n x q covariates (first column = intercept)
-    alpha: np.ndarray           # covariate effects (length q)
-    causal_idx: np.ndarray      # columns of the genotype matrix passed in
-    beta: np.ndarray            # per causal SNP effect (genotype scale given)
-    u: np.ndarray               # polygenic effect
-    e: np.ndarray               # noise
-    h2: float                   # sigma_g^2 / (sigma_g^2 + sigma_e^2)
+    y: np.ndarray  # length n, nan = missing
+    X0: np.ndarray  # n x q covariates (first column = intercept)
+    alpha: np.ndarray  # covariate effects (length q)
+    causal_idx: np.ndarray  # columns of the genotype matrix passed in
+    beta: np.ndarray  # per causal SNP effect (genotype scale given)
+    u: np.ndarray  # polygenic effect
+    e: np.ndarray  # noise
+    h2: float  # sigma_g^2 / (sigma_g^2 + sigma_e^2)
     sigma_g2: float
     sigma_e2: float
     causal_var: float
-    missing: np.ndarray         # boolean mask of y set to nan
+    missing: np.ndarray  # boolean mask of y set to nan
 
 
-def sample_polygenic(Kva: np.ndarray, Kve: np.ndarray, sigma_g2: float,
-                     rng: np.random.Generator) -> np.ndarray:
+def sample_polygenic(
+    Kva: np.ndarray, Kve: np.ndarray, sigma_g2: float, rng: np.random.Generator
+) -> np.ndarray:
     """One draw of u ~ N(0, sigma_g2 K) from the eigendecomposition of K."""
     d = np.clip(np.asarray(Kva, dtype=np.float64), 0.0, None)
     z = rng.standard_normal(len(d))
     return np.asarray(Kve) @ (np.sqrt(d) * z) * np.sqrt(sigma_g2)
 
 
-def _effect_variances(n_causal: int, causal_var: Union[float, Sequence[float]],
-                      effects: str, rng: np.random.Generator) -> np.ndarray:
+def _effect_variances(
+    n_causal: int, causal_var: float | Sequence[float], effects: str, rng: np.random.Generator
+) -> np.ndarray:
     if np.ndim(causal_var) == 1:
         v = np.asarray(causal_var, dtype=np.float64)
         if len(v) != n_causal:
@@ -74,16 +76,22 @@ def _effect_variances(n_causal: int, causal_var: Union[float, Sequence[float]],
     return float(causal_var) * w / w.sum()
 
 
-def simulate(kin, h2: float, rng: np.random.Generator,
-             G: Optional[np.ndarray] = None,
-             causal_idx: Optional[Sequence[int]] = None,
-             causal_var: Union[float, Sequence[float]] = 0.0,
-             effects: str = "equal",
-             X0: Optional[np.ndarray] = None,
-             alpha: Optional[Sequence[float]] = None,
-             n_covariates: int = 0, covariate_effect: float = 0.5,
-             mu: float = 0.0, var_total: float = 1.0,
-             missing_rate: float = 0.0) -> Phenotype:
+def simulate(
+    kin,
+    h2: float,
+    rng: np.random.Generator,
+    G: np.ndarray | None = None,
+    causal_idx: Sequence[int] | None = None,
+    causal_var: float | Sequence[float] = 0.0,
+    effects: str = "equal",
+    X0: np.ndarray | None = None,
+    alpha: Sequence[float] | None = None,
+    n_covariates: int = 0,
+    covariate_effect: float = 0.5,
+    mu: float = 0.0,
+    var_total: float = 1.0,
+    missing_rate: float = 0.0,
+) -> Phenotype:
     """Simulate one phenotype vector.
 
     kin            a :class:`sims.kinship.Kinship` (or any object with Kva, Kve)
@@ -139,13 +147,29 @@ def simulate(kin, h2: float, rng: np.random.Generator,
         missing = rng.random(n) < missing_rate
         y = y.copy()
         y[missing] = np.nan
-    return Phenotype(y=y, X0=X0, alpha=alpha, causal_idx=causal_idx, beta=beta,
-                     u=u, e=e, h2=float(h2), sigma_g2=sigma_g2, sigma_e2=sigma_e2,
-                     causal_var=total_causal, missing=missing)
+    return Phenotype(
+        y=y,
+        X0=X0,
+        alpha=alpha,
+        causal_idx=causal_idx,
+        beta=beta,
+        u=u,
+        e=e,
+        h2=float(h2),
+        sigma_g2=sigma_g2,
+        sigma_e2=sigma_e2,
+        causal_var=total_causal,
+        missing=missing,
+    )
 
 
-def choose_causal(m: int, n_causal: int, rng: np.random.Generator,
-                  G: Optional[np.ndarray] = None, min_maf: float = 0.0) -> np.ndarray:
+def choose_causal(
+    m: int,
+    n_causal: int,
+    rng: np.random.Generator,
+    G: np.ndarray | None = None,
+    min_maf: float = 0.0,
+) -> np.ndarray:
     """Random sorted causal columns; with G, only polymorphic SNPs whose
     sample MAF is >= min_maf (genotypes assumed 0/1/2 or 0/0.5/1)."""
     pool = np.arange(m)

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Iterable, List, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -34,14 +34,19 @@ def load_results(name: str, quick: bool = False, mod=None):
     be grouped on.
     """
     import pandas as pd
+
     if mod is not None:
         rows = runner.current_rows(name, quick, mod=mod)
     else:
         rows = runner.read_rows(runner.raw_path(name, quick))
     recs = []
     for r in rows:
-        rec = {"cell_id": r["cell_id"], "rep": r["rep"], "seed": r["seed"],
-               "elapsed": r.get("elapsed", np.nan)}
+        rec = {
+            "cell_id": r["cell_id"],
+            "rep": r["rep"],
+            "seed": r["seed"],
+            "elapsed": r.get("elapsed", np.nan),
+        }
         for k, v in r["params"].items():
             rec[k] = runner.canonical(v) if isinstance(v, (list, dict)) else v
         rec.update(r["metrics"])
@@ -49,7 +54,7 @@ def load_results(name: str, quick: bool = False, mod=None):
     return pd.DataFrame(recs)
 
 
-def param_columns(df, mod=None) -> List[str]:
+def param_columns(df, mod=None) -> list[str]:
     """Names of the param columns (from the study grid if given)."""
     if mod is not None:
         keys = []
@@ -59,7 +64,7 @@ def param_columns(df, mod=None) -> List[str]:
     raise ValueError("pass the study module")
 
 
-def scalar_metric_columns(df, exclude: Sequence[str] = ()) -> List[str]:
+def scalar_metric_columns(df, exclude: Sequence[str] = ()) -> list[str]:
     skip = {"cell_id", "rep", "seed", "elapsed"} | set(exclude)
     out = []
     for c in df.columns:
@@ -70,17 +75,20 @@ def scalar_metric_columns(df, exclude: Sequence[str] = ()) -> List[str]:
     return out
 
 
-def summarize(df, by: Sequence[str], metrics: Optional[Sequence[str]] = None,
-              se: bool = True):
+def summarize(df, by: Sequence[str], metrics: Sequence[str] | None = None, se: bool = True):
     """Per-cell mean (and standard error over replicates) of scalar metrics.
 
     Returns one row per combination of ``by`` with columns ``n_reps``,
     ``<metric>`` (mean) and ``<metric>_se``.
     """
     import pandas as pd
+
     by = list(by)
-    metrics = list(metrics) if metrics is not None else \
-        [c for c in scalar_metric_columns(df) if c not in by]
+    metrics = (
+        list(metrics)
+        if metrics is not None
+        else [c for c in scalar_metric_columns(df) if c not in by]
+    )
     g = df.groupby(by, sort=False, dropna=False)
     out = g[metrics].mean()
     if se:
@@ -99,8 +107,11 @@ def markdown_table(df, floatfmt: str = "%.4g") -> str:
         if isinstance(v, (float, np.floating)):
             return "" if np.isnan(v) else floatfmt % v
         return str(v)
-    lines = ["| " + " | ".join(str(c) for c in cols) + " |",
-             "|" + "|".join("---" for _ in cols) + "|"]
+
+    lines = [
+        "| " + " | ".join(str(c) for c in cols) + " |",
+        "|" + "|".join("---" for _ in cols) + "|",
+    ]
     for row in df.itertuples(index=False):
         lines.append("| " + " | ".join(fmt(v) for v in row) + " |")
     return "\n".join(lines) + "\n"
@@ -114,14 +125,23 @@ def output_dir(name: str, quick: bool) -> str:
     return d
 
 
-def write_summary(summary, outdir: str, title: str, notes: str = "",
-                  extra_tables: Iterable = (), md_columns: Optional[Sequence[str]] = None) -> None:
+def write_summary(
+    summary,
+    outdir: str,
+    title: str,
+    notes: str = "",
+    extra_tables: Iterable = (),
+    md_columns: Sequence[str] | None = None,
+) -> None:
     """Write summary.csv (all columns) and summary.md (title, run info, notes,
     then the table restricted to ``md_columns`` if given, plus any
     ``extra_tables`` given as (title, DataFrame) pairs)."""
     summary.to_csv(os.path.join(outdir, "summary.csv"), index=False)
-    runs = os.path.join(outdir if os.path.basename(outdir) != "quick" else
-                        os.path.dirname(outdir), "raw", "runs.jsonl")
+    runs = os.path.join(
+        outdir if os.path.basename(outdir) != "quick" else os.path.dirname(outdir),
+        "raw",
+        "runs.jsonl",
+    )
     info = ""
     if os.path.exists(runs):
         last = [json.loads(line) for line in open(runs) if line.strip()]
@@ -130,9 +150,10 @@ def write_summary(summary, outdir: str, title: str, notes: str = "",
         if last:
             r = last[-1]
             total = sum(x["task_cpu_s"] for x in last)
-            info = ("_Last run: %s, git %s, jobs=%d, wall %.0fs; total task time "
-                    "over all runs %.0fs._\n\n" % (r["time"], r["git"], r["jobs"],
-                                                   r["wall_s"], total))
+            info = (
+                "_Last run: %s, git %s, jobs=%d, wall %.0fs; total task time "
+                "over all runs %.0fs._\n\n" % (r["time"], r["git"], r["jobs"], r["wall_s"], total)
+            )
     parts = ["# %s\n\n" % title, info]
     if notes:
         parts.append(notes.strip() + "\n\n")
@@ -157,8 +178,9 @@ def report(ref: str, quick: bool = False) -> str:
     name = runner.study_name(ref, mod)
     df = load_results(ref, quick, mod=mod)
     if df.empty:
-        raise SystemExit("no results for %s (%s); run it first"
-                         % (name, "quick" if quick else "full"))
+        raise SystemExit(
+            "no results for %s (%s); run it first" % (name, "quick" if quick else "full")
+        )
     outdir = output_dir(name, quick)
     if hasattr(mod, "report"):
         mod.report(df, outdir)

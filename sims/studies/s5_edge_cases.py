@@ -84,29 +84,58 @@ def _build_grid(quick):
                 for path in ("cli_impute", "cli_remove"):
                     g.append(_cell("missing", "mcar", path, gm=gm, pm=pm))
     # 2. degenerate SNPs (planted in column 0 of the test set)
-    deg = ["mono", "mono_dosage", "mono_ydrop", "mono_xdrop", "allmiss", "single_minor",
-           "single_minor_ydrop", "eq_cov", "eq_cov_x2", "eq_intercept"]
-    for v in (["mono", "allmiss", "eq_cov"] if quick else deg):
-        for path in (("lib", "cli_impute") if quick else
-                     ("lib", "lib_impute", "cli_impute", "cli_remove")):
+    deg = [
+        "mono",
+        "mono_dosage",
+        "mono_ydrop",
+        "mono_xdrop",
+        "allmiss",
+        "single_minor",
+        "single_minor_ydrop",
+        "eq_cov",
+        "eq_cov_x2",
+        "eq_intercept",
+    ]
+    for v in ["mono", "allmiss", "eq_cov"] if quick else deg:
+        for path in (
+            ("lib", "cli_impute") if quick else ("lib", "lib_impute", "cli_impute", "cli_remove")
+        ):
             g.append(_cell("degenerate", v, path))
     # 3. small n, including n < covariates + 2
-    for n in ((10,) if quick else (10, 20, 50)):
-        for k in ((0, 8, 10) if quick else (0, 2, n // 2, n - 3, n - 2, n - 1, n + 2)):
+    for n in (10,) if quick else (10, 20, 50):
+        for k in (0, 8, 10) if quick else (0, 2, n // 2, n - 3, n - 2, n - 1, n + 2):
             g.append(_cell("smalln", "n_k", "lib", n=n, k=k))
     # 4. kinship pathologies
-    kin = [("lowrank", {"m_kin": 2}), ("lowrank", {"m_kin": 5}), ("lowrank", {"m_kin": 20}),
-           ("identity", {}), ("dup_pairs", {}), ("dup_all", {}),
-           ("nonpsd", {"noise": 0.1}), ("nonpsd", {"noise": 0.3}),
-           ("wrong_order", {}), ("scale", {"scale": 1e-4}), ("scale", {"scale": 1e4}),
-           ("upper_only", {}), ("nan_K", {}), ("asym", {})]
-    for v, kw in (kin[::4] if quick else kin):
+    kin = [
+        ("lowrank", {"m_kin": 2}),
+        ("lowrank", {"m_kin": 5}),
+        ("lowrank", {"m_kin": 20}),
+        ("identity", {}),
+        ("dup_pairs", {}),
+        ("dup_all", {}),
+        ("nonpsd", {"noise": 0.1}),
+        ("nonpsd", {"noise": 0.3}),
+        ("wrong_order", {}),
+        ("scale", {"scale": 1e-4}),
+        ("scale", {"scale": 1e4}),
+        ("upper_only", {}),
+        ("nan_K", {}),
+        ("asym", {}),
+    ]
+    for v, kw in kin[::4] if quick else kin:
         g.append(_cell("kin", v, "lib", **kw))
     # 5. covariates
-    cov = [("collinear_dup", "lib"), ("collinear_dup", "cli_impute"),
-           ("collinear_comb", "lib"), ("intercept_dup", "lib"), ("intercept_dup", "cli_impute"),
-           ("zero_cov", "lib"), ("zero_cov", "cli_impute"), ("cov_nan", "lib"),
-           ("cov_nan", "cli_impute")]
+    cov = [
+        ("collinear_dup", "lib"),
+        ("collinear_dup", "cli_impute"),
+        ("collinear_comb", "lib"),
+        ("intercept_dup", "lib"),
+        ("intercept_dup", "cli_impute"),
+        ("zero_cov", "lib"),
+        ("zero_cov", "cli_impute"),
+        ("cov_nan", "lib"),
+        ("cov_nan", "cli_impute"),
+    ]
     cov = [_cell("cov", v, p) for v, p in cov]
     for k in (5, 20, 40, 80):
         cov.append(_cell("cov", "many", "lib", k=k))
@@ -114,19 +143,36 @@ def _build_grid(quick):
         cov.append(_cell("cov", "cov_scale", "lib", scale=s))
     g += cov[::5] if quick else cov
     # 6. phenotype scaling / distribution
-    ph = [("scale", {"scale": 1e-6}), ("scale", {"scale": 1e6}), ("offset", {"offset": 1e9}),
-          ("constant", {}), ("const_noise", {"noise": 1e-12}), ("binary", {}),
-          ("heavy_t2", {}), ("lognormal", {}), ("inf_y", {}), ("all_nan", {}),
-          ("few_obs", {"n_obs": 3})]
-    for v, kw in (ph[3:4] if quick else ph):
+    ph = [
+        ("scale", {"scale": 1e-6}),
+        ("scale", {"scale": 1e6}),
+        ("offset", {"offset": 1e9}),
+        ("constant", {}),
+        ("const_noise", {"noise": 1e-12}),
+        ("binary", {}),
+        ("heavy_t2", {}),
+        ("lognormal", {}),
+        ("inf_y", {}),
+        ("all_nan", {}),
+        ("few_obs", {"n_obs": 3}),
+    ]
+    for v, kw in ph[3:4] if quick else ph:
         g.append(_cell("pheno", v, "lib", **kw))
     if not quick:
         for v in ("constant", "binary", "all_nan", "inf_y"):
             g.append(_cell("pheno", v, "cli_impute"))
     # 7. CLI file handling
-    io_cases = ["nophenofile", "pheno_shuffled", "pheno_missing_indiv", "pheno_extra_indiv",
-                "pheno_neg9", "kfile_header", "kfile_big", "kfile_small"]
-    for v in (["pheno_missing_indiv"] if quick else io_cases):
+    io_cases = [
+        "nophenofile",
+        "pheno_shuffled",
+        "pheno_missing_indiv",
+        "pheno_extra_indiv",
+        "pheno_neg9",
+        "kfile_header",
+        "kfile_big",
+        "kfile_small",
+    ]
+    for v in ["pheno_missing_indiv"] if quick else io_cases:
         g.append(_cell("io", v, "cli_impute"))
     return g
 
@@ -143,14 +189,14 @@ QUICK_GRID = _build_grid(True)
 class Problem:
     def __init__(self, y, Gt, K, cov, ideal="result"):
         self.y = np.asarray(y, dtype=np.float64)
-        self.Gt = np.asarray(Gt, dtype=np.float64)       # n x m, may contain nan
+        self.Gt = np.asarray(Gt, dtype=np.float64)  # n x m, may contain nan
         self.K = np.asarray(K, dtype=np.float64)
         self.cov = np.asarray(cov, dtype=np.float64).reshape(len(y), -1)  # extra covariates
         self.ideal = ideal
-        self.h_ident = True          # False: h not identifiable (skip h check)
-        self.cov_ref = None          # full-rank covariates for the oracle
-        self.K_ref = None            # the "right" K (to measure the shift)
-        self.io = {}                 # CLI file-handling mutations
+        self.h_ident = True  # False: h not identifiable (skip h check)
+        self.cov_ref = None  # full-rank covariates for the oracle
+        self.K_ref = None  # the "right" K (to measure the shift)
+        self.io = {}  # CLI file-handling mutations
         self.cli_ok = True
         self.skip_oracle = False
         self.expect_all_finite = False
@@ -162,8 +208,7 @@ class Problem:
 
 def _geno_split(rng, n, m_kin, m_test):
     sib = 5 if n % 5 == 0 else (2 if n % 2 == 0 else 1)
-    G = genotypes.family(n // sib, sib, m_kin + m_test,
-                         seed=int(rng.integers(2 ** 31))).G
+    G = genotypes.family(n // sib, sib, m_kin + m_test, seed=int(rng.integers(2**31))).G
     return G[:, :m_kin], G[:, m_kin:]
 
 
@@ -200,11 +245,11 @@ def _b_degenerate(p, var, rng):
         x[:] = 0.0
     elif var == "mono_dosage":
         x[:] = 0.37
-    elif var == "mono_ydrop":      # x varies only among individuals whose y is missing
+    elif var == "mono_ydrop":  # x varies only among individuals whose y is missing
         x[:] = 1.0
         x[:10] = 2.0
         y[:10] = np.nan
-    elif var == "mono_xdrop":      # x constant among non-missing, missing elsewhere
+    elif var == "mono_xdrop":  # x constant among non-missing, missing elsewhere
         x[:] = 1.0
         x[: n // 2] = np.nan
     elif var == "allmiss":
@@ -235,9 +280,9 @@ def _b_smalln(p, var, rng):
     P.cov = rng.standard_normal((n, k)) if k else np.zeros((n, 0))
     # y with covariate signal so the fit is not degenerate
     P.y = P.y + (P.cov @ np.full(k, 0.3) if k else 0.0)
-    if k + 2 >= n:          # SNP column makes the design saturated (df <= 0)
+    if k + 2 >= n:  # SNP column makes the design saturated (df <= 0)
         P.ideal = "error_or_nan"
-    elif k + 3 >= n:        # df = 1: estimable but hardly meaningful
+    elif k + 3 >= n:  # df = 1: estimable but hardly meaningful
         P.ideal = "result_or_error"
     return P
 
@@ -342,7 +387,7 @@ def _b_pheno(p, var, rng):
         P.skip_oracle = True
     elif var == "const_noise":
         y = 3.0 + p["noise"] * rng.standard_normal(n)
-        P.skip_oracle = True        # cancellation: even the oracle is unreliable here
+        P.skip_oracle = True  # cancellation: even the oracle is unreliable here
     elif var == "binary":
         y = (y > np.median(y)).astype(np.float64)
     elif var == "heavy_t2":
@@ -373,16 +418,22 @@ def _b_pheno(p, var, rng):
 def _b_io(p, var, rng):
     P = _base(rng, pm=0.05)
     P.io = {"variant": var}
-    if var in ("nophenofile", "pheno_missing_indiv", "kfile_header", "kfile_big",
-               "kfile_small"):
+    if var in ("nophenofile", "pheno_missing_indiv", "kfile_header", "kfile_big", "kfile_small"):
         P.ideal = "error_or_nan"
     if var == "pheno_extra_indiv":
         P.ideal = "result"
     return P
 
 
-BUILDERS = {"missing": _b_missing, "degenerate": _b_degenerate, "smalln": _b_smalln,
-            "kin": _b_kin, "cov": _b_cov, "pheno": _b_pheno, "io": _b_io}
+BUILDERS = {
+    "missing": _b_missing,
+    "degenerate": _b_degenerate,
+    "smalln": _b_smalln,
+    "kin": _b_kin,
+    "cov": _b_cov,
+    "pheno": _b_pheno,
+    "io": _b_io,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +464,7 @@ def _warn_summary(ws):
 
 def run_lib(P, impute):
     from pylmm.lmm import GWAS, LMM
+
     out = {"crash": 0, "crash_err": "", "clean_error": 0}
     G = _impute(P.Gt) if impute else P.Gt.copy()
     m = G.shape[1]
@@ -427,7 +479,7 @@ def run_lib(P, impute):
             h = float(np.sum(hh))
             out["sigma_hat"] = float(np.sum(sigma))
             out["ll_hat"] = float(np.sum(ll))
-        except Exception as e:  # noqa: BLE001 -- recording is the point
+        except Exception as e:
             out["null_err"] = _err(e)
             out["crash"] = 1
             out["crash_err"] = "null fit: " + _err(e)
@@ -439,10 +491,11 @@ def run_lib(P, impute):
                 out["crash"] = 1
                 out["crash_err"] = "GWAS returned %d stats for %d SNPs" % (len(t), m)
                 t = np.full(m, np.nan)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             out["crash"] = 1
-            out["crash_err"] = (out["crash_err"] + " | " if out["crash_err"] else "") \
-                + "GWAS: " + _err(e)
+            out["crash_err"] = (
+                (out["crash_err"] + " | " if out["crash_err"] else "") + "GWAS: " + _err(e)
+            )
     out["runtime"] = time.perf_counter() - t0
     out["n_warn"], out["warn_first"] = _warn_summary(ws)
     out["h_hat"] = h
@@ -484,14 +537,16 @@ def run_cli(P, remove):
         pre = os.path.join(d, "d")
         _write_bed(pre, P.Gt / 2.0, n)
         # phenotype file
-        rows = ["f%d i%d %s" % (i, i, _fmt(P.y[i], "-9" if var == "pheno_neg9" else "NA"))
-                for i in range(n)]
+        rows = [
+            "f%d i%d %s" % (i, i, _fmt(P.y[i], "-9" if var == "pheno_neg9" else "NA"))
+            for i in range(n)
+        ]
         if var == "pheno_shuffled":
             rows = [rows[i] for i in np.random.default_rng(1).permutation(n)]
         elif var == "pheno_missing_indiv":
             rows = rows[:-1]
         elif var == "pheno_extra_indiv":
-            rows = rows + ["fX iX 1.0"]
+            rows = [*rows, "fX iX 1.0"]
         with open(pre + ".phenos", "w") as f:
             f.write("\n".join(rows) + "\n")
         # kinship file
@@ -504,12 +559,20 @@ def run_cli(P, remove):
         if var == "kfile_header":
             txt = open(pre + ".kin").read()
             open(pre + ".kin", "w").write("# kinship\n" + txt)
-        args = [sys.executable, "-m", "pylmm.cli.gwas", "-v", "--bfile", pre,
-                "--kfile", pre + ".kin"]
+        args = [
+            sys.executable,
+            "-m",
+            "pylmm.cli.gwas",
+            "-v",
+            "--bfile",
+            pre,
+            "--kfile",
+            pre + ".kin",
+        ]
         if var != "nophenofile":
             args += ["--phenofile", pre + ".phenos"]
         else:
-            os.rename(pre + ".phenos", pre + ".other")   # no <base>.phenos either
+            os.rename(pre + ".phenos", pre + ".other")  # no <base>.phenos either
         if P.cov.shape[1]:
             with open(pre + ".cov", "w") as f:
                 for i in range(n):
@@ -518,15 +581,22 @@ def run_cli(P, remove):
         if remove:
             args += ["--removeMissingGenotypes"]
         args += [os.path.join(d, "out.txt")]
-        env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
-                   MKL_NUM_THREADS="1", PYTHONWARNINGS="default")
+        env = dict(
+            os.environ,
+            OMP_NUM_THREADS="1",
+            OPENBLAS_NUM_THREADS="1",
+            MKL_NUM_THREADS="1",
+            PYTHONWARNINGS="default",
+        )
         env["PYTHONPATH"] = os.pathsep.join(
             [os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
-            + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+            + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+        )
         t0 = time.perf_counter()
         try:
-            r = subprocess.run(args, capture_output=True, text=True, timeout=CLI_TIMEOUT,
-                               env=env, cwd=d)
+            r = subprocess.run(
+                args, capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env, cwd=d
+            )
             rc, err = r.returncode, r.stderr
         except subprocess.TimeoutExpired:
             rc, err = -9, "TimeoutExpired"
@@ -537,10 +607,8 @@ def run_cli(P, remove):
         out["warn_first"] = warns[0].strip()[:120] if warns else ""
         for ln in lines:
             if "heritability=" in ln:
-                try:
+                with contextlib.suppress(ValueError):
                     h = float(ln.split("heritability=")[1].split(",")[0])
-                except ValueError:
-                    pass
         if rc != 0:
             out["crash"] = 1
             out["clean_error"] = int(rc == 2 and "error:" in err)
@@ -556,7 +624,7 @@ def run_cli(P, remove):
                     out["crash_err"] = "CLI wrote %d rows for %d SNPs" % (len(vals), m)
                 else:
                     t = np.array([float(v[3]) for v in vals])
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 out["crash"] = 1
                 out["crash_err"] = "reading CLI output: " + _err(e)
     out["h_hat"] = h
@@ -602,7 +670,7 @@ def oracle_compare(P, G, t, h_hat, remove_mode, cli_ml=False):
             ok = ok_y & ~np.isnan(G[:, i])
             Ki = K[np.ix_(ok, ok)]
             w = oracle.wald(P.y[ok], Ki, G[ok, i], X0[ok], reml=True)
-            if w.h >= 0.98:      # h at the upper boundary: pylmm's 0.99 clamp (bugs 2/3)
+            if w.h >= 0.98:  # h at the upper boundary: pylmm's 0.99 clamp (bugs 2/3)
                 skipped += 1
                 continue
             if np.isfinite(t[i]):
@@ -619,7 +687,7 @@ def oracle_compare(P, G, t, h_hat, remove_mode, cli_ml=False):
             res["max_dt"] = float(np.max(dts))
             if dts_ml:
                 res["max_dt_ml"] = float(np.max(dts_ml))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         res["or_err"] = _err(e)
     return res
 
@@ -630,11 +698,10 @@ def classify(out, ideal):
         if out.get("clean_error") and ideal != "result":
             return "OK", "none"
         return "crash", ("high" if ideal == "result" else "medium")
-    nan_h = not np.isfinite(out.get("h_hat", np.nan)) or not np.isfinite(
-        out.get("sigma_hat", 0.0))
+    nan_h = not np.isfinite(out.get("h_hat", np.nan)) or not np.isfinite(out.get("sigma_hat", 0.0))
     n_fin = out.get("n_finite_t", 0)
     if ideal == "error_or_nan":
-        if n_fin + out.get("n_inf", 0) > 0:      # numbers where an error/nan is right
+        if n_fin + out.get("n_inf", 0) > 0:  # numbers where an error/nan is right
             # |t| ~ 0 (p ~ 1) is a spurious null result; larger |t| is believable garbage
             return "wrong", ("medium" if out.get("max_abs_t", 1.0) < 1e-6 else "critical")
         return "OK", ("low" if out.get("n_warn") else "none")
@@ -661,8 +728,8 @@ def run_cell(params, seed):
     out = {}
     try:
         P = build(params, rng)
-    except Exception as e:  # noqa: BLE001 -- the builder itself is not under test
-        raise RuntimeError("builder failed for %r: %s" % (params, _err(e)))
+    except Exception as e:
+        raise RuntimeError("builder failed for %r: %s" % (params, _err(e))) from e
     out["ideal"] = P.ideal
     if path.startswith("cli") and not P.cli_ok:
         out.update(skipped=1, outcome="n/a", severity="none")
@@ -689,30 +756,36 @@ def run_cell(params, seed):
         out["n_expected_nan"] = int((~exp).sum())
         out["n_nan_unexp"] = int((exp & ~finite).sum())
         out["n_finite_unexp"] = int((~exp & finite).sum())
-        out["max_abs_t_unexp"] = float(np.abs(t[~exp & finite]).max()) if (~exp & finite).any() else 0.0
+        out["max_abs_t_unexp"] = (
+            float(np.abs(t[~exp & finite]).max()) if (~exp & finite).any() else 0.0
+        )
     # distance to the "right" K (wrong order / non-PSD / ...)
     if P.K_ref is not None and not out["crash"] and not path.startswith("cli"):
         P2 = Problem(P.y, P.Gt, P.K_ref, P.cov)
         r2, t2, _ = run_lib(P2, impute=False)
         out["h_ref"] = r2["h_hat"]
         both = np.isfinite(t) & np.isfinite(t2)
-        out["t_corr_ref"] = float(np.corrcoef(t[both], t2[both])[0, 1]) if both.sum() > 2 else float("nan")
+        out["t_corr_ref"] = (
+            float(np.corrcoef(t[both], t2[both])[0, 1]) if both.sum() > 2 else float("nan")
+        )
         out["dh_ref"] = out["h_hat"] - r2["h_hat"]
-        out["dh_ref_bad"] = int(abs(out["dh_ref"]) > 0.1 or
-                                (np.isfinite(out["t_corr_ref"]) and out["t_corr_ref"] < 0.9))
+        out["dh_ref_bad"] = int(
+            abs(out["dh_ref"]) > 0.1 or (np.isfinite(out["t_corr_ref"]) and out["t_corr_ref"] < 0.9)
+        )
     if P.K.shape == (len(P.y), len(P.y)) and np.all(np.isfinite(P.K)):
-        try:
+        with contextlib.suppress(np.linalg.LinAlgError):
             out["min_eig_K"] = float(np.linalg.eigvalsh(0.5 * (P.K + P.K.T))[0])
-        except np.linalg.LinAlgError:
-            pass
     if not out["crash"] and P.ideal != "error_or_nan":
-        oc = oracle_compare(P, G, t, out.get("h_hat", np.nan), remove,
-                            cli_ml=(path == "cli_remove"))
+        oc = oracle_compare(
+            P, G, t, out.get("h_hat", np.nan), remove, cli_ml=(path == "cli_remove")
+        )
         out.update(oc)
         out["dh_bad"] = int(abs(oc.get("dh", 0.0)) > 0.02 and oc.get("or_h", 0) < 0.98)
         out["dt_bad"] = int(oc.get("max_dt", 0.0) > 1e-3 + 5 * abs(oc.get("dh", 0.0)))
         if path.startswith("cli") and abs(oc.get("dh", 0.0)) <= 0.02:
-            out["dt_bad"] = int(oc.get("max_dt", 0.0) > 5e-3 + 5 * abs(oc.get("dh", 0.0)))   # h printed to 3 decimals
+            out["dt_bad"] = int(
+                oc.get("max_dt", 0.0) > 5e-3 + 5 * abs(oc.get("dh", 0.0))
+            )  # h printed to 3 decimals
         # t matches an ML-refit oracle but not REML: the CLI missing-SNP branch (bug 1)
         out["bug1_ml"] = int(out["dt_bad"] and oc.get("max_dt_ml", 1.0) < 5e-3)
     out["outcome"], out["severity"] = classify(out, P.ideal)
@@ -735,14 +808,20 @@ def _label(row, keys):
             continue
         if v is None or (isinstance(v, float) and np.isnan(v)):
             continue
-        parts.append("%s=%g" % (k, v) if isinstance(v, (int, float, np.number)) else "%s=%s" % (k, v))
+        parts.append(
+            "%s=%g" % (k, v) if isinstance(v, (int, float, np.number)) else "%s=%s" % (k, v)
+        )
     return ", ".join(parts)
 
 
 def case_table(df):
     import pandas as pd
-    keys = [c for c in df.columns if c in
-            {"gm", "pm", "n", "k", "m_kin", "noise", "scale", "offset", "n_obs"}]
+
+    keys = [
+        c
+        for c in df.columns
+        if c in {"gm", "pm", "n", "k", "m_kin", "noise", "scale", "offset", "n_obs"}
+    ]
     d = df.copy()
     d["knobs"] = d.apply(lambda r: _label(r, keys), axis=1)
     rows = []
@@ -756,19 +835,27 @@ def case_table(df):
         errs = g["crash_err"].dropna() if "crash_err" in g else []
         errs = [e for e in errs if e]
         warns = [w for w in (g["warn_first"].dropna() if "warn_first" in g else []) if w]
-        rows.append({
-            "family": fam, "variant": var, "path": path, "knobs": knobs,
-            "ideal": g["ideal"].iloc[0], "outcome": worst, "frac": round(float(frac), 2),
-            "severity": sev,
-            "crash_err": errs[0] if errs else "",
-            "warn": warns[0] if warns else "",
-            "n_nan_unexp": g["n_nan_unexp"].max() if "n_nan_unexp" in g else np.nan,
-            "n_finite_unexp": g["n_finite_unexp"].max() if "n_finite_unexp" in g else np.nan,
-            "max_abs_dh": g["dh"].abs().max() if "dh" in g else np.nan,
-            "max_dt": g["max_dt"].max() if "max_dt" in g else np.nan,
-            "dh_ref": g["dh_ref"].abs().max() if "dh_ref" in g else np.nan,
-            "runtime_s": round(float(g["runtime"].median()), 3) if "runtime" in g else np.nan,
-            "reps": len(g)})
+        rows.append(
+            {
+                "family": fam,
+                "variant": var,
+                "path": path,
+                "knobs": knobs,
+                "ideal": g["ideal"].iloc[0],
+                "outcome": worst,
+                "frac": round(float(frac), 2),
+                "severity": sev,
+                "crash_err": errs[0] if errs else "",
+                "warn": warns[0] if warns else "",
+                "n_nan_unexp": g["n_nan_unexp"].max() if "n_nan_unexp" in g else np.nan,
+                "n_finite_unexp": g["n_finite_unexp"].max() if "n_finite_unexp" in g else np.nan,
+                "max_abs_dh": g["dh"].abs().max() if "dh" in g else np.nan,
+                "max_dt": g["max_dt"].max() if "max_dt" in g else np.nan,
+                "dh_ref": g["dh_ref"].abs().max() if "dh_ref" in g else np.nan,
+                "runtime_s": round(float(g["runtime"].median()), 3) if "runtime" in g else np.nan,
+                "reps": len(g),
+            }
+        )
     out = pd.DataFrame(rows)
     out["_o"] = out["outcome"].map(_ORDER)
     out["_s"] = out["severity"].map(_SEV)
@@ -777,19 +864,39 @@ def case_table(df):
 
 def report(df, outdir):
     from sims import report as rpt
+
     tab = case_table(df)
     counts = tab.groupby(["family", "outcome"]).size().unstack(fill_value=0).reset_index()
-    cols = ["family", "variant", "path", "knobs", "outcome", "severity", "frac", "crash_err",
-            "n_nan_unexp", "n_finite_unexp", "max_abs_dh", "max_dt", "runtime_s"]
+    cols = [
+        "family",
+        "variant",
+        "path",
+        "knobs",
+        "outcome",
+        "severity",
+        "frac",
+        "crash_err",
+        "n_nan_unexp",
+        "n_finite_unexp",
+        "max_abs_dh",
+        "max_dt",
+        "runtime_s",
+    ]
     rpt.write_summary(
-        tab, outdir, "S5: edge cases and robustness",
-        notes=("One row per case (params), worst outcome over replicates.  outcome: OK, "
-               "silent (dubious input, no warning), nan (unexpected nan/inf), crash (exception; "
-               "message in crash_err), wrong (finite but incorrect vs the oracle, or finite where "
-               "the statistic is not estimable).  severity: critical = silent wrong answer, "
-               "high = crash/nan on valid input, medium = unclear error/silent on garbage input, "
-               "low = warnings only.  n_nan_unexp counts SNPs with nan where the statistic is "
-               "estimable; n_finite_unexp counts SNPs with a finite t where it is not.  "
-               "max_abs_dh / max_dt compare with the dense oracle (h, and relative t).  Sorted by "
-               "severity.  See s5_edge_cases.md for the Phase 5 target list."),
-        md_columns=cols, extra_tables=[("Outcome counts by family", counts)])
+        tab,
+        outdir,
+        "S5: edge cases and robustness",
+        notes=(
+            "One row per case (params), worst outcome over replicates.  outcome: OK, "
+            "silent (dubious input, no warning), nan (unexpected nan/inf), crash (exception; "
+            "message in crash_err), wrong (finite but incorrect vs the oracle, or finite where "
+            "the statistic is not estimable).  severity: critical = silent wrong answer, "
+            "high = crash/nan on valid input, medium = unclear error/silent on garbage input, "
+            "low = warnings only.  n_nan_unexp counts SNPs with nan where the statistic is "
+            "estimable; n_finite_unexp counts SNPs with a finite t where it is not.  "
+            "max_abs_dh / max_dt compare with the dense oracle (h, and relative t).  Sorted by "
+            "severity.  See s5_edge_cases.md for the Phase 5 target list."
+        ),
+        md_columns=cols,
+        extra_tables=[("Outcome counts by family", counts)],
+    )

@@ -9,7 +9,7 @@ reference lines (y = x, nominal alpha) in neutral grey.
 from __future__ import annotations
 
 import os
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -23,16 +23,29 @@ REF = "#8a8984"
 
 def _plt():
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    plt.rcParams.update({
-        "figure.dpi": 110, "savefig.dpi": 110, "font.size": 9,
-        "axes.edgecolor": GRID, "axes.labelcolor": INK_2, "axes.titlecolor": INK,
-        "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.6,
-        "xtick.color": INK_2, "ytick.color": INK_2,
-        "axes.spines.top": False, "axes.spines.right": False,
-        "legend.frameon": False, "lines.linewidth": 1.6,
-    })
+
+    plt.rcParams.update(
+        {
+            "figure.dpi": 110,
+            "savefig.dpi": 110,
+            "font.size": 9,
+            "axes.edgecolor": GRID,
+            "axes.labelcolor": INK_2,
+            "axes.titlecolor": INK,
+            "axes.grid": True,
+            "grid.color": GRID,
+            "grid.linewidth": 0.6,
+            "xtick.color": INK_2,
+            "ytick.color": INK_2,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "legend.frameon": False,
+            "lines.linewidth": 1.6,
+        }
+    )
     return plt
 
 
@@ -41,16 +54,18 @@ def _save(fig, path):
     fig.tight_layout()
     fig.savefig(path)
     import matplotlib.pyplot as plt
+
     plt.close(fig)
     return path
 
 
-def qq(series: Dict[str, np.ndarray], path: str, title: str = "",
-       max_points: int = 2000) -> str:
+def qq(series: dict[str, np.ndarray], path: str, title: str = "", max_points: int = 2000) -> str:
     """QQ plot of -log10 p for one or more labelled p-value vectors, with a
     pointwise 95% band under the uniform null."""
     from scipy import stats
+
     from sims.metrics import qq_data
+
     plt = _plt()
     fig, ax = plt.subplots(figsize=(4.2, 4.0))
     n_max = max((np.sum(~np.isnan(np.asarray(p, float))) for p in series.values()), default=0)
@@ -72,10 +87,20 @@ def qq(series: Dict[str, np.ndarray], path: str, title: str = "",
     return _save(fig, path)
 
 
-def lines(df, x: str, y: str, path: str, hue: Optional[str] = None,
-          yerr: Optional[str] = None, title: str = "", ref: Optional[float] = None,
-          identity: bool = False, xlabel: Optional[str] = None,
-          ylabel: Optional[str] = None, logy: bool = False) -> str:
+def lines(
+    df,
+    x: str,
+    y: str,
+    path: str,
+    hue: str | None = None,
+    yerr: str | None = None,
+    title: str = "",
+    ref: float | None = None,
+    identity: bool = False,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    logy: bool = False,
+) -> str:
     """Metric ``y`` against param ``x`` (one line per ``hue`` level), with
     optional error bars (column ``yerr``), horizontal ``ref`` line (e.g. the
     nominal alpha) or the y = x ``identity`` line (e.g. h2 recovery)."""
@@ -84,9 +109,16 @@ def lines(df, x: str, y: str, path: str, hue: Optional[str] = None,
     groups = [(None, df)] if hue is None else list(df.groupby(hue, sort=True))
     for i, (lev, d) in enumerate(groups):
         d = d.sort_values(x)
-        ax.errorbar(d[x], d[y], yerr=None if yerr is None else d[yerr], marker="o", ms=4,
-                    capsize=2, color=SERIES[i % len(SERIES)],
-                    label=None if hue is None else "%s=%s" % (hue, lev))
+        ax.errorbar(
+            d[x],
+            d[y],
+            yerr=None if yerr is None else d[yerr],
+            marker="o",
+            ms=4,
+            capsize=2,
+            color=SERIES[i % len(SERIES)],
+            label=None if hue is None else "%s=%s" % (hue, lev),
+        )
     if ref is not None:
         ax.axhline(ref, color=REF, lw=1, ls="--")
     if identity:
@@ -102,8 +134,15 @@ def lines(df, x: str, y: str, path: str, hue: Optional[str] = None,
     return _save(fig, path)
 
 
-def scatter(x: Sequence[float], y: Sequence[float], path: str, xlabel: str = "x",
-            ylabel: str = "y", title: str = "", identity: bool = True) -> str:
+def scatter(
+    x: Sequence[float],
+    y: Sequence[float],
+    path: str,
+    xlabel: str = "x",
+    ylabel: str = "y",
+    title: str = "",
+    identity: bool = True,
+) -> str:
     """Scatter of y vs x (e.g. pylmm vs oracle estimates) with y = x."""
     plt = _plt()
     x = np.asarray(x, float)

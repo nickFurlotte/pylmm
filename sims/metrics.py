@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 from scipy import stats
@@ -43,18 +43,18 @@ def lambda_gc(p=None, chi2=None) -> float:
     return float(np.median(chi2) / CHI2_MEDIAN)
 
 
-def type1_error(p, alphas: Sequence[float] = DEFAULT_ALPHAS) -> Dict[str, float]:
+def type1_error(p, alphas: Sequence[float] = DEFAULT_ALPHAS) -> dict[str, float]:
     """{'t1e_<alpha>': fraction of p <= alpha} for null p-values."""
     p = _clean(p)
-    return {"t1e_" + alpha_label(a): (float((p <= a).mean()) if len(p) else np.nan)
-            for a in alphas}
+    return {"t1e_" + alpha_label(a): (float((p <= a).mean()) if len(p) else np.nan) for a in alphas}
 
 
-def power(p_causal, alphas: Sequence[float] = (5e-8, 1e-5, 1e-3, 0.05)) -> Dict[str, float]:
+def power(p_causal, alphas: Sequence[float] = (5e-8, 1e-5, 1e-3, 0.05)) -> dict[str, float]:
     """{'power_<alpha>': fraction of causal p <= alpha}."""
     p = _clean(p_causal)
-    return {"power_" + alpha_label(a): (float((p <= a).mean()) if len(p) else np.nan)
-            for a in alphas}
+    return {
+        "power_" + alpha_label(a): (float((p <= a).mean()) if len(p) else np.nan) for a in alphas
+    }
 
 
 def rate_ci(k: float, n: float, level: float = 0.95):
@@ -113,16 +113,18 @@ def coverage(est, se, truth, level: float = 0.95) -> float:
     return float((np.abs(est[ok] - truth) <= z * se[ok]).mean())
 
 
-def estimate_summary(est, truth, prefix: str = "") -> Dict[str, float]:
+def estimate_summary(est, truth, prefix: str = "") -> dict[str, float]:
     """{'<prefix>mean', 'bias', 'rmse', 'sd'} of estimates against truth."""
     est = np.asarray(est, dtype=np.float64)
-    return {prefix + "mean": float(np.nanmean(est)),
-            prefix + "bias": bias(est, truth),
-            prefix + "rmse": rmse(est, truth),
-            prefix + "sd": float(np.nanstd(est, ddof=1)) if np.sum(~np.isnan(est)) > 1 else np.nan}
+    return {
+        prefix + "mean": float(np.nanmean(est)),
+        prefix + "bias": bias(est, truth),
+        prefix + "rmse": rmse(est, truth),
+        prefix + "sd": float(np.nanstd(est, ddof=1)) if np.sum(~np.isnan(est)) > 1 else np.nan,
+    }
 
 
-def compare(a, b, prefix: str = "") -> Dict[str, float]:
+def compare(a, b, prefix: str = "") -> dict[str, float]:
     """Agreement between two estimate vectors (e.g. pylmm vs oracle t-stats):
     max/mean absolute difference, max relative difference, correlation."""
     a = np.asarray(a, dtype=np.float64).reshape(-1)
@@ -133,9 +135,17 @@ def compare(a, b, prefix: str = "") -> Dict[str, float]:
     d = np.abs(a[ok] - b[ok])
     with np.errstate(divide="ignore", invalid="ignore"):
         rel = d / np.maximum(np.abs(b[ok]), 1e-12)
-    corr = float(np.corrcoef(a[ok], b[ok])[0, 1]) if ok.sum() > 1 and a[ok].std() > 0 and b[ok].std() > 0 else np.nan
-    return {prefix + "max_abs": float(d.max()), prefix + "mean_abs": float(d.mean()),
-            prefix + "max_rel": float(rel.max()), prefix + "corr": corr}
+    corr = (
+        float(np.corrcoef(a[ok], b[ok])[0, 1])
+        if ok.sum() > 1 and a[ok].std() > 0 and b[ok].std() > 0
+        else np.nan
+    )
+    return {
+        prefix + "max_abs": float(d.max()),
+        prefix + "mean_abs": float(d.mean()),
+        prefix + "max_rel": float(rel.max()),
+        prefix + "corr": corr,
+    }
 
 
 def pool_pvalues(arrays: Iterable[Sequence[float]]) -> np.ndarray:

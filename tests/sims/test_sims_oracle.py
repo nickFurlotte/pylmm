@@ -18,8 +18,7 @@ def _blocks(sizes):
 def _grouped_y(sizes, sg=1.0, se=1.0, mu=2.0, seed=0):
     rng = np.random.default_rng(seed)
     a = rng.standard_normal(len(sizes)) * sg
-    return np.concatenate([mu + a[i] + rng.standard_normal(s) * se
-                           for i, s in enumerate(sizes)])
+    return np.concatenate([mu + a[i] + rng.standard_normal(s) * se for i, s in enumerate(sizes)])
 
 
 def _ols(y, X):
@@ -33,6 +32,7 @@ def _ols(y, X):
 # ---------------------------------------------------------------------------
 # closed forms
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("reml", [True, False])
 def test_identity_K_flat_profile_reduces_to_ols(reml):
@@ -108,6 +108,7 @@ def test_boundary_h1_with_pd_K():
 # likelihood identities (no closed-form h needed)
 # ---------------------------------------------------------------------------
 
+
 def _random_problem(n=50, seed=0):
     rng = np.random.default_rng(seed)
     g = genotypes.unrelated(n, 300, seed=seed)
@@ -170,7 +171,7 @@ def test_wald_matches_direct_gls_at_fixed_h(h):
     n = len(y)
     x = np.random.default_rng(9).binomial(2, 0.3, n).astype(float)
     d, U = np.linalg.eigh(h * K + (1 - h) * np.eye(n))
-    W = U / np.sqrt(d)                                   # V^-1/2 = U diag(d^-1/2) U'
+    W = U / np.sqrt(d)  # V^-1/2 = U diag(d^-1/2) U'
     Xa = np.c_[X, x]
     yw, Xw = W.T @ y, W.T @ Xa
     beta, *_ = np.linalg.lstsq(Xw, yw, rcond=None)
@@ -188,7 +189,7 @@ def test_wald_matches_direct_gls_at_fixed_h(h):
     # statsmodels GLS, when installed (the sims group), gives the same REML-convention t
     try:
         import statsmodels.api as sm
-    except ImportError:         # pragma: no cover
+    except ImportError:  # pragma: no cover
         return
     r = sm.GLS(y, Xa, sigma=h * K + (1 - h) * np.eye(n)).fit()
     np.testing.assert_allclose(oracle.wald(y, K, x, X0=X, h=h).t, r.tvalues[-1], rtol=1e-8)
@@ -198,6 +199,7 @@ def test_wald_matches_direct_gls_at_fixed_h(h):
 # statsmodels MixedLM (optional; in the `sims` dependency group)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("reml", [True, False])
 def test_against_statsmodels_mixedlm_unbalanced(reml):
     sm = pytest.importorskip("statsmodels.api")
@@ -206,11 +208,16 @@ def test_against_statsmodels_mixedlm_unbalanced(reml):
     groups = np.repeat(np.arange(len(sizes)), sizes)
     X = np.c_[np.ones(len(y)), np.random.default_rng(1).standard_normal(len(y))]
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = sm.MixedLM(y, X, groups=groups).fit(reml=reml, method=["bfgs"], gtol=1e-10)
-    sg2, se2 = float(r.cov_re.iloc[0, 0]) if hasattr(r.cov_re, "iloc") \
-        else float(np.asarray(r.cov_re)[0, 0]), float(r.scale)
+    sg2, se2 = (
+        float(r.cov_re.iloc[0, 0])
+        if hasattr(r.cov_re, "iloc")
+        else float(np.asarray(r.cov_re)[0, 0]),
+        float(r.scale),
+    )
     f = oracle.fit(y, _blocks(sizes), X, reml=reml)
     np.testing.assert_allclose(f.h, sg2 / (sg2 + se2), atol=1e-5)
     np.testing.assert_allclose(f.sigma2, sg2 + se2, rtol=1e-5)
@@ -224,9 +231,11 @@ def test_against_statsmodels_mixedlm_unbalanced(reml):
 # pylmm vs the oracle (quick check; the studies quantify this properly)
 # ---------------------------------------------------------------------------
 
+
 def test_pylmm_matches_oracle_on_easy_problem():
     from pylmm.lmm import LMM
     from sims import phenotypes
+
     n = 120
     g = genotypes.unrelated(n, 600, seed=4)
     kin = kinship.from_matrix(kinship.kinship(g.G))
@@ -253,8 +262,7 @@ def test_pylmm_matches_oracle_on_easy_problem():
         np.testing.assert_allclose(ll_p, f.ll + off, rtol=1e-9)
         t_p, _ = L.association(x.reshape(-1, 1), h=f.h, REML=reml)
         # association(REML=False) is the ML Wald test, sigma^2 = Q/n (Phase 5.2)
-        np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, null_reml=reml).t,
-                                   rtol=1e-8)
+        np.testing.assert_allclose(t_p, oracle.wald(y, K, x, h=f.h, null_reml=reml).t, rtol=1e-8)
 
 
 def test_ml_unbounded_with_centred_grm_and_intercept():
@@ -265,6 +273,7 @@ def test_ml_unbounded_with_centred_grm_and_intercept():
     kin = kinship.from_matrix(kinship.kinship(g.G))
     assert np.abs(kin.K @ np.ones(n)).max() < 1e-10
     from sims import phenotypes
+
     y = phenotypes.simulate(kin, 0.6, np.random.default_rng(1)).y
     ml = oracle.fit(y, kin.K, reml=False)
     assert ml.ml_unbounded and ml.at_boundary
@@ -275,19 +284,18 @@ def test_ml_unbounded_with_centred_grm_and_intercept():
     assert not oracle.fit(y, 0.8 * kin.K + 0.2 * np.eye(n), reml=False).ml_unbounded
 
 
-
-
 # ---------------------------------------------------------------------------
 # pylmm-convention switches: with all of them on, the oracle reproduces pylmm
 # ---------------------------------------------------------------------------
 
-PYLMM = dict(eig_clamp=1e-6, h_grid="pylmm")
+PYLMM = {"eig_clamp": 1e-6, "h_grid": "pylmm"}
 
 
 def _rank_deficient_problem(seed=0, n=150, m=60, h2=0.5):
     """K from fewer SNPs than individuals: rank <= m - 1, so pylmm clamps
     most eigenvalues to 1e-6 (as for the BED kinship, 1109/1219)."""
     from sims import phenotypes
+
     g = genotypes.unrelated(n, m, seed=seed)
     kin = kinship.from_matrix(kinship.kinship(g.G))
     rng = np.random.default_rng(seed)
@@ -301,6 +309,7 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
     """pylmm ML LL == oracle ML LL; pylmm REML LL == oracle REML LL + the
     analytic constant, at every h (exactly, once the clamp is matched)."""
     from pylmm.lmm import LMM
+
     y, kin, X0, _ = _rank_deficient_problem()
     n, p = X0.shape
     assert (kin.Kva < 1e-6).sum() > 80
@@ -309,17 +318,24 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
     hs = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999]
     for reml in (True, False):
         d = [L.LL(h, REML=reml)[0] - oracle.profile_loglik(h, y, Kc, X0, reml)[0] for h in hs]
-        np.testing.assert_allclose(d, oracle.pylmm_reml_offset(n, p) if reml else 0.0,
-                                   atol=1e-8)
+        np.testing.assert_allclose(d, oracle.pylmm_reml_offset(n, p) if reml else 0.0, atol=1e-8)
     # LL differences agree without any offset
     for reml in (True, False):
         dp = L.LL(0.7, REML=reml)[0] - L.LL(0.0, REML=reml)[0]
-        do = (oracle.profile_loglik(0.7, y, Kc, X0, reml)[0]
-              - oracle.profile_loglik(0.0, y, Kc, X0, reml)[0])
+        do = (
+            oracle.profile_loglik(0.7, y, Kc, X0, reml)[0]
+            - oracle.profile_loglik(0.0, y, Kc, X0, reml)[0]
+        )
         np.testing.assert_allclose(dp, do, rtol=1e-10)
     # the clamp itself is a measurable effect, growing towards h = 1
-    gap = [abs(L.LL(h, REML=True)[0] - oracle.pylmm_reml_offset(n, p)
-               - oracle.profile_loglik(h, y, kin.K, X0)[0]) for h in (0.3, 0.99)]
+    gap = [
+        abs(
+            L.LL(h, REML=True)[0]
+            - oracle.pylmm_reml_offset(n, p)
+            - oracle.profile_loglik(h, y, kin.K, X0)[0]
+        )
+        for h in (0.3, 0.99)
+    ]
     assert gap[1] > 10 * gap[0]
 
 
@@ -329,6 +345,7 @@ def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
     ML null fit and ML Wald test with sigma^2 = Q/n)."""
     from pylmm.lmm import LMM
     from sims import methods
+
     K = np.asarray(kin.K)
     for reml in (True, False):
         L = LMM(y, K, *kin.eig_for_pylmm(), X0=X0)
@@ -340,8 +357,9 @@ def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
         np.testing.assert_allclose(np.ravel(beta), f.beta, rtol=1e-5, atol=1e-7)
     for reml in (True, False):
         t_p, p_p = methods.pylmm_gwas(y, xs, kin, X0=X0, REML=reml)
-        w = [oracle.wald(y, K, xs[:, j], X0=X0, null_reml=reml, **PYLMM)
-             for j in range(xs.shape[1])]
+        w = [
+            oracle.wald(y, K, xs[:, j], X0=X0, null_reml=reml, **PYLMM) for j in range(xs.shape[1])
+        ]
         np.testing.assert_allclose(t_p, [v.t for v in w], atol=tol_t, rtol=tol_t)
         np.testing.assert_allclose(p_p, [v.p for v in w], rtol=1e-4)
 
@@ -356,6 +374,7 @@ def test_pylmm_convention_matches_pylmm_synthetic():
 def test_pylmm_convention_matches_pylmm_bed_subset():
     """Real genotypes: 300 random BED mice, K from 2500 SNPs (rank ~99)."""
     from sims import phenotypes
+
     spec = {"source": "bed", "n_snps": 2510, "select": "random", "n_indivs": 300, "seed": 1}
     g = genotypes.get(spec)
     kin = kinship.get(spec, snps=slice(0, 2500))
@@ -379,6 +398,7 @@ def test_pylmm_convention_reproduces_example_null_failures():
     h = 1 boundary) is unambiguous on every platform."""
     from sims import phenotypes, runner
     from sims.studies import example_null as ex
+
     params = {"n": 200, "h2": 0.5, "m_kin": 2000, "m_test": 2000, "geno_seed": 1}
     spec = {"source": "unrelated", "n": 200, "m": 4000, "seed": 1}
     kin = kinship.get(spec, snps=slice(0, 2000))
@@ -399,6 +419,7 @@ def test_pylmm_convention_reproduces_example_null_failures():
     # step (no BracketError, bug 4) on any platform.  REML only: with this
     # m > n centred K the ML profile is unbounded (bug 17).
     from pylmm.lmm import LMM
+
     for seed in range(40):
         y = phenotypes.simulate(kin, 1.0, np.random.default_rng(seed)).y
         fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
@@ -429,7 +450,7 @@ def test_sigma_conventions():
     # textbook ML uses Q/n, pylmm Q/(n-q): t differs by sqrt(n/(n-q))
     np.testing.assert_allclose(wt.t / wp.t, np.sqrt(n / (n - p - 1)), rtol=1e-10)
     assert wt.df == wp.df == n - p - 1
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="sigma_convention"):
         oracle.wald(y, kin.K, x, sigma_convention="other")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="h_grid"):
         oracle.fit(y, kin.K, h_grid="coarse")

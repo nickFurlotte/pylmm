@@ -53,7 +53,7 @@ GRID = {
     "m_test": [5000],
     "geno_seed": [1],
 }
-REPS = 80            # 25 cells x 80 reps x 5000 SNPs = 4e5 tests per cell/method
+REPS = 80  # 25 cells x 80 reps x 5000 SNPs = 4e5 tests per cell/method
 
 QUICK_GRID = {
     "pop": ["unrelated", "family", "bed"],
@@ -68,20 +68,26 @@ QUICK_REPS = 2
 ALPHAS = (0.05, 1e-2, 1e-3, 1e-4)
 METHODS = ("ols", "reml", "cli", "ols_in", "reml_in", "cli_in")
 MIN_MAF = 0.05
-N_TAIL = 20           # smallest p-values kept per method and replicate
-N_RAND = 200          # random p-values kept per method and replicate
+N_TAIL = 20  # smallest p-values kept per method and replicate
+N_RAND = 200  # random p-values kept per method and replicate
 
-_SETUP = {}           # per-worker cache: geometry of one cell (independent of h2)
+_SETUP = {}  # per-worker cache: geometry of one cell (independent of h2)
 
 
 def _geno_spec(params):
-    m = params["m_kin"] + params["m_test"] + params["m_test"] // 2   # margin for the MAF filter
+    m = params["m_kin"] + params["m_test"] + params["m_test"] // 2  # margin for the MAF filter
     n, seed, pop = params["n"], params["geno_seed"], params["pop"]
     if pop == "unrelated":
         return {"source": "unrelated", "n": n, "m": m, "seed": seed}
     if pop.startswith("bn_fst"):
-        return {"source": "balding_nichols", "n": n, "m": m, "k": 3,
-                "fst": float(pop[len("bn_fst"):]), "seed": seed}
+        return {
+            "source": "balding_nichols",
+            "n": n,
+            "m": m,
+            "k": 3,
+            "fst": float(pop[len("bn_fst") :]),
+            "seed": seed,
+        }
     if pop == "family":
         return {"source": "family", "n_families": n // 4, "n_sibs": 4, "m": m, "seed": seed}
     if pop == "bed":
@@ -114,9 +120,9 @@ def _setup(params):
         spec = _geno_spec(params)
         geno = genotypes.get(spec)
         mk, mt = params["m_kin"], params["m_test"]
-        kin = kinship.get(spec, snps=slice(0, mk))                  # K from SNPs [0, mk)
-        G_dis = _impute_filter(geno.G, np.arange(mk, geno.G.shape[1]), mt)   # disjoint from K
-        G_in = _impute_filter(geno.G, np.arange(0, mk), mt)                  # inside K
+        kin = kinship.get(spec, snps=slice(0, mk))  # K from SNPs [0, mk)
+        G_dis = _impute_filter(geno.G, np.arange(mk, geno.G.shape[1]), mt)  # disjoint from K
+        G_in = _impute_filter(geno.G, np.arange(0, mk), mt)  # inside K
         _SETUP[key] = (kin, G_dis, G_in)
     return _SETUP[key]
 
@@ -134,8 +140,11 @@ def run_cell(params, seed):
     ph = phenotypes.simulate(kin, h2=params["h2"], rng=rng)
     y = ph.y
 
-    out = {"h_hat": methods.pylmm_null(y, kin, REML=True)["h"],
-           "m_dis": G_dis.shape[1], "m_in": G_in.shape[1]}
+    out = {
+        "h_hat": methods.pylmm_null(y, kin, REML=True)["h"],
+        "m_dis": G_dis.shape[1],
+        "m_in": G_in.shape[1],
+    }
     pv = {}
     for suffix, G in (("", G_dis), ("_in", G_in)):
         pv["ols" + suffix] = methods.ols_gwas(y, G)[1]
@@ -159,6 +168,7 @@ def run_cell(params, seed):
 # report
 # ---------------------------------------------------------------------------
 
+
 def _lambda_ci(x):
     x = np.asarray(x, dtype=float)
     x = x[~np.isnan(x)]
@@ -170,14 +180,23 @@ def _lambda_ci(x):
 
 def build_summary(df):
     import pandas as pd
+
     rows = []
     for (pop, h2), d in df.groupby(["pop", "h2"], sort=False):
         for meth in METHODS:
             lam, lo, hi = _lambda_ci(d["lam_" + meth])
             nt = d["n_" + meth].sum()
-            row = {"pop": pop, "h2": h2, "method": meth, "n_reps": len(d),
-                   "n_tests": int(nt), "lambda_gc": lam,
-                   "lambda_lo": lo, "lambda_hi": hi, "h_hat_mean": d["h_hat"].mean()}
+            row = {
+                "pop": pop,
+                "h2": h2,
+                "method": meth,
+                "n_reps": len(d),
+                "n_tests": int(nt),
+                "lambda_gc": lam,
+                "lambda_lo": lo,
+                "lambda_hi": hi,
+                "h_hat_mean": d["h_hat"].mean(),
+            }
             for a in ALPHAS:
                 lab = metrics.alpha_label(a)
                 k = d["k_%s_%s" % (meth, lab)].sum()
@@ -198,11 +217,11 @@ def _pooled_qq(d, meth):
     N = int(d["n_" + meth].sum())
     S = len(rand)
     j = np.arange(1, S + 1)
-    keep = j >= 30        # bulk from the random sample; the extreme tail is exact below
+    keep = j >= 30  # bulk from the random sample; the extreme tail is exact below
     ex_b, ob_b = -np.log10((j[keep] - 0.5) / S), -np.log10(np.clip(rand[keep], 1e-300, 1))
     # the pooled i-th smallest p (i <= N_TAIL) lies in the union of per-replicate tails
     i = np.arange(1, min(N_TAIL, len(tails)) + 1)
-    ex_t, ob_t = -np.log10((i - 0.5) / N), -np.log10(np.clip(tails[:len(i)], 1e-300, 1))
+    ex_t, ob_t = -np.log10((i - 0.5) / N), -np.log10(np.clip(tails[: len(i)], 1e-300, 1))
     if len(ex_b) > 150:
         sel = np.unique(np.linspace(0, len(ex_b) - 1, 150).astype(int))
         ex_b, ob_b = ex_b[sel], ob_b[sel]
@@ -211,15 +230,20 @@ def _pooled_qq(d, meth):
 
 def _plot_qq(df, outdir):
     from sims import plots
+
     plt = plots._plt()
     pops = [p for p in POPS if p in set(df["pop"])]
     h2s = sorted(df["h2"].unique())
     show = [h for h in (0.0, 0.5, 0.95) if h in h2s] or h2s[:3]
-    series = [("ols", "OLS", plots.SERIES[1]), ("reml", "pylmm REML", plots.SERIES[0]),
-              ("cli", "pylmm CLI (ML test)", plots.SERIES[2]),
-              ("reml_in", "pylmm REML, SNPs in K", plots.SERIES[6])]
-    fig, axes = plt.subplots(len(pops), len(show), figsize=(3.1 * len(show), 2.9 * len(pops)),
-                             squeeze=False)
+    series = [
+        ("ols", "OLS", plots.SERIES[1]),
+        ("reml", "pylmm REML", plots.SERIES[0]),
+        ("cli", "pylmm CLI (ML test)", plots.SERIES[2]),
+        ("reml_in", "pylmm REML, SNPs in K", plots.SERIES[6]),
+    ]
+    fig, axes = plt.subplots(
+        len(pops), len(show), figsize=(3.1 * len(show), 2.9 * len(pops)), squeeze=False
+    )
     for r, pop in enumerate(pops):
         for c, h2 in enumerate(show):
             ax = axes[r][c]
@@ -244,20 +268,33 @@ def _plot_qq(df, outdir):
 
 def _plot_lambda(summary, outdir):
     from sims import plots
+
     plt = plots._plt()
     pops = [p for p in POPS if p in set(summary["pop"])]
-    fig, axes = plt.subplots(1, len(pops), figsize=(2.9 * len(pops), 3.0), squeeze=False,
-                             sharey=True)
-    show = [("ols", "OLS", "o", "-", plots.SERIES[1]),
-            ("reml", "pylmm REML", "o", "-", plots.SERIES[0]),
-            ("cli", "pylmm CLI (ML test)", "s", "--", plots.SERIES[2]),
-            ("reml_in", "pylmm REML, SNPs in K", "^", ":", plots.SERIES[6])]
+    fig, axes = plt.subplots(
+        1, len(pops), figsize=(2.9 * len(pops), 3.0), squeeze=False, sharey=True
+    )
+    show = [
+        ("ols", "OLS", "o", "-", plots.SERIES[1]),
+        ("reml", "pylmm REML", "o", "-", plots.SERIES[0]),
+        ("cli", "pylmm CLI (ML test)", "s", "--", plots.SERIES[2]),
+        ("reml_in", "pylmm REML, SNPs in K", "^", ":", plots.SERIES[6]),
+    ]
     for ax, pop in zip(axes[0], pops):
         for meth, lab, mk, ls, col in show:
             d = summary[(summary["pop"] == pop) & (summary["method"] == meth)].sort_values("h2")
-            ax.errorbar(d["h2"], d["lambda_gc"],
-                        yerr=[d["lambda_gc"] - d["lambda_lo"], d["lambda_hi"] - d["lambda_gc"]],
-                        marker=mk, ms=3.5, ls=ls, capsize=2, lw=1.2, color=col, label=lab)
+            ax.errorbar(
+                d["h2"],
+                d["lambda_gc"],
+                yerr=[d["lambda_gc"] - d["lambda_lo"], d["lambda_hi"] - d["lambda_gc"]],
+                marker=mk,
+                ms=3.5,
+                ls=ls,
+                capsize=2,
+                lw=1.2,
+                color=col,
+                label=lab,
+            )
         ax.axhline(1.0, color=plots.REF, lw=1, ls="--")
         ax.set_title(pop, fontsize=9)
         ax.set_xlabel("h2")
@@ -275,12 +312,15 @@ def report(df, outdir):
     summary.to_csv(os.path.join(outdir, "summary.csv"), index=False)
 
     md = summary[["pop", "h2", "method", "n_reps", "n_tests"]].copy()
-    md["lambda_GC [95% CI]"] = ["%.3f [%.3f, %.3f]" % (r.lambda_gc, r.lambda_lo, r.lambda_hi)
-                                for r in summary.itertuples()]
+    md["lambda_GC [95% CI]"] = [
+        "%.3f [%.3f, %.3f]" % (r.lambda_gc, r.lambda_lo, r.lambda_hi) for r in summary.itertuples()
+    ]
     for a in ALPHAS:
         lab = metrics.alpha_label(a)
-        md["obs/alpha @%g" % a] = ["%.2g%s" % (r["ratio_" + lab], "*" if r["outside_" + lab] else "")
-                                   for _, r in summary.iterrows()]
+        md["obs/alpha @%g" % a] = [
+            "%.2g%s" % (r["ratio_" + lab], "*" if r["outside_" + lab] else "")
+            for _, r in summary.iterrows()
+        ]
     md["hits@1e-4"] = summary["hits_1e-04"]
     notes = (
         "Null SNPs only: lambda_GC should be 1 and each obs/alpha ratio 1 (observed type-I error "
@@ -289,7 +329,8 @@ def report(df, outdir):
         "data).  Methods: ols; reml = pylmm GWAS(REML=True); cli = GWAS(REML=False), i.e. the "
         "pylmmGWAS default (REML null fit, ML test); suffix _in = tested SNPs are part of K, "
         "otherwise tested SNPs are disjoint from K.  Full numeric columns (CIs, hit counts) are "
-        "in summary.csv.  See s1_null_calibration.md for interpretation.")
+        "in summary.csv.  See s1_null_calibration.md for interpretation."
+    )
     rpt.write_summary(md, outdir, "S1: null calibration", notes=notes)
     _plot_qq(df, outdir)
     _plot_lambda(summary, outdir)
