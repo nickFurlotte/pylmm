@@ -216,6 +216,6 @@ uv run --group sims python -m sims run example_null --quick
 group). Results go to `sims/results/<study>/` (set `SIMS_RESULTS_DIR` to redirect); commit summaries,
 never `raw/`.
 
-Phase 4's studies (S1–S5, [docs/phase4-simulations.md](../../docs/phase4-simulations.md)) are the
+The simulation studies (S1–S5, [docs/phase4-simulations.md](../../docs/phase4-simulations.md)) are the
 reference for what "calibrated" looks like: pooled type-I error 0.0495–0.0500 at α = 0.05 for h² > 0,
 mildly conservative at h² = 0.

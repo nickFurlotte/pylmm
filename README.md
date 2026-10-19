@@ -1,131 +1,149 @@
 # PyLMM
 
-**A lightweight linear mixed-model toolkit for statistical genetics.**
+**PyLMM: a modern, readable, validated mixed-model toolkit for statistical genetics — built to be used by
+humans and agents.**
 
-PyLMM is an open-source Python package for fitting linear mixed models (LMMs), particularly for genome-wide association studies (GWAS).
+PyLMM fits linear mixed models (LMMs) for genome-wide association studies (GWAS) and heritability. In
+genetic association studies, individuals may be related or share population structure, which produces
+misleading associations if it is ignored. A mixed model accounts for it through a kinship matrix of genetic
+similarity between individuals:
 
-In genetic association studies, individuals may be related or share population structure. These relationships can produce misleading associations if they are not accounted for. Linear mixed models address this by modeling genetic similarity between individuals.
-
-PyLMM provides an accessible implementation of these methods, including:
-
-- **GWAS:** Test variants for association with a phenotype while accounting for relatedness and population structure.
-- **Kinship estimation:** Compute genetic similarity matrices from genotype data.
-- **Python API:** Build custom analyses and experiment with mixed-model methods.
-- **Command-line tools:** Run analyses with PLINK or EMMA-formatted data.
-
-The goal is to keep the methods accessible, the implementation understandable, and the results reproducible.
-
-## A brief history
-
-PyLMM was originally developed by **Nick Furlotte** during his PhD research and released in 2013 as a lightweight Python implementation of linear mixed models for genetic association analysis.
-
-Since then, the original software has been studied, adapted, and ported by other researchers:
-
-- **Original PyLMM (2013):** The initial Python implementation and associated research software.
-- **GeneNetwork port [pylmm_gn2](https://github.com/genenetwork/pylmm_gn2):** An effort to adapt PyLMM for newer Python environments and continued use in genetic analysis.
-- **Karl Broman's [R/lmmlite](https://kbroman.org/lmmlite/) (2015):** An R and C++ implementation of parts of the PyLMM algorithm for GWAS and QTL mapping. Broman developed it while studying how LMMs work, documenting the process in [a detailed blog post](https://kbroman.org/blog/2015/11/24/fitting-linear-mixed-models-for-qtl-mapping/) and publishing reproducible [numerical comparisons](https://kbroman.org/lmmlite/assets/compare2pylmm.html) and [performance comparisons](https://kbroman.org/lmmlite/assets/performance.html) with PyLMM.
-- **[The Jackson Laboratory's pylmm3](https://github.com/TheJacksonLaboratory/pylmm3) (2026):** An independent Python 3 modernization of the original package.
-- **PyLMM rewrite (2026):** A new modernization by the original author, focused on clean Python, reproducibility, testing, and making the package easier for researchers and AI coding agents to work with.
-
-The latest rewrite preserves the core statistical functionality while updating the implementation for modern Python development. A central goal is to validate the rewritten software against the original implementation and published results, providing a reliable foundation for future methodological improvements.
-
-In this rewrite, we aimed to be agent friendly and optimized for code that is easier to read and understand rather than optimizing for speed. 
-
-## Installation
-
-PyLMM requires Python 3.10 or newer.
-
-Install directly from GitHub:
-
-```bash
-pip install git+https://github.com/nickFurlotte/pylmm@main
+```text
+Y = X0 b + x a + u + e,    u ~ N(0, h s2 K),    e ~ N(0, (1 - h) s2 I)
 ```
 
-This installs both the Python library and the `pylmm` command-line program.
+with a Wald t test of each SNP `x`. PyLMM provides:
 
-To work from a source checkout:
+- **GWAS:** test variants for association with a phenotype, accounting for relatedness and population
+  structure (REML by default, optional per-SNP variance refit, covariates, missing genotypes).
+- **Heritability:** the null model gives the SNP heritability `h` and the variance components.
+- **Kinship:** genetic similarity matrices from genotype data.
+- **Command line:** `pylmm gwas` and `pylmm kinship` on PLINK BED/TPED or EMMA files, with samples
+  matched by ID.
+- **Python library:** `LMM`, `gwas`, `calculate_kinship` and `PlinkReader` for custom analyses.
 
-```bash
+The code favours being easy to read and check over speed: numpy and scipy only, type-annotated, with
+documentation whose examples run in CI.
+
+## Validated
+
+- **Against the original code.** The test suite checks the outputs against reference outputs of the
+  original 2013 Python 2 pylmm ([tests/golden/](tests/golden/)), with fixed tolerances. The Python 3 port
+  matched them to within 5.1e-8 relative for every fitted quantity and 4.2e-7 absolute for per-SNP
+  statistics ([docs/phase3-port.md](docs/phase3-port.md)). Deliberate changes since, such as bug fixes, are
+  listed in the [CHANGELOG](CHANGELOG.md).
+- **Simulation studies** with known heritability and causal SNPs, on five genotype structures
+  ([docs/phase4-simulations.md](docs/phase4-simulations.md)). Under a correctly specified model, with the
+  REML null fit and the Wald test, null p-values are calibrated when h² > 0 (type-I error 0.0495–0.0500
+  at α = 0.05, mean χ² 0.99–1.01 over 1,575 replicates), and the Wald t matches an independent
+  implementation to 2e-7. Under population structure pylmm has much more power than ordinary least
+  squares, which is badly inflated there; the design partly favours the LMM, since the simulated
+  polygenic effect is drawn from the same kinship that pylmm fits. The bugs the studies found are fixed
+  or listed under *Known caveats* in [AGENTS.md](AGENTS.md).
+- **Published results** ([docs/replication.md](docs/replication.md)). An agent working only from the docs
+  reanalysed two published mouse GWAS of the Hybrid Mouse Diversity Panel:
+  - *Farber et al. 2011*, bone mineral density: **partially replicated**. All 5 published trait–locus
+    pairs have a signal in the published ±1.3 Mb interval, 3 at the published position. An interval
+    always has a best SNP, so position alone is not a replication, and significance is systematically
+    lower (by 0.47 in −log10 p, median): 1/5 pass Bonferroni and 3/5 the paper's threshold.
+  - *Bennett et al. 2010*, HDL cholesterol: **replicated**, with the same lead SNP (the *Nos1ap* peak on
+    chromosome 1); −log10 p 11.5 with a per-SNP refit (7.9–9.0 without the refit) vs 9.4 published.
+
+## Install
+
+PyLMM needs Python 3.11 or newer, numpy and scipy. It is not on PyPI yet; install it from GitHub:
+
+```bash skip-ci: network
+pip install "git+https://github.com/nickFurlotte/pylmm@main"
+```
+
+This installs the Python library and the `pylmm` command. A git install clones the whole repository,
+including ~215 MB of example data ([data/README.md](data/README.md)), so it takes a while. To work from a
+source checkout:
+
+```bash skip-ci: network
 git clone -b main https://github.com/nickFurlotte/pylmm
 cd pylmm
-uv sync
+uv sync           # then prefix commands with `uv run`
 ```
 
-The `main` branch contains the modern Python implementation. The repository's older `master` branch retains the original Python 2 code.
+The `main` branch holds the current code; the older `master` branch keeps the original Python 2 code.
 
 ## Quick start
 
-PyLMM provides two primary commands: `kinship` and `gwas`.
+### Command line
 
-### 1. Compute a kinship matrix
+From a checkout, with the bundled example data (1,219 mice, 98,740 SNPs, a fake phenotype); `pylmm` is
+on the PATH after `pip install`, or prefix it with `uv run` after `uv sync`. It takes about a minute:
 
-A kinship matrix captures genetic similarity between individuals and is used by the mixed model to account for relatedness.
-
-Using the example PLINK dataset included in the repository:
-
-```bash
-pylmm kinship \
-  --bfile data/snps.132k.clean.noX \
-  -o snps.kin
+```bash skip-ci: full dataset, see just readme-example
+pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
+pylmm gwas --bfile data/snps.132k.clean.noX --kinship snps.kin \
+  --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv
 ```
 
-This generates a kinship matrix (`snps.kin`) and a corresponding sample ID file (`snps.kin.id`).
+`pylmm kinship` writes the kinship matrix `snps.kin` and its sample IDs `snps.kin.id`, which `pylmm gwas`
+uses to match samples. `results.tsv` has one row per SNP: `SNP_ID`, `BETA`, `BETA_SD`, `F_STAT` (the
+signed t) and `P_VALUE`. `pylmm gwas --help` lists every option, with examples.
 
-### 2. Run a GWAS
+### Python
 
-Once a kinship matrix is available, test genetic variants for association with a phenotype:
+```python
+import numpy as np
+from pylmm.lmm import LMM, calculate_kinship, gwas
 
-```bash
-pylmm gwas \
-  --bfile data/snps.132k.clean.noX \
-  --kinship data/snps.132k.clean.noX.pylmm.kin \
-  --pheno data/snps.132k.clean.noX.fake.phenos \
-  -o results.tsv
+rng = np.random.default_rng(0)
+W = rng.binomial(2, 0.3, size=(200, 500)).astype(float)  # 200 individuals x 500 SNPs
+K = calculate_kinship(W)
+Y = 1.0 * W[:, 0] + rng.multivariate_normal(np.zeros(200), 0.5 * K + 0.5 * np.eye(200))
+
+h, beta, sigma2, ll = LMM(Y, K).fit()  # null model: heritability h, REML
+ts, ps = gwas(Y, W[:, :20], K)         # Wald t statistics and p-values, one per SNP
+print(f"h = {h:.2f}, p(SNP 0) = {ps[0]:.1e}")
 ```
 
-This example uses the original precomputed kinship matrix included with the dataset to support reproducibility testing. To use the matrix generated in step 1 instead, set `--kinship snps.kin`.
+The [user guide](docs/guide.md) covers loading PLINK files, covariates (add the intercept to `X0`
+yourself), missing data, reading the results and the pitfalls.
 
-The resulting tab-separated file contains one row per variant, including its estimated effect size, standard error, F-statistic, and association p-value.
+## For agents
 
-For additional options:
+[AGENTS.md](AGENTS.md) is the entry point for coding agents: the repository map, commands, what the tests
+mean, conventions and the known caveats to read before trusting a number. [skills/](skills/) holds agent
+skills for running a GWAS, estimating heritability, custom analyses, inbred strain panels, simulation,
+converting genotype formats, interpreting results and migrating old code. Claude Code finds them through
+`.claude/skills`.
 
-```bash
-pylmm --help
-pylmm gwas --help
-pylmm kinship --help
-```
+## Migrating from the old pylmm
 
-For custom analyses using the Python API, see [scripts/example.py](scripts/example.py) and the [user guide](docs/guide.md).
+The camelCase API (`lmm.GWAS`, `calculateKinship`, ...) and the `pylmmGWAS` / `pylmmKinship` commands are
+replaced by PEP 8 names and one `pylmm` command. The `migrate-from-old-pylmm` skill, the name and flag maps
+in [docs/migration/](docs/migration/) and the [CHANGELOG](CHANGELOG.md) cover the port.
 
-## Built for humans and agents
+## History
 
-The 2026 rewrite was developed with a particular goal: **make scientific software easier to understand, verify, and extend, whether the contributor is a human researcher or an AI coding agent.**
+PyLMM was written by Nick Furlotte during his PhD and released in 2013 as a lightweight Python
+implementation of linear mixed models for genetic association. Others have since studied, adapted and
+ported it: the GeneNetwork port [pylmm_gn2](https://github.com/genenetwork/pylmm_gn2); Karl Broman's
+[R/lmmlite](https://kbroman.org/lmmlite/) (2015), an R and C++ implementation of parts of the algorithm,
+with [numerical comparisons](https://kbroman.org/lmmlite/assets/compare2pylmm.html) to PyLMM; and The
+Jackson Laboratory's [pylmm3](https://github.com/TheJacksonLaboratory/pylmm3) (2026), an independent
+Python 3 modernisation. Version 1.0 is a rewrite by the original author: Python 3, a new API and command
+line, and validation against the original code and published results.
 
-Beyond modern Python conventions, type annotations, and automated testing, the repository includes documentation and reusable agent skills for common statistical genetics workflows.
+## Links
 
-- [AGENTS.md](AGENTS.md) — Repository structure, development conventions, testing requirements, and guidance for coding agents.
-- [Agent Skills](skills/) — Reusable workflows for running GWAS, estimating heritability, simulating data, interpreting results, and building custom association analyses.
-- [User guide](docs/guide.md) — More detailed examples and documentation for the Python library.
-- [Replication](docs/replication.md) — Two published mouse GWAS reanalysed by an agent from the docs alone (Farber 2011 BMD partially replicated, Bennett 2010 HDL replicated).
-- [Example data](data/README.md) — What the bundled files are, where they come from, and their checksums.
+- [User guide](docs/guide.md) · [Conventions](docs/conventions.md) · [CHANGELOG](CHANGELOG.md)
+- [Replication of published GWAS](docs/replication.md) · [Example data](data/README.md)
+- [Issues](https://github.com/nickFurlotte/pylmm/issues)
 
-Documentation examples are executed in continuous integration to help keep instructions synchronized with working code.
+Development uses `uv`, `pytest`, `ruff` and `mypy`: `just test`, `just lint` and `just typecheck` (see
+the [justfile](justfile) and [AGENTS.md](AGENTS.md)).
 
-The longer-term goal is to make PyLMM a useful environment for exploring and validating statistical genetics methods, including AI-assisted implementations of new research.
+## How to cite
 
-## Development
-
-PyLMM uses modern Python development tools, including `uv`, `pytest`, `ruff`, and `mypy`.
-
-```bash
-uv run pytest           # Run the test suite
-uv run pytest --runslow # Include full-dataset tests
-just lint               # Check linting
-just typecheck          # Check types
-```
-
-See the [justfile](justfile) for additional development commands and [AGENTS.md](AGENTS.md) for contributor guidance.
+If you use PyLMM, please cite the software; [CITATION.cff](CITATION.cff) has the details (GitHub's "Cite
+this repository" button reads it).
 
 ## License
 
-PyLMM is available under the MIT License. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

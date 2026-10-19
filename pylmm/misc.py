@@ -78,12 +78,10 @@ def fit_two(
     for each. This is slow for large ``n``; lower ``ngrids`` for a coarse
     answer (it cuts the number of eigendecompositions, not the inner 100).
 
-    Known caveat (bug 3, deferred to Phase 6.3; see
-    ``docs/phase4-simulations.md``): the ``w`` grid never includes 1.0 (nor does
-    the heritability grid inside each fit, which stops at 0.99), so a model
-    that is purely ``K1`` cannot be returned exactly; the best it can do is
-    ``w = 1 - 1/ngrids``.
-    Behaviour is unchanged here.
+    Known caveat (not yet fixed; see *Known caveats* in ``AGENTS.md``): the
+    ``w`` grid never includes 1.0 (nor does the heritability grid inside
+    each fit, which stops at 0.99), so a model that is purely ``K1`` cannot
+    be returned exactly; the best it can do is ``w = 1 - 1/ngrids``.
 
     Examples
     --------

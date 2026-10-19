@@ -7,7 +7,7 @@
 r"""Readers for PLINK (BED, TPED) and EMMA genotype, phenotype and covariate files.
 
 The single entry point is :class:`PlinkReader`.  (This module was ``pylmm.input``
-before Phase 5.4.)
+before 1.0.0.)
 
 Supported formats
 -----------------
@@ -534,7 +534,7 @@ class PlinkReader:
             for x in xx:
                 try:
                     vals.append(float(x))
-                except Exception:  # noqa: PERF203 - per-value fallback to NaN
+                except Exception:  # per-value fallback to NaN
                     vals.append(np.nan)
             if len(vals) != self.N:
                 raise InputError(
@@ -567,7 +567,7 @@ class PlinkReader:
 
         ``1 1`` is 0, ``2 2`` is 1, ``1 2`` / ``2 1`` is 0.5, and a pair with
         a ``0`` (``0 0``, or half-missing ``0 1`` / ``2 0``) is missing, as
-        in PLINK.  (Before Phase 5b a half-missing pair was read as 0.5.)
+        in PLINK.  (Before 1.0.0 a half-missing pair was read as 0.5.)
 
         Raises
         ------
@@ -631,7 +631,7 @@ class PlinkReader:
         G : numpy.ndarray
             Raw genotypes of one SNP, shape ``(n,)``, nan where missing.  It
             is not modified: the mean imputation is done on a copy (it used
-            to fill the caller's array in place; fixed in Phase 5.5).
+            to fill the caller's array in place; fixed in 1.0.0).
 
         Returns
         -------
@@ -850,7 +850,7 @@ class PlinkReader:
                 for x in v:
                     try:
                         p.append(float(x))
-                    except ValueError:  # noqa: PERF203 - per-value fallback to NaN
+                    except ValueError:  # per-value fallback to NaN
                         p.append(np.nan)
                 P.append(p)
         return self._emma_columns(P, emma_file, "phenotype")

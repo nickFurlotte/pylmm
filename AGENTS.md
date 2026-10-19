@@ -2,7 +2,7 @@
 
 **PyLMM: a modern, readable, validated mixed-model toolkit for statistical genetics, built to be used by
 humans and agents.** A linear mixed model (LMM) for GWAS and heritability: `Y = X0 b + x a + u + e`,
-`u ~ N(0, h s2 K)`, `e ~ N(0, (1 - h) s2 I)`, with a Wald t test per SNP. Python ≥ 3.10, numpy + scipy.
+`u ~ N(0, h s2 K)`, `e ~ N(0, (1 - h) s2 I)`, with a Wald t test per SNP. Python ≥ 3.11, numpy + scipy.
 This file is for coding agents working in this repo or with pylmm; humans should start at
 [README.md](README.md) and [docs/guide.md](docs/guide.md).
 
@@ -15,9 +15,9 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
 | `pylmm/misc.py` | `fit_two`, two-kinship variance components |
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
-| `tests/` | pytest suite; `tests/golden/` = Phase 1 reference outputs; `tests/helpers.py` = all tolerances |
-| `sims/` | Phase 4 simulation framework (genotype/phenotype generators, oracle, studies) |
-| `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, Phase 1/3/4 reports, `migration/` maps, `research/` |
+| `tests/` | pytest suite; `tests/golden/` = reference outputs of the original Python 2 code; `tests/helpers.py` = all tolerances |
+| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies) |
+| `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, reports on the Python 2 baseline, the port and the simulation studies, `migration/` maps, `research/` |
 | `skills/` | agent skills (below); `.claude/skills` links here |
 | `data/` | example data (~215 MB): 1219 mice BED (fake phenotypes), 94-strain HMDP EMMA text; provenance, marker map and checksums in [data/README.md](data/README.md) |
 | `scripts/example.py` | a short library example |
@@ -40,7 +40,7 @@ just test-slow        # + the full-dataset tests (--runslow)
 just docs-test        # only the docs snippets (tests/test_docs.py)
 just lint             # ruff check + ruff format --check (CI runs the same)
 just fmt              # apply ruff fixes and formatting
-just typecheck        # mypy on pylmm/, Python 3.10 and 3.14
+just typecheck        # mypy on pylmm/, Python 3.11 and 3.14
 just sim example_null --quick   # a simulation study
 ```
 
@@ -53,17 +53,17 @@ uv run pylmm gwas --help > /dev/null   # every option, with examples
 
 ## Tests: what they mean
 
-* **Goldens** (`tests/golden/`) are the outputs of the original 2013 Python 2 code (Phase 1). The golden
+* **Goldens** (`tests/golden/`) are the outputs of the original 2013 Python 2 code. The golden
   tests are a *regression* contract: a refactor must not change a number beyond the tolerances. **Never
   edit, regenerate or loosen a golden file or a tolerance to make a test pass.** `just golden` exists for a
   deliberate, reviewed re-baseline only (see `tests/golden/README.md`).
 * **Tolerances live only in `tests/helpers.py`** (`RTOL`, `RTOL_FIT`, `ATOL_FIT`, `RTOL_P`, ...), each with the
   measurement behind it. Compare numbers through `helpers.assert_close` / `assert_fit_close` /
   `assert_pvalues_close`, never as text.
-* `tests/sims/` checks the simulation framework and keeps the Phase 4 bug reproducers (`xfail(strict=True)`
+* `tests/sims/` checks the simulation framework and keeps the simulation-study bug reproducers (`xfail(strict=True)`
   for unfixed bugs: fixing one makes it XPASS and fail; then flip the marker).
 * **Docs are executable.** `tests/test_docs.py` runs every `python` and `bash` code block of this file,
-  `docs/guide.md` and `skills/**/*.md`. Blocks of one file share a namespace and a scratch directory; mark a
+  README.md, `docs/guide.md` and `skills/**/*.md`. Blocks of one file share a namespace and a scratch directory; mark a
   block that needs external tools or a network with `skip-ci: <reason>` after the language. If you change
   behaviour, fix the docs in the same change.
 * Docstring examples in `pylmm/` run as doctests.
@@ -78,7 +78,7 @@ uv run pylmm gwas --help > /dev/null   # every option, with examples
 * Samples are matched by ID `(FID, IID)`, never by row position (except EMMA input, which has no IDs).
 * Type hints on all library code (`py.typed`), checked by mypy; numpydoc docstrings with runnable examples.
 * ruff (line length 100) for lint and format; CI runs `ruff check`, `ruff format --check`, mypy, pytest on
-  Python 3.10–3.14 and a lowest-direct (numpy 1.22, scipy 1.9) job.
+  Python 3.11–3.14 and a lowest-direct (numpy 1.23.2, scipy 1.9.2) job.
 * CLI: kebab-case flags named after PLINK's, 1-based column numbers, exit codes 0 / 2 (usage or input
   error) / 1 (unexpected), messages via the `pylmm` logger.
 
@@ -119,11 +119,12 @@ use `skills/` directly, or copy it to `.claude/skills`.
   `pylmm gwas --covar` adds it (unless `--no-intercept`).
 * **REML is the default** everywhere (`reml=True`, `--reml`); ML (`--ml`) is ill-posed for a centred K built
   from more SNPs than individuals (bug 17).
-* **Phase 6.3 items (known, not yet fixed)**: the h search grid stops at 0.99, so h = 1 is never returned
+* **Known, not yet fixed** (bug numbers: the table in
+  [sims/studies/s4_bug_confirmation.md](sims/studies/s4_bug_confirmation.md)): the h search grid stops at 0.99, so h = 1 is never returned
   and h² ≥ 0.98 reads 0.99 (bugs 2, 3); the two kinship normalisations differ with missing calls and
   monomorphic SNPs still count in `m` (bug 8); the first grid optimum is kept, not the best; `fit()`'s ML
   sigma is Q/(n-q) (bug 9); `tstat(log=True)` is wrong and unused (bug 5); genotypes are standardised over
-  individuals later dropped for a missing phenotype (6.3b, |Δt| ≤ 0.024).
+  individuals later dropped for a missing phenotype (|Δt| ≤ 0.024).
 * `LMM.association` fails on a `nan` genotype; `gwas` handles missing calls.
 * A kinship without a `K.id` sidecar is assumed to be in genotype order. `pylmm gwas --bfile` / `--tfile`
   warns about that. `pylmm gwas --emma-geno` does **not**: EMMA input has no IDs, so K's rows are always
@@ -131,7 +132,7 @@ use `skills/` directly, or copy it to `.claude/skills`.
   `PlinkReader.read_kinship` does not warn either; it only checks that K is n × n. `pylmm kinship` writes
   the sidecar for PLINK input.
 * Inbred panels from a per-animal BED: `pylmm gwas` mean-imputes missing calls over **animals**, not
-  strains (Δ−log10 p up to 0.28 in the Phase R replication). See `inbred-strain-panels`.
+  strains (Δ−log10 p up to 0.28 in the [replication](docs/replication.md)). See `inbred-strain-panels`.
 
 A 30-second sanity check that the install works:
 

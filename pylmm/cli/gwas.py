@@ -291,7 +291,7 @@ def read_kinship_file(fn: str, n: int) -> FloatArray:
     ValueError
         Naming the file, if it cannot be read, a token is not a number, the
         file is not exactly ``n`` rows of ``n`` values, or the matrix has a
-        nan/inf.  (Bug 16, fixed in Phase 5.1: the old ``np.fromfile`` +
+        nan/inf.  (Fixed in 1.0.0: the old ``np.fromfile`` +
         ``resize`` read silently zero-filled or truncated K.)
     """
     try:
@@ -385,7 +385,7 @@ def read_eigen_file(fn: str, K: FloatArray) -> tuple[FloatArray, FloatArray]:
     ValueError
         If the files are missing, have the wrong shape or nan/inf values, or
         are not the eigendecomposition of ``K`` (checked on a random
-        vector).  (Bug 7, fixed in Phase 5.2: this used to read files that
+        vector).  (Fixed in 1.0.0: this used to read files that
         the kinship program never wrote.)
     """
     n = K.shape[0]
@@ -437,7 +437,7 @@ def read_aligned_kinship(k_file: str, reader: plink_io.PlinkReader) -> tuple[Flo
     Note: when K drops individuals, genotypes are imputed and standardised
     over the KEPT individuals, but individuals dropped for a missing
     phenotype or covariate still count in the mean and SD (max |dt| 0.024
-    between the two rules; making them consistent is a Phase 6 item).
+    between the two rules; making them consistent is planned).
 
     Parameters
     ----------
@@ -637,7 +637,7 @@ def _drop_incomplete(
 ) -> tuple[FloatArray, FloatArray, FloatArray, NDArray[np.bool_]]:
     """Drop the individuals with a missing phenotype or covariate, with a warning.
 
-    (Phase 5.2: a missing covariate used to be a fatal error.)
+    (Before 1.0.0 a missing covariate was a fatal error.)
 
     Returns
     -------
@@ -766,7 +766,8 @@ def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
 
     With ``--refit`` the variance components are fitted per SNP instead,
     so the null model is not fitted here.  REML by default, ML with
-    ``--ml``, here and in every per-SNP fit (bug 1, fixed in Phase 5.2).
+    ``--ml``, here and in every per-SNP fit (before 1.0.0 the null fit was
+    always REML).
 
     Raises
     ------

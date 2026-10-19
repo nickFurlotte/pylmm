@@ -557,7 +557,7 @@ def run_hgrid(params, rng):
         try:
             with np.errstate(all="ignore"):
                 L.fit(X=G[:, j].reshape(-1, 1))
-        except Exception:  # noqa: PERF203 - count per-SNP crashes
+        except Exception:  # count per-SNP crashes
             crashes += 1
     out["refit_crash_frac"] = crashes / 20.0
     return out

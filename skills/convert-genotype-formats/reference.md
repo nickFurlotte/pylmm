@@ -1,7 +1,7 @@
 # Conversion reference: recipes, caveats and how they were checked
 
 Companion to [SKILL.md](SKILL.md). Research background: [docs/research/io-formats.md](../../docs/research/io-formats.md).
-The commands below are not run in CI (they need external tools). In Phase 5c (October 2026) each recipe
+The commands below are not run in CI (they need external tools). In October 2026 each recipe
 was run on a small test VCF (8 samples; a multiallelic site, a half-call, an `R2` INFO field, a `DS`
 FORMAT field) with **plink2 v2.0.0-a.7.13 (15 Oct 2026)**, **bcftools 1.24**, **bio2zarr 0.2.1** and
 **vcztools 0.2.0**, and the resulting BED read with pylmm. Results are marked *checked*; anything taken
@@ -68,8 +68,7 @@ plink2 --pfile imp --hard-call-threshold 0.1 --make-bed --out imp_hc
   (`bcftools view -M2`) them first.
 * `dosage=HDS` for Minimac4 haplotype dosages; `dosage=GP` reads probabilities (*docs only*).
 * BED stores hard calls: with `--hard-call-threshold 0.1`, dosages more than 0.1 from 0/1/2 become
-  missing (and 0.5 / 1.5 always do). pylmm cannot read dosages today; a PGEN reader is planned
-  (Phase 6.2d). Alternatively, read dosages with any Python library and pass the matrix to
+  missing (and 0.5 / 1.5 always do). pylmm cannot read dosages today; a PGEN reader is planned. Alternatively, read dosages with any Python library and pass the matrix to
   `pylmm.lmm.gwas` directly (it takes any numeric coding).
 
 ## BGEN → PGEN / BED (*checked*)
@@ -170,8 +169,8 @@ exactly as in the `.fam` (watch leading zeros and float-formatted IDs like `101.
 
 ### When a site blocks scripted downloads: a handoff note
 
-Some repositories serve the landing page to scripts but refuse the file itself. Seen in the Phase R
-replication: the **Dryad** dataset page (`https://datadryad.org/dataset/doi:...`) loads, while each file's
+Some repositories serve the landing page to scripts but refuse the file itself. Seen in the
+[replication](../../docs/replication.md): the **Dryad** dataset page (`https://datadryad.org/dataset/doi:...`) loads, while each file's
 `https://datadryad.org/downloads/file_stream/<id>` returns **HTTP 403** to `curl`; a publisher returned a
 reCAPTCHA page instead of the article; MPD returned 403 to a script. Do not try to get around it (other
 endpoints, faked headers, CAPTCHA solving). Stop, keep the evidence (`curl -D headers.txt`), and hand the

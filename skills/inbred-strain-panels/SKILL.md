@@ -20,7 +20,7 @@ example at the end sketches the two published HMDP studies reproduced in
 [docs/replication.md](../../docs/replication.md) (Farber et al. 2011, Bennett et al. 2010); their data
 files are not in the repository.
 
-**Planned, not yet in pylmm** (Phase 6): a strain-aware option that expands strain genotypes to animals
+**Planned, not yet in pylmm**: a strain-aware option that expands strain genotypes to animals
 and imputes over strains, a named IBS kinship, a LOCO flag for the command line, and marker metadata
 (chromosome, position, counted allele) carried through the EMMA path. Until then, use the recipes here.
 

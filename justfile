@@ -17,12 +17,11 @@ lint:
     uv run --locked ruff check
     uv run --locked ruff format --check
 
-# mypy config is in pyproject.toml.  Each run uses a throwaway environment:
-# the numpy stubs of the lock's newer-Python numpy do not support mypy's
-# python_version = "3.10".
-# Type-check the package, CLI included, under Python 3.10 and 3.14 (as CI does)
+# mypy config is in pyproject.toml.  Each run uses a throwaway environment with the
+# numpy (and numpy stubs) that the lock resolves for that Python.
+# Type-check the package, CLI included, under Python 3.11 and 3.14 (as CI does)
 typecheck:
-    uv run --locked --isolated --python 3.10 mypy
+    uv run --locked --isolated --python 3.11 mypy
     uv run --locked --isolated --python 3.14 mypy --python-version 3.14
 
 # Apply formatting and auto-fixable lint fixes
@@ -38,7 +37,7 @@ test *args:
 notebook-test:
     uv run --locked --group sims --group notebooks pytest -q tests/test_notebook.py
 
-# Run only the executable docs: every code block of AGENTS.md, docs/guide.md, skills/
+# Run only the executable docs: every code block of README.md, AGENTS.md, docs/guide.md, skills/
 docs-test *args:
     uv run --group sims pytest tests/test_docs.py "$@"
 

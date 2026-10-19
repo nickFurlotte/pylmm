@@ -26,7 +26,7 @@ that makes a script loop forever fails the test instead of hanging CI. (The
 watchdog was chosen over pytest-timeout because it needs no extra dependency
 on either Python.)
 
-The same tests run unchanged on Python 3.10+, which is what CI uses:
+The same tests run unchanged on Python 3.11+, which is what CI uses:
 
 ```
 uv run pytest                       # fast suite: 32 passed, 2 skipped
