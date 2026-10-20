@@ -316,8 +316,6 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   are length-checked.
 
 ### Removed
-- `docs/research/` (the I/O formats survey and the literature review): background notes, not user
-  documentation; the conversion facts the skills rely on are in `convert-genotype-formats/reference.md`.
 - `pylmmGWAS --kfile2`.
 
 ### Fixed
