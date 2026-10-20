@@ -44,13 +44,13 @@ def _covariates(kind, n, rng):
     cov = rng.normal(size=(n, 3)) * [1.0, 100.0, 1e-3]  # very different scales
     if kind == "covariates":
         return np.column_stack([np.ones(n), cov])
-    if kind == "no-intercept":
-        return cov
-    assert kind == "empty"
-    return np.zeros((n, 0))
+    assert kind == "no-intercept"
+    return cov
 
 
-COVARIATE_KINDS = ["intercept", "covariates", "no-intercept", "empty"]
+# X0 with no column at all is left out: the null fit (LMM.fit, scipy.linalg.inv of a 0 x 0
+# matrix) fails on it with the floor scipy, 1.9.2, before either test path runs.
+COVARIATE_KINDS = ["intercept", "covariates", "no-intercept"]
 
 
 @pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
@@ -61,7 +61,7 @@ def test_association_batch_matches_association(kind, reml):
     L = LMM(y, K, kva, kve, X0)
     L.fit(reml=reml)
     cols = [j for j in range(X.shape[1]) if snp_estimable(X[:, j], L.X0)]
-    assert len(cols) == X.shape[1] or kind in ("no-intercept", "empty")
+    assert len(cols) == X.shape[1] or kind == "no-intercept"
     ref = np.array([L.association(X[:, j], reml=reml, return_beta=True) for j in cols])
     res = L.association_batch(X[:, cols], reml=reml)
     assert isinstance(res, AssociationResult)
@@ -114,12 +114,12 @@ def _hard_columns(X0, rng):
     return np.column_stack(cols)
 
 
-@pytest.mark.parametrize("kind", COVARIATE_KINDS)
+@pytest.mark.parametrize("kind", [*COVARIATE_KINDS, "empty"])
 def test_estimable_columns_equals_snp_estimable(kind):
     """The vectorised estimability check makes exactly the decisions of snp_estimable."""
     rng = np.random.default_rng(3)
     n = 120
-    X0 = _covariates(kind, n, rng)
+    X0 = np.zeros((n, 0)) if kind == "empty" else _covariates(kind, n, rng)
     X0 = np.ones((n, 1)) if X0 is None else X0
     X = _hard_columns(X0, rng)
     expected = [snp_estimable(X[:, j], X0) for j in range(X.shape[1])]
