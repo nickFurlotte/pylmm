@@ -380,6 +380,54 @@ def test_genotype_sources_are_interchangeable():
     assert np.array_equal(a, b, equal_nan=True)
 
 
+def _normalize_genotype_1_0_0(G):
+    """normalize_genotype as released in pylmm 1.0.0, verbatim (the reference)."""
+    x = ~np.isnan(G)
+    if not x.any():
+        return G
+    m = G[x].mean()
+    if np.ptp(G[x]) <= 1e-12 * max(1.0, abs(m)):
+        G = np.zeros_like(G)
+        return G
+    if G[x].var() == 0:
+        s = 1.0
+    else:
+        s = np.sqrt(G[x].var())
+    G = np.where(np.isnan(G), m, G)
+    if s == 0:
+        G = G - m
+    else:
+        G = (G - m) / s
+    return G
+
+
+def test_normalize_genotype_bit_identical_to_1_0_0():
+    """The faster normalize_genotype (called values extracted once) changes no bit."""
+    rng = np.random.default_rng(2026)
+    for t in range(1200):
+        n = int(rng.integers(1, 2500))
+        kind = t % 6
+        if kind == 0:
+            g = rng.choice([0.0, 0.5, 1.0], n)  # BED fractions
+        elif kind == 1:
+            g = rng.random(n) * 2  # dosages
+        elif kind == 2:
+            g = 0.3 + rng.normal(0, 1e-15, n)  # constant up to rounding
+        elif kind == 3:
+            g = np.full(n, np.nan)
+        elif kind == 4:
+            g = rng.choice([0.0, 1.0, 2.0], n) * 1e8
+        else:
+            g = rng.normal(5, 1e-6, n)
+        if t % 2:
+            g[rng.random(n) < 0.1] = np.nan
+        before = g.copy()
+        new = normalize_genotype(g)
+        assert np.array_equal(new, _normalize_genotype_1_0_0(before.copy()), equal_nan=True)
+        assert np.array_equal(g, before, equal_nan=True)  # input not modified
+        assert new is not g or np.isnan(g).all()  # a new array, except all-missing
+
+
 def test_plink_reader_normalize_genotype_delegates():
     g = np.array([0.0, 0.5, np.nan, 1.0, 1.0])
     assert np.array_equal(PlinkReader.normalize_genotype(None, g), normalize_genotype(g))  # type: ignore[arg-type]

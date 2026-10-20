@@ -280,23 +280,29 @@ def normalize_genotype(G: NDArray[np.float64]) -> NDArray[np.float64]:
     >>> normalize_genotype(np.array([0.0, 1.0, np.nan, 2.0])).tolist()
     [-1.224744871391589, 0.0, 0.0, 1.224744871391589]
     """
+    # The called values are extracted once (they used to be extracted four
+    # times, and the nan test done twice); every result is computed with the
+    # same operations as before, so it is bit for bit the same.
     x = ~np.isnan(G)
+    called = G[x]
     # All missing: return the all-nan SNP unchanged (length n), which the
     # CLIs then skip.  It used to return an empty array (bug 11).
-    if not x.any():
+    if not len(called):
         return G
-    m = G[x].mean()
+    m = called.mean()
     # A SNP that is constant up to rounding (e.g. an EMMA dosage) is
     # returned as zeros, which the CLIs skip: standardising it would blow
     # its rounding noise up to unit variance (issue 19).
-    if np.ptp(G[x]) <= 1e-12 * max(1.0, abs(m)):
+    if np.ptp(called) <= 1e-12 * max(1.0, abs(m)):
         G = np.zeros_like(G)
         return G
-    if G[x].var() == 0:
+    var = called.var()
+    if var == 0:
         s = 1.0
     else:
-        s = np.sqrt(G[x].var())
-    G = np.where(np.isnan(G), m, G)
+        s = np.sqrt(var)
+    if len(called) < len(G):  # mean-impute the missing calls (on a copy)
+        G = np.where(x, G, m)
     if s == 0:
         G = G - m
     else:
