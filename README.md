@@ -128,7 +128,9 @@ ported it: the GeneNetwork port [pylmm_gn2](https://github.com/genenetwork/pylmm
 with [numerical comparisons](https://kbroman.org/lmmlite/assets/compare2pylmm.html) to PyLMM; and The
 Jackson Laboratory's [pylmm3](https://github.com/TheJacksonLaboratory/pylmm3) (2026), an independent
 Python 3 modernisation. Version 1.0 is a rewrite by the original author: Python 3, a new API and command
-line, and validation against the original code and published results.
+line, and validation against the original code and published results. The rewrite was done with Claude
+Code (AI-assisted); every change was reviewed, tested against the outputs of the original Python 2 code
+and checked in simulations.
 
 ## Links
 
