@@ -129,8 +129,8 @@ with [numerical comparisons](https://kbroman.org/lmmlite/assets/compare2pylmm.ht
 Jackson Laboratory's [pylmm3](https://github.com/TheJacksonLaboratory/pylmm3) (2026), an independent
 Python 3 modernisation. Version 1.0 is a rewrite by the original author: Python 3, a new API and command
 line, and validation against the original code and published results. The rewrite was done with Claude
-Code (AI-assisted); every change was reviewed, tested against the outputs of the original Python 2 code
-and checked in simulations.
+Code (AI-assisted); every change went through code review (AI reviewers and the author), was tested
+against the outputs of the original Python 2 code and was checked in simulations.
 
 ## Links
 
@@ -148,6 +148,4 @@ this repository" button reads it).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-Code: MIT. Example data in `data/`: see [data/README.md](data/README.md).
+Code: MIT (see [LICENSE](LICENSE)). Example data in `data/`: see [data/README.md](data/README.md).
