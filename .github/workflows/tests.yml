@@ -14,9 +14,9 @@ jobs:
     name: lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           python-version: "3.13"
           enable-cache: true
@@ -38,9 +38,9 @@ jobs:
       matrix:
         python-version: ["3.11", "3.14"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
@@ -60,11 +60,11 @@ jobs:
       OPENBLAS_NUM_THREADS: "1"
     steps:
       # NOTE: every job clones the ~215MB example data in data/.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # setup-uv stopped publishing floating major tags after v7, so this is
-      # pinned to an exact release; bump it deliberately.
-      - uses: astral-sh/setup-uv@v10.3.0
+      # Actions are pinned to full commit SHAs (the comment names the release);
+      # Dependabot (.github/dependabot.yml) proposes updates monthly.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
@@ -100,9 +100,9 @@ jobs:
     env:
       OPENBLAS_NUM_THREADS: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           python-version: "3.13"
           enable-cache: true
@@ -119,9 +119,9 @@ jobs:
       OPENBLAS_NUM_THREADS: "1"
     steps:
       # NOTE: clones the ~215MB example data too; see the pytest job.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           python-version: "3.11"
 
