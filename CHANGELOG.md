@@ -8,6 +8,26 @@ maps them).
 
 ## [Unreleased]
 
+### Added
+- Variant metadata: `PlinkReader.variants` -> the `.bim` columns of every SNP (`chrom`, `snp`, `cm`, `bp`,
+  `a1`, `a2`) as a `pylmm.genotypes.Variants` (numpy columns; `variants[k]` is a `Variant` named tuple).
+  Before, the reader kept only the SNP ID. For a TPED file the columns come from its `.bim`, or from its
+  `.map` (no alleles); EMMA input has SNP names (`SNP_<k>`) only. A malformed `.bim`/`.map` line raises
+  `InputError` when the metadata is read.
+- Blocks of SNPs: `PlinkReader.iter_blocks(block_size=1024)` yields `(G, variants)`, `G` float64
+  `(len(indivs), b)`, bit for bit the vectors of `iter_snps` (standardised or not). A BED file is decoded a
+  block at a time: 3-5x the throughput of `iter_snps` unstandardised, 1.3-1.6x standardised
+  (`sims/bench/bed_blocks.py`). `iter_snps` and the CLI output are unchanged.
+- `pylmm.genotypes`: the `GenotypeSource` protocol (`sample_ids`, `num_samples`, `variants`,
+  `iter_blocks`), implemented by `PlinkReader` and by the new `ArraySource`, which wraps an in-memory
+  `(n, m)` genotype matrix (e.g. read from VCF, BGEN or VCF Zarr with another library) with optional IDs and
+  metadata. `normalize_genotype` is now also a function there (`PlinkReader.normalize_genotype` calls it).
+- `sims/bench/`: Phase 6 benchmarks; `python -m sims.bench.bed_blocks [--quick]`.
+
+### Changed
+- `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
+  bit for bit unchanged.
+
 ## [1.0.0] - 2026-10-19
 
 The Python 3 port of pylmm, with a new PEP 8 API and a single `pylmm` command line, validated against the
