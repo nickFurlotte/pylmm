@@ -5,11 +5,13 @@ every comparison below is ``np.array_equal(..., equal_nan=True)``, never a toler
 """
 
 import itertools
+import logging
 import os
 import warnings
 
 import numpy as np
 import pytest
+from synthetic_bed import write_synthetic_bed
 
 from pylmm.genotypes import (
     DEFAULT_BLOCK_SIZE,
@@ -20,7 +22,6 @@ from pylmm.genotypes import (
 )
 from pylmm.plink_io import PlinkReader
 from pylmm.samples import InputError
-from sims.bench import bed_blocks
 
 BED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 BED = os.path.join(BED, "snps.132k.clean.noX")
@@ -84,7 +85,9 @@ def test_variants_columns_and_indexing():
         a2=["G", "T", "A"],
     )
     assert len(v) == 3
-    assert v.cm.dtype == np.float64 and v.bp.dtype == np.int64 and v.snp.dtype.kind == "U"
+    assert v.cm.dtype == np.float64 and v.bp.dtype == np.int64
+    assert all(getattr(v, c).dtype == object for c in ("snp", "chrom", "a1", "a2"))
+    assert all(type(x) is str for x in v.snp)
     assert v[2] == Variant("X", "c", 1.0, 30, "G", "A")
     assert v[-1] == v[2]
     assert isinstance(v[np.int64(0)], Variant)
@@ -105,6 +108,22 @@ def test_variants_missing_columns_and_validation():
         Variants(snp=["a", "b"], bp=[1])
     with pytest.raises(ValueError, match="1-d"):
         Variants(snp=[["a"]])
+    assert Variants(snp=["a", "b"], bp=[100.0, 2e2]).bp.tolist() == [100, 200]
+    for bad in ([1.9, 2.0], [np.nan, 1.0], ["x", "1"]):
+        with pytest.raises(ValueError, match=r"Variants\.bp: positions must be integers"):
+            Variants(snp=["a", "b"], bp=bad)
+
+
+def test_variants_columns_are_read_only():
+    chrom = np.array(["1", "2"], dtype=object)
+    v = Variants(snp=["a", "b"], chrom=chrom, bp=[1, 2])
+    for col in (v.snp, v.chrom, v.bp, v[0:1].chrom, v[v.bp > 1].bp):
+        with pytest.raises(ValueError, match="read-only"):
+            col[0] = col[0]
+    chrom[0] = "X"  # the caller's own array stays writeable (the column is a view of it)
+    r = PlinkReader(BED)
+    with pytest.raises(ValueError, match="read-only"):
+        r.variants.chrom[0] = "X"
 
 
 # -- PlinkReader.variants -------------------------------------------------------
@@ -152,28 +171,94 @@ def test_emma_variants_are_names_only(tmp_path):
     assert list(v.snp) == ["SNP_1", "SNP_2", "SNP_3"]
     assert v.chrom is None and v.bp is None
     assert list(v.snp) == [name for _, name in r.iter_snps()]
+    r2 = PlinkReader(str(fn), type="emma", norm_genotype=False)
+    blocks = [bv.snp.tolist() for _, bv in r2.iter_blocks(2)]
+    assert blocks == [["SNP_1", "SNP_2"], ["SNP_3"]]
+    assert r2._variants is None  # names built from the rows read, no counting pass
+
+
+def _bed_with_bim(tmp_path, bim_text):
+    """A 2-individual, 2-SNP BED set with this .bim text (the PR #23 review's bim.py cases)."""
+    base = str(tmp_path / "b")
+    with open(base + ".bim", "w", newline="", encoding="utf-8") as f:
+        f.write(bim_text)
+    with open(base + ".fam", "w") as f:
+        f.write("F I1 0 0 0 -9\nF I2 0 0 0 -9\n")
+    with open(base + ".bed", "wb") as f:
+        f.write(b"\x6c\x1b\x01\x08\x02")
+    return base
+
+
+GOOD_BIM = ["1 rs1 0 100 A G", "1 rs2 0 200 C T"]
 
 
 @pytest.mark.parametrize(
-    ("line", "match"),
+    ("bim_text", "bp", "cm"),
     [
-        ("1 rs2 0 200 C", r"line 2: expected 6 fields .* found 5"),
-        ("1 rs2 0 2e2x C T", "SNP file .*bim"),
-        ("", r"line 2: expected 6 fields"),
+        ("1\trs1\t0\t100\tA\tG\n1\trs2\t0\t200\tC\tT\n", [100, 200], [0.0, 0.0]),
+        ("\r\n".join(GOOD_BIM) + "\r\n", [100, 200], [0.0, 0.0]),
+        ("\n".join(x + "  \t" for x in GOOD_BIM) + "\n", [100, 200], [0.0, 0.0]),
+        ("\n".join(GOOD_BIM), [100, 200], [0.0, 0.0]),
+        ("\n".join("  " + x for x in GOOD_BIM) + "\n", [100, 200], [0.0, 0.0]),
+        ("\n".join(x + " extra" for x in GOOD_BIM) + "\n", [100, 200], [0.0, 0.0]),  # 7 cols
+        ("1 rs1 NA 100 A G\n1 rs2 x 200 C T\n", [100, 200], [np.nan, np.nan]),
+        ("1 rs1 0 1.5e2 A G\n1 rs2 0.25 200.0 C T\n", [150, 200], [0.0, 0.25]),
+        ("1 rs1 0 -100 A G\n1 rs2 0 200 C T\n", [-100, 200], [0.0, 0.0]),
+        ("﻿" + "\n".join(GOOD_BIM) + "\n", [100, 200], [0.0, 0.0]),
     ],
 )
-def test_bad_bim_raises_input_error(tmp_path, line, match):
-    base = str(tmp_path / "b")
-    bed_blocks.write_synthetic_bed(base, 3, 2, seed=1)
-    with open(base + ".bim") as f:
-        first = f.readline()
-    with open(base + ".bim", "w") as f:
-        f.write(first + line + "\n")
-    r = PlinkReader(base)
-    with pytest.raises(InputError, match=match):
+def test_bim_quirks_iter_snps_reads_are_tolerated(tmp_path, bim_text, bp, cm):
+    """Every .bim that iter_snps reads also gives variants and iter_blocks."""
+    base = _bed_with_bim(tmp_path, bim_text)
+    names = [name for _, name in PlinkReader(base).iter_snps()]
+    v = PlinkReader(base).variants
+    assert v.snp.tolist() == names == ["rs1", "rs2"]
+    assert v.bp.tolist() == bp
+    np.testing.assert_array_equal(v.cm, cm)
+    blocks = [bv.snp.tolist() for _, bv in PlinkReader(base).iter_blocks()]
+    assert blocks == [names]
+
+
+@pytest.mark.parametrize("bad_bp", ["1.5", "2e2x", "NA", "1e300"])
+def test_bim_non_integer_position_is_minus_one_with_one_warning(tmp_path, caplog, bad_bp):
+    base = _bed_with_bim(tmp_path, "1 rs1 0 %s A G\n1 rs2 0 %s C T\n" % (bad_bp, bad_bp))
+    with caplog.at_level(logging.WARNING, logger="pylmm"):
+        v = PlinkReader(base).variants
+    assert v.bp.tolist() == [-1, -1]
+    msgs = [r.getMessage() for r in caplog.records]
+    assert len(msgs) == 1
+    assert "2 position(s) are not integers" in msgs[0] and "line 1, %r" % bad_bp in msgs[0]
+    assert "b.bim" in msgs[0] and "np." not in msgs[0]
+
+
+@pytest.mark.parametrize(
+    ("bim_text", "match"),
+    [
+        (
+            "1 rs1 0 100 A G\n1 rs2 0 200 C\n",
+            r"b\.bim, line 2: expected 6 or more fields .* found 5",
+        ),
+        ("1 rs1 0 100 A\n1 rs2 0 200 C\n", r"b\.bim, line 1: expected 6 or more fields"),
+        ("\n".join(GOOD_BIM) + "\n\n", r"b\.bim, line 3: expected 6 or more fields .* found 0"),
+    ],
+)
+def test_short_bim_line_raises_naming_file_and_line(tmp_path, bim_text, match):
+    """A .bim line without its 6 columns is an error, but only when the metadata is needed."""
+    base = _bed_with_bim(tmp_path, bim_text)
+    r = PlinkReader(base)  # the constructor does not read the .bim
+    with pytest.raises(InputError, match=match) as e:
         r.variants  # noqa: B018
-    with pytest.raises(InputError):
+    assert "np." not in str(e.value)
+    with pytest.raises(InputError, match=match):
         r.iter_blocks()
+
+
+def test_long_allele_does_not_widen_the_columns(tmp_path):
+    """One 500-bp allele: the text columns are object arrays, 8 bytes per entry."""
+    base = _bed_with_bim(tmp_path, "1 rs1 0 100 %s G\n1 %s 0 200 C T\n" % ("A" * 500, "x" * 400))
+    v = PlinkReader(base).variants
+    assert v.a1[0] == "A" * 500 and v.snp[1] == "x" * 400
+    assert v.a1.nbytes == v.snp.nbytes == 2 * np.dtype(object).itemsize
 
 
 def test_map_with_mixed_widths_raises(tmp_path):
@@ -181,8 +266,24 @@ def test_map_with_mixed_widths_raises(tmp_path):
     _write_tped(base)
     with open(base + ".map", "a") as f:
         f.write("1 rs9 900\n")
-    with pytest.raises(InputError, match=r"line 4: expected 4 fields"):
+    with pytest.raises(InputError, match=r"t\.map, line 4: expected 4 or more fields"):
         PlinkReader(base, type="t").variants  # noqa: B018
+    _write_tped(base, map_cols=3)
+    with open(base + ".map", "a") as f:
+        f.write("1 rs9 0 900\n")
+    with pytest.raises(InputError, match=r"t\.map, line 4: expected 3 fields"):
+        PlinkReader(base, type="t").variants  # noqa: B018
+
+
+def test_map_extra_columns_ignored(tmp_path):
+    base = str(tmp_path / "t")
+    _write_tped(base)
+    with open(base + ".map") as f:
+        lines = f.read().splitlines()
+    with open(base + ".map", "w") as f:
+        f.writelines(line + "\tjunk\n" for line in lines)
+    v = PlinkReader(base, type="t").variants
+    assert v.bp.tolist() == [100, 200, 300] and v.a1 is None
 
 
 # -- iter_blocks: bit-identical to iter_snps -------------------------------------
@@ -219,7 +320,7 @@ def test_bed_blocks_identical_edge_shapes(tmp_path, n, norm):
     """N not a multiple of 4, a last partial block, block sizes 1 and > num_snps, missing calls."""
     base = str(tmp_path / "s")
     m = 13
-    raw = bed_blocks.write_synthetic_bed(base, n, m, missing=0.15, seed=n)
+    raw = write_synthetic_bed(base, n, m, missing=0.15, seed=n)
     W, names = _per_snp(PlinkReader(base, norm_genotype=norm))
     if not norm:
         assert np.array_equal(W, raw, equal_nan=True)  # the writer and the reader agree
@@ -234,7 +335,7 @@ def test_bed_blocks_identical_edge_shapes(tmp_path, n, norm):
 
 def test_bed_blocks_with_kinship_dropping_individuals(tmp_path):
     base = str(tmp_path / "s")
-    bed_blocks.write_synthetic_bed(base, 11, 9, missing=0.1, seed=3)
+    write_synthetic_bed(base, 11, 9, missing=0.1, seed=3)
     with open(base + ".fam") as f:
         ids = [tuple(line.split()[:2]) for line in f]
     kept = [ids[i] for i in (7, 0, 3, 10, 5)]
@@ -269,7 +370,7 @@ def test_bed_all_missing_and_constant_snps(tmp_path):
 
 def test_truncated_bed_raises_like_iter_snps(tmp_path):
     base = str(tmp_path / "s")
-    bed_blocks.write_synthetic_bed(base, 6, 5, seed=2)  # 2 bytes per SNP
+    write_synthetic_bed(base, 6, 5, seed=2)  # 2 bytes per SNP
     with open(base + ".bed", "rb") as f:
         data = f.read()
     with open(base + ".bed", "wb") as f:
@@ -319,6 +420,33 @@ def test_iter_blocks_is_independent_of_iter_snps(tmp_path):
         assert np.array_equal(G[:, 0], g1, equal_nan=True) and v.snp[0] == n1
         assert np.array_equal(G[:, 1], g2, equal_nan=True) and v.snp[1] == n2
         r.close()
+
+
+@pytest.mark.parametrize("fmt", ["b", "t", "emma"])
+def test_iter_blocks_captures_state_at_the_call(tmp_path, fmt):
+    """subset() or a norm change between iter_blocks() and next() does not affect it."""
+    if fmt == "b":
+        base = str(tmp_path / "s")
+        write_synthetic_bed(base, 9, 7, missing=0.1, seed=6)
+    elif fmt == "t":
+        base = str(tmp_path / "t")
+        _write_tped(base, n=6, m=7)
+    else:
+        base = str(tmp_path / "g.emma")
+        with open(base, "w") as f:
+            f.write("0 1 2 1 0\n1 1 0 2 2\n2 0 1 1 0\n")
+    expected, _ = _per_snp(PlinkReader(base, type=fmt, norm_genotype=False))
+    r = PlinkReader(base, type=fmt, norm_genotype=False)
+    it = r.iter_blocks(2)
+    r.subset(r.indivs[:2])
+    r.norm_genotype = True
+    G, _ = next(it)
+    assert np.array_equal(G, expected[:, :2], equal_nan=True)
+    rest = np.hstack([G2 for G2, _ in it])  # also mid-iteration: the earlier rows
+    assert np.array_equal(rest, expected[:, 2:], equal_nan=True)
+    assert r.num_samples == 2  # the reader itself has the new state
+    g_new, _ = next(r.iter_blocks(2))  # a new iterator sees it
+    assert g_new.shape[0] == 2
 
 
 def test_default_block_size():
@@ -428,25 +556,19 @@ def test_normalize_genotype_bit_identical_to_1_0_0():
         assert new is not g or np.isnan(g).all()  # a new array, except all-missing
 
 
+def test_normalize_genotype_2d_input_as_1_0_0():
+    """Outside the (n,) contract, but 2-d input still gives what 1.0.0 gave (mean imputed)."""
+    for g in (
+        np.array([[0.0, 1.0], [np.nan, 2.0]]),
+        np.array([[0.5, np.nan, 1.0], [0.0, 0.5, np.nan]]),
+        np.array([[1.0, 2.0], [3.0, 4.0]]),
+    ):
+        new = normalize_genotype(g.copy())
+        assert new.shape == g.shape
+        assert np.array_equal(new, _normalize_genotype_1_0_0(g.copy()), equal_nan=True)
+        assert not np.isnan(new).any()
+
+
 def test_plink_reader_normalize_genotype_delegates():
     g = np.array([0.0, 0.5, np.nan, 1.0, 1.0])
     assert np.array_equal(PlinkReader.normalize_genotype(None, g), normalize_genotype(g))  # type: ignore[arg-type]
-
-
-# -- the benchmark ----------------------------------------------------------------
-
-
-def test_bench_bed_blocks_small(tmp_path):
-    base = str(tmp_path / "s")
-    bed_blocks.write_synthetic_bed(base, 9, 300, seed=4)
-    rows = bed_blocks.bench_file("tiny", base, 300, repeats=1)
-    assert len(rows) == 2 * (1 + len(bed_blocks.BLOCK_SIZES))
-    assert all(r["identical"] for r in rows)
-    table = bed_blocks.format_table(rows)
-    assert table.startswith("| data |") and "iter_blocks(1024)" in table
-
-
-@pytest.mark.slow
-def test_bench_bed_blocks_quick(capsys):
-    assert bed_blocks.main(["--quick", "--repeats", "1"]) == 0
-    assert "bit-identical to iter_snps: yes" in capsys.readouterr().out

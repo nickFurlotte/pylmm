@@ -152,6 +152,7 @@ import copy
 import itertools
 import logging
 import os
+import sys
 import warnings
 from collections.abc import Iterator, Sequence
 from typing import IO, TYPE_CHECKING, Any, cast
@@ -701,14 +702,27 @@ class PlinkReader:
         the ``.bim`` file if it exists, otherwise the ``.map`` file's
         (``chrom``, ``snp``, ``cm``, ``bp``; no alleles, and no ``cm`` for a
         three-column ``.map``).  For EMMA input, the names ``SNP_1``,
-        ``SNP_2``, ... of its non-blank rows and no other column.  The
-        ``snp`` column holds the names `iter_snps` returns.
+        ``SNP_2``, ... of its non-blank rows and no other column (this
+        property reads the whole EMMA file once to count them; `iter_blocks`
+        does not need it).  The ``snp`` column holds the names `iter_snps`
+        returns.  ``len(variants)`` is the number of SNPs (`num_snps` is set
+        only by an iteration, and is -1 for EMMA).
+
+        The file is read leniently, so that every file `iter_snps` reads
+        has metadata: extra fields after the sixth (``.bim``) or fourth
+        (``.map``) are ignored; a ``cM`` that is not a number (``NA``) is
+        nan; a position written as an integral float (``100.0``,
+        ``1.5e2``) is that integer, and any other non-integer position is
+        -1, with one logged warning that names the first such line and the
+        count.
 
         Raises
         ------
         InputError
-            (A ``ValueError``.)  If a ``.bim`` line does not have 6 fields, a
-            ``.map`` line 3 or 4, or a position is not a number.
+            (A ``ValueError``.)  If a ``.bim`` line has fewer than 6 fields
+            (or a blank line), or a ``.map`` line fewer than 3 or not the same
+            number as the first line (3, or 4 or more); the message names
+            the file and the line.
 
         Examples
         --------
@@ -756,9 +770,18 @@ class PlinkReader:
         the genotypes are not standardised; TPED and EMMA blocks are
         stacked from the per-SNP reader.  The iteration is independent of
         `iter_snps` (it opens its own file handle, closed when the iteration
-        ends or the iterator is discarded) and uses the individuals of the
-        time of the call.  A block holds ``8 * len(indivs) * block_size``
-        bytes, and the decoding about as much again.
+        ends or the iterator is discarded).  A block holds
+        ``8 * len(indivs) * block_size`` bytes, and the decoding about as
+        much again.
+
+        The individuals, ``norm_genotype`` and the SNP metadata are those of
+        the time of the call (`variants` is read then, if it was not yet,
+        except for EMMA input, whose block variants are built from the rows
+        as they are read).  A later `subset`, kinship read or change of
+        ``norm_genotype`` does not affect an iterator already created: its
+        blocks keep the earlier rows, while `indivs` and `num_samples` then
+        describe the new state, so call `iter_blocks` again after a
+        `subset`.
 
         Parameters
         ----------
@@ -805,20 +828,34 @@ class PlinkReader:
         >>> tmp.cleanup()
         """
         block_size = check_block_size(block_size)
-        variants = self.variants
+        # Everything the iteration depends on is captured now, at the call (the
+        # generators below would otherwise read it at the first next()).
         if self.type == "b":
             self._check_bed_header()
-            return self._iter_blocks_bed(block_size, variants)
-        return self._iter_blocks_stacked(block_size, variants)
+            index = None if self._geno_index is None else self._geno_index.copy()
+            return self._iter_blocks_bed(
+                block_size, self.variants, self.N, index, self.norm_genotype
+            )
+        reader = copy.copy(self)  # same individuals and options, its own file handles
+        reader.fhandle = reader.snp_file_handle = None
+        # EMMA names are SNP_<k>: built from the rows read, without a counting pass.
+        variants = None if self.type == "emma" else self.variants
+        return self._iter_blocks_stacked(block_size, reader, variants)
 
     def _iter_blocks_bed(
-        self, block_size: int, variants: Variants
+        self,
+        block_size: int,
+        variants: Variants,
+        n_file: int,
+        index: NDArray[np.intp] | None,
+        norm: bool,
     ) -> Iterator[tuple[NDArray[np.float64], Variants]]:
-        """`iter_blocks` for a BED file: decode `block_size` SNPs at a time."""
-        n_file = self.N
+        """`iter_blocks` for a BED file: decode `block_size` SNPs at a time.
+
+        `n_file` individuals in the file, of which `index` are kept (None: all,
+        in order); `norm`: standardise.  Captured by `iter_blocks` at the call.
+        """
         bytes_per_snp = (n_file + 3) // 4
-        index = self._geno_index
-        norm = self.norm_genotype
         m = len(variants)
         with open(self.fbase + ".bed", "rb") as fh:
             fh.read(3)  # magic number and SNP-major flag, checked by iter_blocks
@@ -854,12 +891,15 @@ class PlinkReader:
         R: NDArray[np.float64] = np.take(cls._BED_BYTE_VALUES, B, axis=0).reshape(b, -1)[:, :n]
         return R
 
+    @staticmethod
     def _iter_blocks_stacked(
-        self, block_size: int, variants: Variants
+        block_size: int, reader: PlinkReader, variants: Variants | None
     ) -> Iterator[tuple[NDArray[np.float64], Variants]]:
-        """`iter_blocks` for TPED and EMMA input: stack the vectors of the per-SNP reader."""
-        reader = copy.copy(self)  # its own file handles; same individuals and options
-        reader.fhandle = reader.snp_file_handle = None
+        """`iter_blocks` for TPED and EMMA input: stack the vectors of `reader`'s per-SNP path.
+
+        `reader` is a shallow copy made by `iter_blocks`; `variants` is None for
+        EMMA, whose block variants are made from the SNP names read.
+        """
         reader.iter_snps()
         # Call __next__ directly: iter(reader) (as in islice) would restart the iteration.
         try:
@@ -867,14 +907,22 @@ class PlinkReader:
             done = False
             while not done:
                 cols: list[NDArray[np.float64]] = []
+                names: list[str] = []
                 while len(cols) < block_size:
                     try:
-                        cols.append(next(reader)[0])
+                        g, name = next(reader)
                     except StopIteration:
                         done = True
                         break
+                    cols.append(g)
+                    names.append(name)
                 if cols:
-                    yield np.column_stack(cols), variants[start : start + len(cols)]
+                    v = (
+                        Variants.from_names(names)
+                        if variants is None
+                        else variants[start : start + len(cols)]
+                    )
+                    yield np.column_stack(cols), v
                     start += len(cols)
         finally:
             reader.close()
@@ -1318,65 +1366,145 @@ class PlinkReader:
 
 
 # Lines of a .bim / .map file parsed at a time by `_read_variant_file` (bounds the
-# memory of the Python strings of a file with millions of SNPs).
+# memory of the Python lists of a file with millions of SNPs).
 _VARIANT_CHUNK = 65536
 
 
-def _read_variant_file(fn: str) -> Variants:
-    """Read a ``.bim`` (6 columns) or ``.map`` (3 or 4 columns) file into `Variants`.
+def _text(values: Sequence[str]) -> NDArray[np.object_]:
+    """A 1-d object array of the strings `values` (see `pylmm.genotypes.Variants`)."""
+    a = np.empty(len(values), dtype=object)
+    a[:] = values
+    return a
 
-    ``.map``: ``chrom snp cm bp``, or ``chrom snp bp`` (no ``cm``), as PLINK
-    reads them; no alleles.  The columns are converted chunk by chunk, so
-    only one chunk of lines is held as Python strings at a time.
+
+def _parse_cm(values: Sequence[str]) -> NDArray[np.float64]:
+    """Genetic positions; a value that is not a number (e.g. ``NA``) is nan."""
+    try:
+        return np.array([float(x) for x in values], dtype=np.float64)
+    except ValueError:
+        pass
+    out = np.empty(len(values), dtype=np.float64)
+    for i, x in enumerate(values):
+        try:
+            out[i] = float(x)
+        except ValueError:
+            out[i] = np.nan
+    return out
+
+
+_INT64_MAX = np.iinfo(np.int64).max
+
+
+def _parse_bp(values: Sequence[str]) -> tuple[NDArray[np.int64], list[int]]:
+    """Base-pair positions, and the indices of the values that are not integers (set to -1).
+
+    An integral float (``100.0``, ``1.5e2``) is that integer.
+    """
+    try:
+        return np.array([int(x) for x in values], dtype=np.int64), []
+    except (ValueError, OverflowError):
+        pass
+    out = np.empty(len(values), dtype=np.int64)
+    bad = []
+    for i, x in enumerate(values):
+        v: int | None
+        try:
+            v = int(x)
+        except ValueError:
+            try:
+                f = float(x)
+            except ValueError:
+                f = np.nan
+            v = int(f) if np.isfinite(f) and f == np.floor(f) else None
+        if v is None or abs(v) > _INT64_MAX:
+            bad.append(i)
+            out[i] = -1
+        else:
+            out[i] = v
+    return out, bad
+
+
+def _variant_fields(is_bim: bool, width: int | None) -> tuple[str, str]:
+    """The field count and names a ``.bim`` / ``.map`` line needs, for error messages."""
+    if is_bim:
+        return "6 or more", "chromosome, SNP id, cM, position, A1, A2"
+    if width == 4:
+        return "4 or more", "chromosome, SNP id, cM, position"
+    if width == 3:
+        return "3", "chromosome, SNP id, position"
+    return "3, or 4 or more", "chromosome, SNP id, [cM,] position"
+
+
+def _read_variant_file(fn: str) -> Variants:
+    """Read a ``.bim`` or ``.map`` file into `Variants`, leniently (see `PlinkReader.variants`).
+
+    ``.bim``: ``chrom snp cm bp a1 a2`` (6 or more fields; the first 6 are
+    used).  ``.map``: ``chrom snp cm bp`` (4 or more fields), or ``chrom snp
+    bp`` (exactly 3, no ``cm``), as on the first line, for every line; no
+    alleles.  The lines are converted chunk by chunk, so only one chunk is held
+    as Python lists at a time.
 
     Raises
     ------
     InputError
-        If a line has the wrong number of fields (all lines of a ``.map`` must
-        have the same number) or ``cm`` / ``bp`` is not a number.
+        If a line has too few fields, naming the file and line.
     """
     is_bim = fn.endswith(".bim")
-    allowed = (6,) if is_bim else (4, 3)
-    width: int | None = None
+    width: int | None = 6 if is_bim else None
     chunks: list[list[NDArray[Any]]] = []
+    bad_bp: list[tuple[int, str]] = []  # (line, value) of the first non-integer position
+    n_bad_bp = 0
     lineno = 0
-    with open(fn) as f, _number_errors("SNP file %s" % fn):
+    with open(fn) as f:
         while True:
-            rows = [line.split() for line in itertools.islice(f, _VARIANT_CHUNK)]
-            if not rows:
+            lines = list(itertools.islice(f, _VARIANT_CHUNK))
+            if not lines:
                 break
-            for r in rows:
+            first = lineno + 1
+            rows = []
+            for line in lines:
                 lineno += 1
-                if width is None and len(r) in allowed:
-                    width = len(r)
-                if len(r) != width:
+                r = line.split()
+                if width is None:  # a .map: its first line says 3 or 4 columns
+                    width = 4 if len(r) >= 4 else 3 if len(r) == 3 else None
+                if width is None or len(r) < width or (width == 3 and len(r) != 3):
+                    need, fields = _variant_fields(is_bim, width)
                     raise InputError(
                         "%s, line %d: expected %s fields (%s), found %d"
-                        % (
-                            fn,
-                            lineno,
-                            width or " or ".join(str(a) for a in allowed),
-                            "chromosome, SNP id, cM, position, A1, A2"
-                            if is_bim
-                            else "chromosome, SNP id, [cM,] position",
-                            len(r),
-                        )
+                        % (fn, lineno, need, fields, len(r))
                     )
-            chunk = [np.array(c, dtype=str) for c in zip(*rows)]
-            if width == 3:  # chrom snp bp
-                chunk[2] = chunk[2].astype(np.int64)
-            else:
-                chunk[2] = chunk[2].astype(np.float64)
-                chunk[3] = chunk[3].astype(np.int64)
+                rows.append(r)
+            cols = list(zip(*(r[:width] for r in rows)))
+            bp_col = cols[2] if width == 3 else cols[3]
+            bp, bad = _parse_bp(bp_col)
+            if bad:
+                n_bad_bp += len(bad)
+                if not bad_bp:
+                    bad_bp.append((first + bad[0], bp_col[bad[0]]))
+            # Chromosome codes repeat: one str object per distinct code.
+            chunk = [_text([sys.intern(x) for x in cols[0]]), _text(cols[1]), bp]
+            if width != 3:
+                chunk.append(_parse_cm(cols[2]))
+            if width == 6:
+                chunk += [_text(cols[4]), _text(cols[5])]
             chunks.append(chunk)
+    if n_bad_bp:
+        log.warning(
+            "%s: %d position(s) are not integers and are -1 in the variant metadata (first: line "
+            "%d, %r)",
+            fn,
+            n_bad_bp,
+            bad_bp[0][0],
+            bad_bp[0][1],
+        )
     if not chunks:
         return Variants.from_names([])
     c = [np.concatenate(col) for col in zip(*chunks)]
     if width == 3:
         return Variants(chrom=c[0], snp=c[1], bp=c[2])
     if width == 4:
-        return Variants(chrom=c[0], snp=c[1], cm=c[2], bp=c[3])
-    return Variants(chrom=c[0], snp=c[1], cm=c[2], bp=c[3], a1=c[4], a2=c[5])
+        return Variants(chrom=c[0], snp=c[1], cm=c[3], bp=c[2])
+    return Variants(chrom=c[0], snp=c[1], cm=c[3], bp=c[2], a1=c[4], a2=c[5])
 
 
 if TYPE_CHECKING:

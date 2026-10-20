@@ -60,9 +60,9 @@ The SNPs of one chromosome, as a boolean mask over the variants:
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, overload
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -89,13 +89,47 @@ class Variant(NamedTuple):
     a2: str | None
 
 
-def _column(values: ArrayLike | None, dtype: Any, name: str, m: int) -> NDArray[Any] | None:
-    """`values` as a 1-d array of `dtype` and length `m`, or None."""
-    if values is None:
-        return None
-    a = np.asarray(values, dtype=dtype)
+def _text_column(values: ArrayLike) -> NDArray[np.object_]:
+    """`values` as an array of Python ``str`` objects (dtype object).
+
+    An object array costs one pointer per entry plus each string's own size,
+    whereas a fixed-width ``<U`` array is as wide as its longest string: one
+    300-bp indel allele in a million-SNP ``.bim`` would make a 1.2 GB column.
+    An object array is taken as it is (its entries are assumed to be str).
+    """
+    if isinstance(values, np.ndarray) and values.dtype == object:
+        return values
+    if isinstance(values, np.ndarray) and values.dtype.kind == "U":
+        return values.astype(object)  # entries become str
+    seq = list(cast(Iterable[Any], values))
+    a = np.empty(len(seq), dtype=object)
+    a[:] = [str(x) for x in seq]
+    return a
+
+
+def _bp_column(values: ArrayLike) -> NDArray[np.int64]:
+    """`values` as int64 positions; ValueError for a non-integral or non-numeric value."""
+    a = np.asarray(values)
+    if a.dtype.kind in "iub":
+        return a.astype(np.int64, copy=False)
+    try:
+        f = a.astype(np.float64)
+    except (TypeError, ValueError):
+        raise ValueError("Variants.bp: positions must be integers") from None
+    bad = ~np.isfinite(f) | (f != np.floor(f))
+    if bad.any():
+        raise ValueError(
+            "Variants.bp: positions must be integers, got %r" % (a.reshape(-1)[np.argmax(bad)],)
+        )
+    return f.astype(np.int64)
+
+
+def _readonly(a: NDArray[Any], name: str, m: int) -> NDArray[Any]:
+    """A read-only view of the 1-d array `a` of length `m` (the caller's array stays writeable)."""
     if a.ndim != 1 or len(a) != m:
         raise ValueError("Variants.%s has shape %s, expected (%d,) like snp" % (name, a.shape, m))
+    a = a.view()
+    a.flags.writeable = False
     return a
 
 
@@ -105,8 +139,10 @@ class Variants:
 
     The columns are those of a PLINK ``.bim`` file.  Only ``snp`` is required;
     any other column may be None when the source does not have it.  Columns
-    are converted to numpy arrays (``str`` for the text columns, float64 for
-    ``cm``, int64 for ``bp``) of one length.
+    are converted to read-only numpy arrays of one length: the text columns
+    (``snp``, ``chrom``, ``a1``, ``a2``) to arrays of Python ``str`` (dtype
+    object, so one long allele or ID does not widen the whole column),
+    ``cm`` to float64 and ``bp`` to int64.
 
     Parameters
     ----------
@@ -117,7 +153,8 @@ class Variants:
     cm : array_like of float, optional
         Genetic position (centimorgans).
     bp : array_like of int, optional
-        Base-pair position.
+        Base-pair position.  Floats are accepted if integral (``100.0``);
+        anything else raises ValueError.
     a1, a2 : array_like of str, optional
         Alleles.  pylmm's genotype is the fraction of copies of ``a2``.
 
@@ -126,7 +163,9 @@ class Variants:
     ``len(variants)`` is the number of SNPs.  Indexing with an int gives a
     `Variant`; indexing with a slice, a boolean mask or an index array gives
     a new `Variants` (``variants[variants.chrom == "2"]``).  A slice shares
-    memory with the original, like any numpy slice.
+    memory with the original, like any numpy slice.  The columns are
+    read-only views, so the metadata cached by a reader cannot be changed by
+    accident; copy a column (``variants.chrom.copy()``) to edit it.
 
     Examples
     --------
@@ -141,32 +180,41 @@ class Variants:
     Variant(chrom=None, snp='SNP_1', cm=None, bp=None, a1=None, a2=None)
     """
 
-    snp: NDArray[np.str_]
-    chrom: NDArray[np.str_] | None = None
+    snp: NDArray[np.object_]
+    chrom: NDArray[np.object_] | None = None
     cm: NDArray[np.float64] | None = None
     bp: NDArray[np.int64] | None = None
-    a1: NDArray[np.str_] | None = None
-    a2: NDArray[np.str_] | None = None
+    a1: NDArray[np.object_] | None = None
+    a2: NDArray[np.object_] | None = None
 
     def __post_init__(self) -> None:
-        snp = np.asarray(self.snp, dtype=str)
-        if snp.ndim != 1:
-            raise ValueError("Variants.snp must be 1-d, got shape %s" % (snp.shape,))
+        if np.ndim(self.snp) != 1:
+            raise ValueError("Variants.snp must be 1-d, got shape %s" % (np.shape(self.snp),))
+        snp = _text_column(self.snp)
         m = len(snp)
-        object.__setattr__(self, "snp", snp)
-        for name, dtype in (
-            ("chrom", str),
-            ("cm", np.float64),
-            ("bp", np.int64),
-            ("a1", str),
-            ("a2", str),
-        ):
-            object.__setattr__(self, name, _column(getattr(self, name), dtype, name, m))
+        object.__setattr__(self, "snp", _readonly(snp, "snp", m))
+        for name in ("chrom", "cm", "bp", "a1", "a2"):
+            values = getattr(self, name)
+            if values is None:
+                continue
+            a: NDArray[Any]
+            if name == "cm":
+                a = np.asarray(values, dtype=np.float64)
+            elif name == "bp":
+                a = _bp_column(values)
+            else:
+                if np.ndim(values) != 1:
+                    raise ValueError(
+                        "Variants.%s has shape %s, expected (%d,) like snp"
+                        % (name, np.shape(values), m)
+                    )
+                a = _text_column(values)
+            object.__setattr__(self, name, _readonly(a, name, m))
 
     @classmethod
     def from_names(cls, names: Sequence[str]) -> Variants:
         """Variants with SNP IDs only (every other column None)."""
-        return cls(snp=np.asarray(names, dtype=str))
+        return cls(snp=names)  # type: ignore[arg-type]
 
     def __len__(self) -> int:
         return len(self.snp)
@@ -219,8 +267,18 @@ class GenotypeSource(Protocol):
     num_samples : int
         ``len(sample_ids)``, the rows of a block.
     variants : Variants
-        Metadata of every SNP, in the order the blocks return them.
+        Metadata of every SNP, in the order the blocks return them;
+        ``len(variants)`` is the number of SNPs.
+    norm_genotype : bool
+        Whether the blocks are standardised: each SNP (column) mean-imputed,
+        centred and scaled to unit variance by `normalize_genotype` (an
+        all-missing SNP stays all nan, a constant one is all zeros).  If
+        false, blocks hold the source's raw values, nan where missing (for
+        PLINK input the fraction of A2 alleles, 0 / 0.5 / 1).
     """
+
+    @property
+    def norm_genotype(self) -> bool: ...
 
     @property
     def sample_ids(self) -> Sequence[SampleID] | Sequence[int]: ...
@@ -287,7 +345,7 @@ def normalize_genotype(G: NDArray[np.float64]) -> NDArray[np.float64]:
     called = G[x]
     # All missing: return the all-nan SNP unchanged (length n), which the
     # CLIs then skip.  It used to return an empty array (bug 11).
-    if not len(called):
+    if not called.size:
         return G
     m = called.mean()
     # A SNP that is constant up to rounding (e.g. an EMMA dosage) is
@@ -301,7 +359,7 @@ def normalize_genotype(G: NDArray[np.float64]) -> NDArray[np.float64]:
         s = 1.0
     else:
         s = np.sqrt(var)
-    if len(called) < len(G):  # mean-impute the missing calls (on a copy)
+    if called.size < G.size:  # mean-impute the missing calls (on a copy)
         G = np.where(x, G, m)
     if s == 0:
         G = G - m
