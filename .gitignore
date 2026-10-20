@@ -8,3 +8,11 @@ sims/results/**/raw/
 sims/results/**/quick/
 # `just readme-example` output
 readme-example/
+# Build, tool caches, notebooks and OS files
+.DS_Store
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
