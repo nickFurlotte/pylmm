@@ -95,13 +95,14 @@ bone mineral density; Bennett et al. 2010, HDL cholesterol) from their phenotype
 
 The files in `data/` are third-party research data. They are **not covered by the MIT licence of the
 pylmm code**, and this repository does not grant a licence for them. They are redistributed, as they have
-been since 2013, as public research data so that the examples and tests run; no other licence terms are
+been since 2012–13, as public research data so that the examples and tests run; no other licence terms are
 known to this repository. If you use them in your own work, cite the original sources:
 
-* **HMDP genotypes** (`hmdp.liver.snps`, the pickles and kinship derived from it, and the positions and
-  alleles in `hmdp.liver.snps.map.tsv`): the Broad Institute mouse HapMap / wild-type genotype data,
-  <https://data.broadinstitute.org/mouse/hapmap/>, file `Merged_Hapmap_WT_Genotypes.txt.gz` (see
-  "Origin and build" above).
+* **HMDP genotypes and strains** (`hmdp.liver.snps`, the pickles and kinship derived from it,
+  `hmdp.liver.strains`, and the positions and alleles in `hmdp.liver.snps.map.tsv`): the genotypes match
+  the Broad Institute mouse HapMap / wild-type genotype file `Merged_Hapmap_WT_Genotypes.txt.gz`,
+  <https://data.broadinstitute.org/mouse/hapmap/> (see "Origin and build" above); cite that resource for
+  them. The map's positions and alleles are taken from it.
 * **HMDP liver expression** (`hmdp.liver.exprs`, `hmdp.liver.exprs.1`): no source is recorded with the
   files. The HMDP liver expression study of Bennett et al. 2010 (*Genome Research* 20:281; GEO
   [GSE16780](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE16780)) is the published dataset of
