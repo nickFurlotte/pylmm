@@ -37,6 +37,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -441,8 +442,20 @@ BUILDERS = {
 # ---------------------------------------------------------------------------
 
 
+# An absolute path up to a repo package directory, e.g. "/opt/clone/pylmm/lmm.py:220"
+# -> "pylmm/lmm.py:220", so the summary never records the machine-specific checkout path.
+_ABS_TO_REPO = re.compile(
+    r"(?:[A-Za-z]:)?[\\/]\S*[\\/]"  # the absolute prefix (greedy: up to the last match)
+    r"(?=(?:pylmm|sims|tests)[\\/](?:[\w.-]+[\\/])*[\w.-]+\.py)"  # a repo .py path follows
+)
+
+
+def _relpaths(s):
+    return _ABS_TO_REPO.sub("", s)
+
+
 def _err(e):
-    return ("%s: %s" % (type(e).__name__, " ".join(str(e).split())))[:160]
+    return _relpaths("%s: %s" % (type(e).__name__, " ".join(str(e).split())))[:160]
 
 
 def _impute(G):
@@ -459,7 +472,8 @@ def _warn_summary(ws):
     if not ws:
         return 0, ""
     w = ws[0]
-    return len(ws), ("%s: %s" % (w.category.__name__, " ".join(str(w.message).split())))[:120]
+    msg = "%s: %s" % (w.category.__name__, " ".join(str(w.message).split()))
+    return len(ws), _relpaths(msg)[:120]
 
 
 def run_lib(P, impute):
@@ -605,7 +619,7 @@ def run_cli(P, remove):
         lines = [ln for ln in err.strip().splitlines() if ln.strip()]
         warns = [ln for ln in lines if "Warning" in ln]
         out["n_warn"] = len(warns)
-        out["warn_first"] = warns[0].strip()[:120] if warns else ""
+        out["warn_first"] = _relpaths(warns[0].strip())[:120] if warns else ""
         for ln in lines:
             if "heritability=" in ln:
                 with contextlib.suppress(ValueError):
@@ -613,7 +627,7 @@ def run_cli(P, remove):
         if rc != 0:
             out["crash"] = 1
             out["clean_error"] = int(rc == 2 and "error:" in err)
-            out["crash_err"] = (lines[-1].strip() if lines else "rc=%d" % rc)[:160]
+            out["crash_err"] = _relpaths(lines[-1].strip() if lines else "rc=%d" % rc)[:160]
         else:
             fn = os.path.join(d, "out.txt")
             try:
