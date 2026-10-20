@@ -52,7 +52,8 @@ Y = X0 b + x a + u + e,    u ~ N(0, h s2 K),    e ~ N(0, (1 - h) s2 I)
 * REML is the default everywhere (`reml=True`, `--reml`); `reml=False` / `--ml` is maximum likelihood.
 
 The modules: `pylmm.lmm` (`calculate_kinship`, `LMM`, `gwas`), `pylmm.plink_io` (`PlinkReader`),
-`pylmm.samples` (sample IDs and alignment), `pylmm.misc` (`fit_two`, two kinships). Their docstrings are
+`pylmm.genotypes` (variant metadata, `ArraySource`, the `GenotypeSource` interface), `pylmm.samples`
+(sample IDs and alignment), `pylmm.misc` (`fit_two`, two kinships). Their docstrings are
 complete (numpydoc, with examples): `help(pylmm.lmm.LMM)`.
 
 ## 3. Loading data
@@ -93,9 +94,42 @@ print(name, np.unique(g_raw[~np.isnan(g_raw)]), int(np.isnan(g_raw).sum()), "mis
 assert set(np.unique(g_raw[~np.isnan(g_raw)])) <= {0.0, 0.5, 1.0}
 ```
 
-To keep the chromosome and position (PlinkReader keeps only the SNP ID), read the `.bim` yourself; its
-lines are in the order the reader iterates. `skills/convert-genotype-formats/scripts/plink_tools.py` has
-`read_bim`, plus BED writing and subsetting helpers that pylmm itself does not have:
+**Variant metadata.** `reader.variants` holds the `.bim` columns of every SNP, in iteration order, as
+read-only numpy arrays: `chrom`, `snp`, `cm`, `bp`, `a1`, `a2` (a `pylmm.genotypes.Variants`; read once, on
+first use; a cM of `NA` is nan, a position that is not an integer is -1, with a logged warning).
+`variants[k]` is one SNP as a `Variant` named tuple; a boolean mask selects SNPs, e.g. a chromosome.
+For a TPED file the columns come from its `.bim`, or from its `.map` (no alleles); EMMA input has SNP
+names only (`SNP_1`, ...), the other columns are `None`.
+
+```python
+with PlinkReader(BED) as reader:
+    variants = reader.variants
+print(len(variants), variants[0])
+assert variants.snp[:2000].tolist() == snp_names
+on_chr2 = variants.chrom == "2"            # boolean mask over all SNPs
+print(int(on_chr2.sum()), "SNPs on chromosome 2, from bp", variants.bp[on_chr2].min())
+```
+
+**Blocks of SNPs.** `reader.iter_blocks(block_size)` yields `(G, variants)`: `G` is an `(n, b)` float64
+matrix of `b <= block_size` SNPs (the same values as `iter_snps`, bit for bit, standardised or not) and
+`variants` is the metadata of those SNPs. A BED file is decoded a block at a time, 2-6x faster than
+one SNP at a time (but only up to 1.6x when standardising, which then takes most of the time). A block is
+`8 * n * block_size` bytes (default 1024 SNPs: 10 MB for 1219 mice); pick a smaller block for a very
+large `n`. Process a genome block by block instead of building the full matrix:
+
+```python
+with PlinkReader(BED) as reader:
+    G, v = next(reader.iter_blocks(500))
+    assert np.array_equal(G, W[:, :500])     # the first 500 SNPs of W above
+    sq = {}                                  # sum of squared standardised values per chromosome
+    for G, v in itertools.islice(reader.iter_blocks(4096), 3):
+        for c in np.unique(v.chrom):
+            sq[c] = sq.get(c, 0.0) + float((G[:, v.chrom == c] ** 2).sum())
+print(G.shape, v.snp[0], sorted(sq))
+```
+
+`skills/convert-genotype-formats/scripts/plink_tools.py` has BED writing and subsetting helpers that pylmm
+itself does not have (and `read_bim`, which returns the same columns as a dict):
 
 ```python
 import sys
@@ -103,8 +137,7 @@ sys.path.insert(0, "skills/convert-genotype-formats/scripts")
 import plink_tools
 
 bim = plink_tools.read_bim(BED)            # chrom, snp, cm, pos, a1, a2 arrays
-assert list(bim["snp"][:2000]) == snp_names
-print(bim["chrom"][0], bim["pos"][0], bim["a1"][0], bim["a2"][0])
+assert np.array_equal(bim["pos"], variants.bp) and np.array_equal(bim["a2"], variants.a2)
 ```
 
 ### Other genotype formats
@@ -117,11 +150,24 @@ print(bim["chrom"][0], bim["pos"][0], bim["a1"][0], bim["a2"][0])
   chromosome, build-37 position and alleles (see `data/README.md`).
 * VCF, BCF, BGEN, PGEN, VCF Zarr, Hail: convert to BED first, see the `convert-genotype-formats` skill.
 * Any genotype matrix you already have in numpy works directly with `calculate_kinship`, `LMM` and `gwas`.
+  To pass it to code written for blocks (`iter_blocks`), wrap it in `pylmm.genotypes.ArraySource(G,
+  sample_ids=..., variants=..., norm_genotype=True)`: the same interface as `PlinkReader`
+  (`sample_ids`, `num_samples`, `variants`, `iter_blocks`; the `GenotypeSource` protocol), with the same
+  per-SNP standardisation.
 
 ```python
 with PlinkReader("data/hmdp.liver.snps", type="emma") as emma:
     G_emma = np.column_stack([g for g, _ in itertools.islice(emma.iter_snps(), 100)])
 print(G_emma.shape, emma.indivs[:3])       # (94, 100) [0, 1, 2]
+
+from pylmm.genotypes import ArraySource, Variants
+
+counts = np.random.default_rng(1).binomial(2, 0.3, size=(50, 8)).astype(float)   # e.g. from a VCF
+source = ArraySource(counts, sample_ids=[("F%d" % i, "I%d" % i) for i in range(50)],
+                     variants=Variants(snp=["v%d" % j for j in range(8)], chrom=["1"] * 4 + ["2"] * 4,
+                                       bp=np.arange(8) * 1000))
+for G, v in source.iter_blocks(5):         # standardised, like PlinkReader's default
+    print(G.shape, v.snp.tolist())
 ```
 
 ### Phenotypes and covariates
@@ -432,7 +478,9 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
   individual is dropped or reordered (otherwise it is ignored, with a warning).
 * SNPs with missing calls under `--remove-missing-genotypes` (or library `gwas`) each cost an
   eigendecomposition; `--refit` costs a likelihood search per SNP.
-* Process SNPs in blocks with `islice` rather than building a full genotype matrix.
+* Process SNPs in blocks with `reader.iter_blocks(block_size)` rather than building a full genotype matrix;
+  for a BED file it also decodes 2-6x faster than `iter_snps` (unstandardised; 1.0-1.6x standardised, where
+  the per-SNP standardisation dominates; `sims/bench/bed_blocks.py` measures it).
 
 ```bash
 pylmm kinship --bfile mini -o mini.kin --eigen-npz mini.eig.npz -v
