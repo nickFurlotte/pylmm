@@ -10,23 +10,31 @@ maps them).
 
 ### Added
 - Variant metadata: `PlinkReader.variants` -> the `.bim` columns of every SNP (`chrom`, `snp`, `cm`, `bp`,
-  `a1`, `a2`) as a `pylmm.genotypes.Variants` (numpy columns; `variants[k]` is a `Variant` named tuple).
-  Before, the reader kept only the SNP ID. For a TPED file the columns come from its `.bim`, or from its
-  `.map` (no alleles); EMMA input has SNP names (`SNP_<k>`) only. A malformed `.bim`/`.map` line raises
-  `InputError` when the metadata is read.
+  `a1`, `a2`) as a `pylmm.genotypes.Variants`: read-only numpy columns (text as Python `str` objects, `cm`
+  float64, `bp` int64); `variants[k]` is a `Variant` named tuple. Before, the reader kept only the SNP ID.
+  For a TPED file the columns come from its `.bim`, or from its `.map` (4 columns, or 3 without cM; no
+  alleles); EMMA input has SNP names (`SNP_<k>`) only. The file is read on first use, leniently: fields after
+  the 6th (`.bim`) or 4th (`.map`) are ignored, a cM that is not a number (`NA`) is nan, a position written
+  as an integral float (`100.0`, `1.5e2`) is that integer, and any other non-integer position is -1 with one
+  logged warning (file, first line, count). A `.bim` line with fewer than 6 fields, a `.map` line whose width
+  differs from the first line's, or a blank line raises `InputError` naming the file and line, when the
+  metadata (or `iter_blocks`) is first needed; `iter_snps` does not read these columns and is unchanged.
 - Blocks of SNPs: `PlinkReader.iter_blocks(block_size=1024)` yields `(G, variants)`, `G` float64
-  `(len(indivs), b)`, bit for bit the vectors of `iter_snps` (standardised or not). A BED file is decoded a
-  block at a time: 3-5x the throughput of `iter_snps` unstandardised, 1.3-1.6x standardised
-  (`sims/bench/bed_blocks.py`). `iter_snps` and the CLI output are unchanged.
+  `(len(indivs), b)`, bit for bit the vectors of `iter_snps` (standardised or not), for the individuals and
+  `norm_genotype` of the time of the call. A BED file is decoded a block at a time: with the `.bim` read in
+  both, 2.3-6.0x the throughput of `iter_snps` unstandardised and 1.0-1.6x standardised (block sizes 256 to
+  4096, full and `--quick` runs of `sims/bench/bed_blocks.py`). `iter_snps` and the CLI output are
+  unchanged.
 - `pylmm.genotypes`: the `GenotypeSource` protocol (`sample_ids`, `num_samples`, `variants`,
-  `iter_blocks`), implemented by `PlinkReader` and by the new `ArraySource`, which wraps an in-memory
+  `norm_genotype`, `iter_blocks`), implemented by `PlinkReader` and by the new `ArraySource`, which wraps an in-memory
   `(n, m)` genotype matrix (e.g. read from VCF, BGEN or VCF Zarr with another library) with optional IDs and
   metadata. `normalize_genotype` is now also a function there (`PlinkReader.normalize_genotype` calls it).
 - `sims/bench/`: Phase 6 benchmarks; `python -m sims.bench.bed_blocks [--quick]`.
 
 ### Changed
 - `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
-  bit for bit unchanged.
+  bit for bit unchanged for one SNP (1-d input, the documented use; 2-d input also gives the 1.0.0 result,
+  tested on a few arrays).
 
 ## [1.0.0] - 2026-10-19
 

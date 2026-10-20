@@ -95,8 +95,9 @@ assert set(np.unique(g_raw[~np.isnan(g_raw)])) <= {0.0, 0.5, 1.0}
 ```
 
 **Variant metadata.** `reader.variants` holds the `.bim` columns of every SNP, in iteration order, as
-numpy arrays: `chrom`, `snp`, `cm`, `bp`, `a1`, `a2` (a `pylmm.genotypes.Variants`; read once, on first
-use). `variants[k]` is one SNP as a `Variant` named tuple; a boolean mask selects SNPs, e.g. a chromosome.
+read-only numpy arrays: `chrom`, `snp`, `cm`, `bp`, `a1`, `a2` (a `pylmm.genotypes.Variants`; read once, on
+first use; a cM of `NA` is nan, a position that is not an integer is -1, with a logged warning).
+`variants[k]` is one SNP as a `Variant` named tuple; a boolean mask selects SNPs, e.g. a chromosome.
 For a TPED file the columns come from its `.bim`, or from its `.map` (no alleles); EMMA input has SNP
 names only (`SNP_1`, ...), the other columns are `None`.
 
@@ -111,8 +112,8 @@ print(int(on_chr2.sum()), "SNPs on chromosome 2, from bp", variants.bp[on_chr2].
 
 **Blocks of SNPs.** `reader.iter_blocks(block_size)` yields `(G, variants)`: `G` is an `(n, b)` float64
 matrix of `b <= block_size` SNPs (the same values as `iter_snps`, bit for bit, standardised or not) and
-`variants` is the metadata of those SNPs. A BED file is decoded a block at a time, several times faster
-than one SNP at a time (standardising each SNP then takes most of the time). A block is
+`variants` is the metadata of those SNPs. A BED file is decoded a block at a time, 2-6x faster than
+one SNP at a time (but only up to 1.6x when standardising, which then takes most of the time). A block is
 `8 * n * block_size` bytes (default 1024 SNPs: 10 MB for 1219 mice); pick a smaller block for a very
 large `n`. Process a genome block by block instead of building the full matrix:
 
@@ -478,7 +479,7 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
 * SNPs with missing calls under `--remove-missing-genotypes` (or library `gwas`) each cost an
   eigendecomposition; `--refit` costs a likelihood search per SNP.
 * Process SNPs in blocks with `reader.iter_blocks(block_size)` rather than building a full genotype matrix;
-  for a BED file it also decodes 3-5x faster than `iter_snps` (unstandardised; 1.3-1.6x standardised, where
+  for a BED file it also decodes 2-6x faster than `iter_snps` (unstandardised; 1.0-1.6x standardised, where
   the per-SNP standardisation dominates; `sims/bench/bed_blocks.py` measures it).
 
 ```bash
