@@ -295,6 +295,19 @@ t_null, p_null = model.association(W[:, 1500])   # t and p only
   `pylmm.lmm.snp_estimable(x, X0)` does, as `gwas` does for you.
 * `fit(X=x)` followed by `association(x)` is the per-SNP refit.
 
+`association_batch` runs the same test on many complete SNPs at once: it rotates the whole block with
+one matrix product and fits each SNP in closed form against the null model, so it is many times faster
+than a loop over `association` and gives the same numbers up to rounding (about 1e-10 relative at
+worst). It returns arrays `t, p, beta, beta_var`. Like `association` it does not check estimability or
+handle `nan`.
+
+```python
+res = model.association_batch(W[:, 1490:1510])
+t_loop = [model.association(W[:, j])[0] for j in range(1490, 1510)]
+assert np.allclose(res.t, t_loop, rtol=1e-9)
+print("se of the first:", np.sqrt(res.beta_var[0]))
+```
+
 ## 7. Scans with `gwas`
 
 `gwas(Y, X, K)` tests every column of `X` and returns two lists, t statistics and p-values (`nan` for a SNP
@@ -303,7 +316,7 @@ that cannot be tested: constant, collinear with the covariates, all missing).
 ```python
 from pylmm.lmm import gwas
 
-ts, ps = gwas(Y, W, K, kva, kve)           # null fit once, REML; ~1 s for 2000 SNPs
+ts, ps = gwas(Y, W, K, kva, kve)           # null fit once, REML
 ps = np.asarray(ps)
 top = np.argsort(ps)[:3]
 print([(snp_names[j], "%.1e" % ps[j]) for j in top])
@@ -327,6 +340,16 @@ print("max |t| change without the intercept: %.2f" % np.nanmax(np.abs(np.subtrac
 but `X0` must be complete on the individuals with a phenotype, so drop or impute missing covariates first,
 as above. Other options: `reml=False` (ML everywhere), `refit=True`, and `ids=` / `kinship_ids=` to have
 `gwas` check that Y and K list the same individuals in the same order.
+
+**Speed.** `gwas` tests the complete SNPs (no `nan`) in blocks of `block_size=1000` with
+`LMM.association_batch` (section 6); SNPs with missing calls, and every SNP with `refit=True`, are tested
+one at a time. `batch=False` tests every SNP one at a time, the code path of pylmm 1.0.0: slower, same
+numbers up to rounding. `pylmm gwas --block-size N` and `--no-batch` do the same on the command line.
+
+```python
+ts_one, _ = gwas(Y, W[:, :200], K, kva, kve, batch=False)
+assert np.allclose(ts[:200], ts_one, rtol=1e-9, equal_nan=True)
+```
 
 ## 8. Missing genotypes
 

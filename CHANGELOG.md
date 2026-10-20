@@ -2,11 +2,43 @@
 
 All notable user-visible changes to pylmm. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmm gwas`, formerly `pylmmGWAS`,
-without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below. Entries written
+without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below, except in the last
+digits by the batched tests of [Unreleased] (numerically equal to rounding; see there). Entries written
 before the single `pylmm` command use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
 maps them).
 
 ## [Unreleased]
+
+### Changed
+
+#### Batched association tests (faster scans, same numbers)
+- `gwas()` and `pylmm gwas` (without `--refit`) test the SNPs without missing calls in blocks: one matrix
+  product rotates a block of SNPs into the eigenbasis of K, and each SNP's GLS fit is computed in closed form
+  against the null model, instead of a matrix-vector product and a small matrix inverse per SNP. One SNP at
+  a time -> blocks of 1000 SNPs. Speedup (single-threaded BLAS, `sims/bench/gwas_batch.py`, an 8-core
+  arm64 laptop): `gwas()` 7-10x at n = 500 (20,000 SNPs) and 19-20x at n = 2000 (10,000 SNPs); `pylmm gwas` on
+  20,000 SNPs of the README data 10.2 s -> 2.8 s (3.7x, the whole command, kinship reading included).
+- Same model, same h, same statistics; only the floating-point order differs. Largest differences, batched
+  vs the old path, in the benchmark: t and beta 5e-13 absolute (up to 2e-9 relative, only for values near
+  0), p 3e-13 absolute (2e-12 relative), se 2e-14 relative; in the tests up to 1e-10 relative (BETA with an
+  EMMA covariate, where the batched value is the closer one to a QR least-squares reference: 2e-12 vs
+  1e-10); nan in the same places. On the README data (first 20,000 SNPs) the output files differ only in
+  the last printed digits (17 of 20,000 lines byte-identical; max relative difference 1.6e-11 in BETA and
+  F_STAT, 3e-14 in P_VALUE); the goldens pass at their existing tolerances.
+- Which SNPs are tested (nan for constant, collinear or untestable SNPs) is unchanged: the block check makes
+  exactly the decisions of `snp_estimable`.
+- SNPs with missing calls (tested on their called individuals) and `refit=True` / `--refit` still test one SNP
+  at a time.
+
+### Added
+- `LMM.association_batch(X, h=None, reml=True)`: the Wald test of `association(..., return_beta=True)` for
+  every column of `X` at once; returns `AssociationResult(t, p, beta, beta_var)`, arrays.
+- `gwas(..., batch=True, block_size=1000)`: `batch=False` -> one SNP at a time, the 1.0.0 code path;
+  `block_size` bounds the memory of a block (`n * block_size` floats). `pylmm.lmm.GWAS_BLOCK_SIZE` is the default.
+- `pylmm gwas --block-size N` (SNPs read and tested together, default 1000) and `--no-batch` (the 1.0.0
+  one-SNP-at-a-time path).
+- `sims/bench/gwas_batch.py` (`just bench gwas_batch [--quick]`): batched vs per-SNP wall time and
+  differences, synthetic and on the bundled BED file.
 
 ## [1.0.0] - 2026-10-19
 

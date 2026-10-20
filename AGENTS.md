@@ -10,13 +10,13 @@ This file is for coding agents working in this repo or with pylmm; humans should
 
 | path | what |
 |---|---|
-| `pylmm/lmm.py` | the model: `calculate_kinship`, `LMM` (`fit`, `association`), `gwas`, input checks |
+| `pylmm/lmm.py` | the model: `calculate_kinship`, `LMM` (`fit`, `association`, `association_batch`), `gwas`, input checks |
 | `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes; phenotype, covariate, kinship files |
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
 | `pylmm/misc.py` | `fit_two`, two-kinship variance components |
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
 | `tests/` | pytest suite; `tests/golden/` = reference outputs of the original Python 2 code; `tests/helpers.py` = all tolerances |
-| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies) |
+| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies); `sims/bench/`: speed benchmarks (`just bench gwas_batch --quick`) |
 | `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, reports on the Python 2 baseline, the port and the simulation studies, `migration/` maps |
 | `skills/` | agent skills (below); `.claude/skills` links here |
 | `data/` | example data (~215 MB): 1219 mice BED (fake phenotypes), 94-strain HMDP EMMA text; provenance, marker map and checksums in [data/README.md](data/README.md) |
@@ -42,6 +42,7 @@ just lint             # ruff check + ruff format --check (CI runs the same)
 just fmt              # apply ruff fixes and formatting
 just typecheck        # mypy on pylmm/, Python 3.11 and 3.14
 just sim example_null --quick   # a simulation study
+just bench gwas_batch --quick   # a benchmark (sims/bench/)
 ```
 
 `uv run pylmm ...` runs the command line from the checkout:
