@@ -1,53 +1,15 @@
 # PyLMM
 
-**PyLMM: a modern, readable, validated mixed-model toolkit for statistical genetics — built to be used by
+**PyLMM: a modern, readable mixed-model toolkit for statistical genetics — built to be used by
 humans and agents.**
 
-PyLMM fits linear mixed models (LMMs) for genome-wide association studies (GWAS) and heritability. In
-genetic association studies, individuals may be related or share population structure, which produces
-misleading associations if it is ignored. A mixed model accounts for it through a kinship matrix of genetic
-similarity between individuals:
+PyLMM fits linear mixed models (LMMs) for genome-wide association studies (GWAS) and heritability estimation. In
+genetic association studies, individuals may be related or share population structure, which can produce
+misleading associations if ignored. A mixed model accounts for this relatedness by modeling the genetic 
+contribution to a trait as a variance component with variance proportional to the genetic relatedness or kinship matrix.
 
-```text
-Y = X0 b + x a + u + e,    u ~ N(0, h s2 K),    e ~ N(0, (1 - h) s2 I)
-```
-
-with a Wald t test of each SNP `x`. PyLMM provides:
-
-- **GWAS:** test variants for association with a phenotype, accounting for relatedness and population
-  structure (REML by default, optional per-SNP variance refit, covariates, missing genotypes).
-- **Heritability:** the null model gives the SNP heritability `h` and the variance components.
-- **Kinship:** genetic similarity matrices from genotype data.
-- **Command line:** `pylmm gwas` and `pylmm kinship` on PLINK BED/TPED or EMMA files, with samples
-  matched by ID.
-- **Python library:** `LMM`, `gwas`, `calculate_kinship` and `PlinkReader` for custom analyses.
-
-The code favours being easy to read and check over speed: numpy and scipy only, type-annotated, with
+The PyLMM code favours being easy to read and understand over speed: numpy and scipy only, type-annotated, with
 documentation whose examples run in CI.
-
-## Validated
-
-- **Against the original code.** The test suite checks the outputs against reference outputs of the
-  original 2013 Python 2 pylmm ([tests/golden/](tests/golden/)), with fixed tolerances. The Python 3 port
-  matched them to within 5.1e-8 relative for every fitted quantity and 4.2e-7 absolute for per-SNP
-  statistics ([docs/phase3-port.md](docs/phase3-port.md)). Deliberate changes since, such as bug fixes, are
-  listed in the [CHANGELOG](CHANGELOG.md).
-- **Simulation studies** with known heritability and causal SNPs, on five genotype structures
-  ([docs/phase4-simulations.md](docs/phase4-simulations.md)). Under a correctly specified model, with the
-  REML null fit and the Wald test, null p-values are calibrated when h² > 0 (type-I error 0.0495–0.0500
-  at α = 0.05, mean χ² 0.99–1.01 over 1,575 replicates), and the Wald t matches an independent
-  implementation to 2e-7. Under population structure pylmm has much more power than ordinary least
-  squares, which is badly inflated there; the design partly favours the LMM, since the simulated
-  polygenic effect is drawn from the same kinship that pylmm fits. The bugs the studies found are fixed
-  or listed under *Known caveats* in [AGENTS.md](AGENTS.md).
-- **Published results** ([docs/replication.md](docs/replication.md)). An agent working only from the docs
-  reanalysed two published mouse GWAS of the Hybrid Mouse Diversity Panel:
-  - *Farber et al. 2011*, bone mineral density: **partially replicated**. All 5 published trait–locus
-    pairs have a signal in the published ±1.3 Mb interval, 3 at the published position. An interval
-    always has a best SNP, so position alone is not a replication, and significance is systematically
-    lower (by 0.47 in −log10 p, median): 1/5 pass Bonferroni and 3/5 the paper's threshold.
-  - *Bennett et al. 2010*, HDL cholesterol: **replicated**, with the same lead SNP (the *Nos1ap* peak on
-    chromosome 1); −log10 p 11.5 with a per-SNP refit (7.9–9.0 without the refit) vs 9.4 published.
 
 ## Install
 
@@ -131,6 +93,30 @@ Python 3 modernisation. Version 1.0 is a rewrite by the original author: Python 
 line, and validation against the original code and published results. The rewrite was done with Claude
 Code (AI-assisted); every change went through code review (AI reviewers and the author), was tested
 against the outputs of the original Python 2 code and was checked in simulations.
+
+## Validating the python3 port.
+
+- **Against the original code.** The test suite checks the outputs against reference outputs of the
+  original 2013 Python 2 pylmm ([tests/golden/](tests/golden/)), with fixed tolerances. The Python 3 port
+  matched them to within 5.1e-8 relative for every fitted quantity and 4.2e-7 absolute for per-SNP
+  statistics ([docs/phase3-port.md](docs/phase3-port.md)). Deliberate changes since, such as bug fixes, are
+  listed in the [CHANGELOG](CHANGELOG.md).
+- **Simulation studies** with known heritability and causal SNPs, on five genotype structures
+  ([docs/phase4-simulations.md](docs/phase4-simulations.md)). Under a correctly specified model, with the
+  REML null fit and the Wald test, null p-values are calibrated when h² > 0 (type-I error 0.0495–0.0500
+  at α = 0.05, mean χ² 0.99–1.01 over 1,575 replicates), and the Wald t matches an independent
+  implementation to 2e-7. Under population structure pylmm has much more power than ordinary least
+  squares, which is badly inflated there; the design partly favours the LMM, since the simulated
+  polygenic effect is drawn from the same kinship that pylmm fits. The bugs the studies found are fixed
+  or listed under *Known caveats* in [AGENTS.md](AGENTS.md).
+- **Published results** ([docs/replication.md](docs/replication.md)). An agent working only from the docs
+  reanalysed two published mouse GWAS of the Hybrid Mouse Diversity Panel:
+  - *Farber et al. 2011*, bone mineral density: **partially replicated**. All 5 published trait–locus
+    pairs have a signal in the published ±1.3 Mb interval, 3 at the published position. An interval
+    always has a best SNP, so position alone is not a replication, and significance is systematically
+    lower (by 0.47 in −log10 p, median): 1/5 pass Bonferroni and 3/5 the paper's threshold.
+  - *Bennett et al. 2010*, HDL cholesterol: **replicated**, with the same lead SNP (the *Nos1ap* peak on
+    chromosome 1); −log10 p 11.5 with a per-SNP refit (7.9–9.0 without the refit) vs 9.4 published.
 
 ## Links
 
