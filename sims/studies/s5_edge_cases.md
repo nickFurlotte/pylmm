@@ -6,6 +6,8 @@ Study code: `sims/studies/s5_edge_cases.py`. Full table (161 cases, one row each
 outcome over 6 replicates): `sims/results/s5_edge_cases/summary.md` / `summary.csv`.
 Reproduce: `just sim s5_edge_cases --jobs 6` then `just sim-report s5_edge_cases`
 (`--quick`: 22 cells, about 5 s).
+The `warn` texts in the committed `summary.csv` had their absolute paths shortened after they were
+truncated to 120 characters, so a rerun (which shortens first) shows longer texts.
 
 pylmm as on `phase4-sims-framework` was run unchanged. Nothing here modifies `pylmm/`.
 
@@ -268,5 +270,5 @@ Fix: copy inside both functions.
 - Runtime: every library cell takes under 0.2 s and a CLI cell about 0.7 s (mostly Python and
   scipy start-up). No case showed a runtime problem at n = 100.
 - Cost of the study: quick (22 cells) about 5 s. Full grid, 161 cells x 6 replicates =
-  978 tasks: sum of task time 510 to 640 s (measured at `--jobs 2` on a busy laptop, wall
+  978 tasks: sum of task time 510 to 640 s (measured at `--jobs 2` on a busy machine, wall
   255 to 325 s), so about 2 to 3 min at `--jobs 6`.

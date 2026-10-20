@@ -28,7 +28,7 @@ merged mouse HapMap / wild-type genotype file, NCBI build 37 (mm9):
 <https://data.broadinstitute.org/mouse/hapmap/> → `Merged_Hapmap_WT_Genotypes.txt.gz`
 (20,446,478 bytes, last modified 2009-02-20, SHA-256 `dd4f80e9e737635c02a9f2f2e843ee3666a91d9b4ed4903ce453128bb126796f`;
 the paper-era URL `http://www.mousehapmap.org/` redirects there over plain HTTP; HTTPS on that hostname
-fails). This was not documented when the data was added; the Phase R replication established it
+fails). This was not documented when the data was added; the replication ([docs/replication.md](../docs/replication.md)) established it
 empirically (2026-10-19): **the same number of rows (132,285)**, and across the 27 strains whose names
 appear in both files, **122,242 informative rows with 0 discordances** between the 0/1 codes and the
 Broad base calls. The other 10,043 rows show one base only in those 27 strains, so they are consistent
@@ -89,7 +89,27 @@ bone mineral density; Bennett et al. 2010, HDL cholesterol) from their phenotype
 | `snps.132k.clean.noX.bed/.bim/.fam` | PLINK 1 BED of 1219 inbred mice (one row per animal: replicate animals of inbred strains, so K has rank about 110) at 98,740 autosomal SNPs. SNP IDs are `mm37-<chr>-<bp>`, positions on build 37; every position is a row of the HMDP marker map. The `.bim` alleles are `1`/`2` (no letters). The `.fam` has numeric FID = IID `1`–`1219` and **no strain labels**. |
 | `snps.132k.clean.noX.fake.phenos` | **FAKE phenotype**: `FID IID value`, one random value per animal, no header. It carries no biology; use it only to exercise the software (README example, tests). It cannot replicate or refute anything. |
 | `snps.132k.clean.noX.pylmm.kin` | 1219 × 1219 kinship of all 98,740 SNPs from the original 2013 code, as text; the README example and the golden tests use it. `pylmm kinship --bfile data/snps.132k.clean.noX` recomputes it. |
-| `snps.132k.clean.noX.pylmm.kin.id` | its ID sidecar (`FID IID` per row, in `.fam` order), added in Phase 5b.1 so `pylmm gwas` aligns the kinship by ID. |
+| `snps.132k.clean.noX.pylmm.kin.id` | its ID sidecar (`FID IID` per row, in `.fam` order), added in 1.0.0 so `pylmm gwas` aligns the kinship by ID. |
+
+## Licence and citation
+
+The files in `data/` are third-party research data. They are **not covered by the MIT licence of the
+pylmm code**, and this repository does not grant a licence for them. They are redistributed, as they have
+been since 2012–13, as public research data so that the examples and tests run; no other licence terms are
+known to this repository. If you use them in your own work, cite the original sources:
+
+* **HMDP genotypes and strains** (`hmdp.liver.snps`, the pickles and kinship derived from it,
+  `hmdp.liver.strains`, and the positions and alleles in `hmdp.liver.snps.map.tsv`): the genotypes match
+  the Broad Institute mouse HapMap / wild-type genotype file `Merged_Hapmap_WT_Genotypes.txt.gz`,
+  <https://data.broadinstitute.org/mouse/hapmap/> (see "Origin and build" above); cite that resource for
+  them. The map's positions and alleles are taken from it.
+* **HMDP liver expression** (`hmdp.liver.exprs`, `hmdp.liver.exprs.1`): no source is recorded with the
+  files. The HMDP liver expression study of Bennett et al. 2010 (*Genome Research* 20:281; GEO
+  [GSE16780](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE16780)) is the published dataset of
+  this kind, but this repository has not verified that the bundled values come from it.
+* **The 1219-animal BED set** (`snps.132k.clean.noX.*`): the original source of the genotypes is not
+  documented (its positions are rows of the HMDP marker map). It ships with **fake phenotypes** and is
+  for software examples and tests only.
 
 ## Checksums (SHA-256)
 

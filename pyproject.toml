@@ -82,8 +82,9 @@ packages = ["pylmm"]
 # The package, its metadata and the sources that need no data: sims/ (code
 # only, not its result tables), skills/ and the notebook, plus the docs that
 # skills/ and AGENTS.md link to (docs/migration/ is read by the
-# migrate-from-old-pylmm script).  Not data/ (~215MB), nor tests/, which
-# needs tests/golden and data/.  An explicit list, because
+# migrate-from-old-pylmm script), and the contributor and security notes.
+# Of data/ (~215MB) only its README (provenance and licence); not tests/,
+# which needs tests/golden and data/.  An explicit list, because
 # hatchling walks the .claude/skills symlink before skills/ and then skips
 # skills/ as already seen.
 only-include = [
@@ -95,11 +96,15 @@ only-include = [
     "docs/guide.md",
     "docs/conventions.md",
     "docs/replication.md",
+    "docs/phase4-simulations.md",
+    "data/README.md",
     "AGENTS.md",
     "CHANGELOG.md",
     "CITATION.cff",
+    "CONTRIBUTING.md",
     "LICENSE",
     "README.md",
+    "SECURITY.md",
 ]
 exclude = ["/sims/results"]
 

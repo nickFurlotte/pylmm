@@ -1,8 +1,9 @@
 # Phase 4: simulation study synthesis
 
 This report pulls together the five Phase 4 studies (S1–S5) on the Python 3
-port of pylmm. It is meant to support decisions: what is statistically sound,
-what fails, and what to fix in Phase 5 and what in Phase 6.3. Each number
+port of pylmm: what is statistically sound, what fails, and which fixes were
+scheduled first (Phase 5) and which later (Phase 6.3); §6 says which of them
+1.0.0 contains. Each number
 below comes from a committed study summary (`sims/results/<study>/summary.*`,
 `sims/studies/<study>.md`) or from `sims/synthesis.py`, whose outputs are in
 [`sims/results/synthesis/`](../sims/results/synthesis/). To reproduce them:
@@ -16,7 +17,7 @@ sample or a CI that is optimistic.
 
 * **On its default path, and under a correctly specified model, pylmm is
   statistically correct.** Every study simulates the polygenic effect from the
-  same K that is fitted (§8), so these are calibration results for an exactly
+  same K that is fitted (§7), so these are calibration results for an exactly
   specified model. With the REML null fit and the Wald test, null p-values
   are calibrated on all five genotype structures when h² > 0. Pooled type-I
   error at α = 0.05 is 0.0495–0.0500, at α = 1e-3 it is (0.93–1.02)×10⁻³,
@@ -87,7 +88,7 @@ sample or a CI that is optimistic.
 cells × replicates, and every task has a deterministic seed. Each replicate
 simulates y = Xβ + Σ βⱼgⱼ + u + e with u ~ N(0, h²σ²K), where K is pylmm's
 own `calculateKinship`, and the same K is then used for the fit, so the
-model is exactly specified (§8). The replicate is fitted with pylmm
+model is exactly specified (§7). The replicate is fitted with pylmm
 (unchanged) and with comparators: OLS, and the oracle. Nothing in `pylmm/`
 was modified.
 
@@ -121,9 +122,9 @@ separate estimator, optimizer and clamp effects.
 | `bed` | S1–S4 | random subsets of the bundled 1,219 mice. 300 or 600 mice are 97 or 108 distinct genotypes, K has rank ≈ 96–109, and the 5,000 test SNPs act like ≈ 18 independent tests (S4 item 18) |
 | `hmdp` | S4 (bug 8) | the 94-strain text data |
 
-**Compute actually used.** Everything ran on one laptop (Apple M1, 8 cores,
-16 GB) with numpy 2.5.4, scipy 1.18.1 and Python 3.13.9. S1–S3 used
-`--jobs 4`; the README cap is 6. Wall time and task time below are from each
+**Compute actually used.** The benchmarks ran on an Apple M1, 8 cores,
+16 GB, with numpy 2.5.4, scipy 1.18.1 and Python 3.13.9. S1–S3 used
+`--jobs 4`; the runner's default cap on that machine is 6. Wall time and task time below are from each
 `summary.md` header.
 
 | study | tasks (cells × reps) | wall | total task CPU |
@@ -519,117 +520,30 @@ Sources: S4 [`ledger.csv`](../sims/results/s4_bug_confirmation/ledger.csv),
 h² = 0.95 has a crash rate of 12.5% over 40 replicates), and the S5 and
 synthesis files cited above.
 
-## 6. Decisions for Nick
+## 6. What was fixed, what is still open
 
-The manager's default recommendation is in bold.
+The last column of the ledger above records where each bug was scheduled at
+the time: "5" for the robustness fixes, "6.3" for result-changing numerics.
 
-1. **Phase 5, first: fix bug 4 and bug 16.**
-   * For bug 4, use `minimize_scalar(method="bounded")` inside the bracketing
-     grid interval, or clip h to [0, 1] in `LL_brent`, and remove the nan
-     fallback. Keeping the 0.99 cap for now leaves every non-crashing result
-     unchanged.
-   * For bug 16, read with `loadtxt`, require shape n × n, symmetry and finite
-     values, and otherwise raise.
-   * *Alternative:* fold bug 4 into the Phase 6.3 closed-interval search. That
-     leaves a crash in the default path for months. Not recommended.
-2. **Bug 1: make REML the explicit default and add a real `--ML`.**
-   * `--REML` becomes a no-op alias, so default outputs and goldens are
-     unchanged.
-   * `--ML` fits the null model and runs the test by ML, consistently, and
-     `--refit` and `--removeMissingGenotypes` follow the same flag (today they
-     silently use ML).
-   * Document that ML is ill-posed with an m > n centred GRM (bug 17).
-   * *Alternative:* make ML the true default, as the old help text says. That
-     changes every default output slightly (|Δt| ≤ 0.04) and exposes
-     ML-specific failures (bug 17) on the default path.
-3. **Result-changing numerics go to Phase 6.3 behind flags, off by default
-   until the goldens are re-baselined.**
-   * Bugs 3 and 2 together (closed [0, 1] search, so ĥ can reach 1).
-   * Bug 8: one normalisation, with the denominator = SNPs kept. This changes
-     every golden ĥ, but no t or p.
-   * Bug 17 handling: warn when K·1 ≈ 0 with rank n−1 under ML.
-4. **Phase 5 input-validation bundle: issues 10, 11, 19–24, 14.** Raise
-   errors, or return nan, where pylmm currently crashes cryptically or returns
-   finite garbage. This changes behaviour only for inputs that are already
-   broken.
-5. **Dead CLI flags: remove `--kfile2` (6) and fix `--eigen` (7)** so it reads
-   what pylmmKinship writes. *Alternative:* implement `--kfile2` via
-   `misc.fitTwo`, which is new functionality and belongs after Phase 6.3.
-6. **Acceptance check: after the bug-4 fix, re-run only the crashed
-   replicates of S1–S3**, about 15 min. The runner only computes
-   replicates missing from `raw/full.jsonl`, and crashed replicates are
-   never written there, so rerunning each study in place
-   (`just sim s1_null_calibration --jobs 4`, likewise S2 and S3) runs exactly
-   the 107 crashed replicates and nothing else; `--cells <id> …` (ids from
-   `python -m sims plan <study>`, or the `cell_id` column of
-   `crash_accounting.csv`) restricts it further. Confirm 0 errors and
-   replicate counts back at 80/12/80, then regenerate the reports and the
-   synthesis. Note that the rerun mixes old-pylmm and fixed-pylmm rows in one
-   file, which is what this check wants (the other replicates did not crash
-   and a bounded search changes them only within the optimizer's tolerance); for any change that alters
-   non-crashing results, bump the study's `STUDY_VERSION` instead, so the
-   whole study reruns and the loaders ignore the old rows.
+* **Fixed in 1.0.0** (each S4 reproducer is now a regression test in
+  [`tests/sims/test_s4_reproducers.py`](../tests/sims/test_s4_reproducers.py),
+  and the S5 robustness cases are in `tests/test_input_validation.py`,
+  `tests/test_kinship_file.py` and `tests/test_h_search.py`): bug 4 (bounded
+  h search, no `BracketError` or nan fallback), bug 16 (kinship files are
+  checked), bug 1 (REML is the explicit default and `--ml` is a real ML
+  path), bugs 6 and 7 (`--kfile2` removed, `--eigen` reads what
+  `pylmm kinship` writes), and the input-validation bundle: bugs 10, 11,
+  12, 14, 19–24, 13 and part of 15, plus the ML Wald test of bug 9.
+* **Still open**, as known issues listed under "Known caveats" in
+  [AGENTS.md](../AGENTS.md): bugs 2 and 3 (the h grid stops at 0.99), bug 8
+  (the two kinship normalisations; monomorphic SNPs counted in `m`), bug 9
+  for `fit()`'s ML σ², bug 5 (`tstat(log=True)`, unreachable) and bug 25
+  (a `LinAlgWarning` for badly scaled covariates; answers correct). Bug 17
+  is a property of ML with a centred K, documented rather than fixed. Their
+  reproducers stay `xfail(strict=True)`: each will XPASS, and so fail the
+  suite, when its fix lands, and the marker must then be removed.
 
-## 7. Phase 5 test targets
-
-These S4 reproducers in
-[`tests/sims/test_s4_reproducers.py`](../tests/sims/test_s4_reproducers.py) are
-`xfail(strict=True)`. Each will XPASS, and so fail the suite, when its fix
-lands. The marker must then be removed and the matching `test_bugN_current_*`
-test inverted.
-
-* Phase 5:
-  * done in Phase 5.1, now regression tests: `test_bug4_fit_with_peak_near_one`
-    and `test_bug16_wrong_size_kinship_rejected`
-  * done in Phase 5.2, now regression tests (the matching
-    `test_bugN_current_*` tests were inverted):
-    `test_bug10_absent_individuals_treated_as_missing`,
-    `test_bug11_cli_gwas_all_missing_snp`,
-    `test_bug11_cli_kinship_all_missing_snp`,
-    `test_bug1_gwas_ml_equals_textbook_ml_wald` (plus `test_bug1_cli_ml_flag`
-    for `--ML`), `test_bug6_kfile2_removed`,
-    `test_bug7_eigen_reads_pylmmkinship_output`,
-    `test_bug12_lmm_does_not_mutate_kva`,
-    `test_bug12_calculatekinship_does_not_mutate_w`,
-    `test_bug14_no_pheno_file_is_a_usage_error`,
-    `test_bug15_gwas_return_type_consistent`
-* Phase 6.3:
-  * `test_bug2_getmax_finds_peak_at_098`
-  * `test_bug3_h_search_reaches_one`
-  * `test_bug3_fittwo_can_select_k1_alone`
-  * `test_bug5_log_p`
-  * `test_bug8_monomorphic_snps_do_not_change_k`
-  * `test_bug8_two_kinships_agree_with_missing_data`
-
-New Phase 5 tests to write (items 2–6 and 8–10 done in Phase 5.2, in
-`tests/test_input_validation.py` and the S4 file). Each is from S5
-([`s5_edge_cases.md`](../sims/studies/s5_edge_cases.md), §"Phase 5 robustness
-targets"), and each has an exact cell in `s5_edge_cases/summary.csv`.
-
-1. A `--kfile` of 95×95 or 105×105 for 100 individuals, or with a `#`
-   header, gives a clear error (P0-1, bug 16). Done in Phase 5.1
-   (`tests/test_kinship_file.py`).
-2. A constant-dosage SNP, or SNP = covariate, gives nan on `GWAS` and both
-   CLI branches, using one `snp_estimable` helper (P0-2, issues 19 and 13).
-3. `X0` with ≥ n−1 columns raises `ValueError` (P0-3, issue 20).
-4. The CLI with and without `--removeMissingGenotypes` gives the same t for
-   complete SNPs, and the same null convention for all SNPs (P0-4, bug 1).
-5. K that is asymmetric, has a nan, or is non-PSD below a tolerance raises an
-   error or a warning that names the most negative eigenvalue (P0-5,
-   issue 21).
-6. A constant or infinite phenotype raises `ValueError` (P0-6, issue 22).
-7. The seed-1177 n = 10 null fit, and `smalln` n = 20, return h at the
-   boundary rather than `BracketError` (P1-7, bug 4). The seed-1177 case is
-   done in Phase 5.1 (`tests/test_h_search.py`; ĥ = 0.961, the interior
-   optimum).
-8. An all-missing SNP gives nan for that SNP, and the scan continues (P1-8,
-   bug 11).
-9. Collinear or duplicate covariates, or a column of ones together with the
-   CLI intercept, give an error that names the columns (P1-9, issue 23).
-10. A pheno file missing a fam individual gives a `ValueError` listing the
-    IDs, and no row shift (P1-10, bug 10).
-
-## 8. Caveats and limits
+## 7. Caveats and limits
 
 * **CIs are optimistic under LD and shared phenotypes.**
   * S1's pooled CIs here are replicate-cluster CIs, which account for SNPs
@@ -681,9 +595,7 @@ targets"), and each has an exact cell in `s5_edge_cases/summary.csv`.
   software stack listed in §2.
 * **The raw results are not archived (won't fix here).** The
   `raw/full.jsonl` files (about 100 MB) are gitignored, so the synthesis and
-  every recomputation in this report need a checkout that has them. Archiving
-  them, e.g. as a release asset, belongs with the Zenodo data work in the
-  cleanup phase.
+  every recomputation in this report need a checkout that has them.
 * **The oracle shares pylmm's model** (V = σ²(hK + (1−h)I), a Wald test with
   t(n−q)). It checks pylmm's arithmetic and optimisation, not the choice of
   model.

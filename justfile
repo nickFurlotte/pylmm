@@ -49,7 +49,7 @@ test-slow *args:
 test-py27 *args:
     docker/py27/test.sh "$@"
 
-# Run a Phase 4 simulation study, e.g. `just sim example_null --quick --jobs 4`
+# Run a simulation study, e.g. `just sim example_null --quick --jobs 4`
 sim STUDY *args:
     uv run --group sims python -m sims run "$@"
 
@@ -73,9 +73,9 @@ readme-example OUTDIR="readme-example":
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # DANGER: OVERWRITES tests/golden/ -- ONLY for a deliberate, reviewed
-# regeneration of the Phase 1 reference outputs.  Never run this to "fix" a
+# regeneration of the reference outputs of the original Python 2 code.  Never run this to "fix" a
 # failing test.  It runs whatever pylmm code is in this working tree under
-# the py2.7 baseline image; the goldens are meant to come from the Phase 1
+# the py2.7 baseline image; the goldens are meant to come from the original
 # baseline code, so check that code out first.  See tests/golden/README.md.
 # To measure the current code against the goldens instead, use:
 #     uv run python tests/golden/diff_vs_golden.py

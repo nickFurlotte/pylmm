@@ -37,6 +37,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -441,8 +442,31 @@ BUILDERS = {
 # ---------------------------------------------------------------------------
 
 
+# Shorten absolute paths in error and warning text, so the summary never records the
+# machine-specific checkout path: "/opt/clone/pylmm/lmm.py:220" -> "pylmm/lmm.py:220", and
+# ".../site-packages/scipy/optimize/_optimize.py" -> "scipy/optimize/_optimize.py".
+# A path counts as absolute only where it starts a token ("/" or "C:\\" not preceded by a word
+# character, ".", ":", "/", "\\" or "-"), so relative paths and URLs are left alone.
+_ABS_PATH = re.compile(r"(?<![\w.:/\\-])(?:[A-Za-z]:)?[\\/][^\s\"',;()<>]*")
+_SITE_PACKAGES = re.compile(r"^.*[\\/](?:site|dist)-packages[\\/]")
+_REPO_PREFIX = re.compile(
+    r"^.*[\\/]"  # greedy: the last separator that a repo .py path follows
+    r"(?=(?:pylmm|sims|tests)[\\/](?:[\w.-]+[\\/])*[\w.-]+\.py)"
+)
+
+
+def _shorten(m):
+    p = m.group(0)
+    q = _SITE_PACKAGES.sub("", p, count=1)
+    return q if q != p else _REPO_PREFIX.sub("", p, count=1)
+
+
+def _relpaths(s):
+    return _ABS_PATH.sub(_shorten, s)
+
+
 def _err(e):
-    return ("%s: %s" % (type(e).__name__, " ".join(str(e).split())))[:160]
+    return _relpaths("%s: %s" % (type(e).__name__, " ".join(str(e).split())))[:160]
 
 
 def _impute(G):
@@ -459,7 +483,8 @@ def _warn_summary(ws):
     if not ws:
         return 0, ""
     w = ws[0]
-    return len(ws), ("%s: %s" % (w.category.__name__, " ".join(str(w.message).split())))[:120]
+    msg = "%s: %s" % (w.category.__name__, " ".join(str(w.message).split()))
+    return len(ws), _relpaths(msg)[:120]
 
 
 def run_lib(P, impute):
@@ -605,7 +630,7 @@ def run_cli(P, remove):
         lines = [ln for ln in err.strip().splitlines() if ln.strip()]
         warns = [ln for ln in lines if "Warning" in ln]
         out["n_warn"] = len(warns)
-        out["warn_first"] = warns[0].strip()[:120] if warns else ""
+        out["warn_first"] = _relpaths(warns[0].strip())[:120] if warns else ""
         for ln in lines:
             if "heritability=" in ln:
                 with contextlib.suppress(ValueError):
@@ -613,7 +638,7 @@ def run_cli(P, remove):
         if rc != 0:
             out["crash"] = 1
             out["clean_error"] = int(rc == 2 and "error:" in err)
-            out["crash_err"] = (lines[-1].strip() if lines else "rc=%d" % rc)[:160]
+            out["crash_err"] = _relpaths(lines[-1].strip() if lines else "rc=%d" % rc)[:160]
         else:
             fn = os.path.join(d, "out.txt")
             try:

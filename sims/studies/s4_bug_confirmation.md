@@ -7,8 +7,9 @@
 
 Question: for each suspected bug in `docs/phase1-baseline.md`, is it real, can a
 user reach it, and how much does it change the results (ĥ, t, p, −log10 p)?
-This ledger is meant to support decisions. For each bug Nick picks Phase 5
-(robustness/behaviour) or Phase 6.3 (numerics).
+Each bug was scheduled either for the robustness and behaviour fixes (Phase 5,
+in 1.0.0) or for the numerics work (Phase 6.3, still open; see "Known caveats"
+in `AGENTS.md`).
 
 * Code: `sims/studies/s4_bug_confirmation.py`, with five experiments:
   `remlml`, `hgrid`, `kinship`, `mlcent` and `bednull`.
@@ -20,10 +21,9 @@ This ledger is meant to support decisions. For each bug Nick picks Phase 5
   removed. `test_bugN_current_*` tests assert today's behaviour and must be
   inverted or deleted together with the fix.
 * Machine-readable ledger: `LEDGER` in the study module, written to
-  `sims/results/s4_bug_confirmation/ledger.csv` by the report. It is the input
-  for the preprint's bug-ledger figure.
-* Bug numbers 1–16 follow `docs/phase1-baseline.md`. Bug 17 is new, from the
-  framework agent. Item 18 is the λ_GC investigation.
+  `sims/results/s4_bug_confirmation/ledger.csv` by the report.
+* Bug numbers 1–16 follow `docs/phase1-baseline.md`. Bug 17 is new, found by the
+  simulation framework. Item 18 is the λ_GC investigation.
 * Software used: numpy 2.5.4, scipy 1.18.1, Python 3.13 (uv.lock). Bugs 4 and
   16 depend on the version (see below).
 

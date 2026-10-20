@@ -76,7 +76,7 @@ ATOL = 1e-12
 #                   by rtol=1e-5 was at most 2.2e-8 abs
 #   beta            1.1e-8 abs (1.6e-5 rel at |beta| ~ 1e-3)
 #   p-values        1.2e-6 rel (5.4e-7 on the log10 scale)
-# The old ATOL_FIT=1e-8 was below that (the reviewer saw 4.7e-8 abs at
+# The old ATOL_FIT=1e-8 was below that (4.7e-8 abs was measured at
 # |t|=0.003).  ATOL_FIT is 10x the worst absolute t-stat change; RTOL_P is
 # ~8x the worst relative p-value change.  Both are still orders of magnitude
 # below any real behavioural change.

@@ -183,9 +183,6 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   namespace and a scratch directory; `skip-ci: <reason>` opts a block out, `needs=<module>` skips it when
   a module is missing; a block in an unknown language is an error; the pytest summary lists the counts).
   `just docs-test` runs it alone.
-- `docs/research/io-formats.md`: the I/O formats review, with a verification of its
-  conversion recipes (plink2 `--extract-if-info`, vcztools `view-plink -o/--max-alleles`, and two
-  corrections: plink2 BGEN import needs a REF/ALT mode, and dosage import rejects multiallelic records).
 
 #### Sample IDs and alignment
 - New module `pylmm.samples`: sample IDs are `(FID, IID)` pairs (`SampleID`); `align_samples()` aligns any
@@ -357,9 +354,15 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 ### Docs
 - README rewritten for 1.0 (what pylmm does, how it is validated, install, quick start, agents, migration);
   new `CITATION.cff` for the software.
+- `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reports; 1.0.x supported) and a bug report
+  issue template.
+- `data/README.md`: a licence and citation section. The example data is third-party research data, not
+  covered by the MIT licence of the code; it says which sources to cite and that the 1219-animal BED's
+  origin is undocumented. The README's license section points to it.
 - Package metadata: description, Production/Stable and Python 3.11-3.14 classifiers, keywords, project
-  URLs. The sdist ships the package, `sims/` (without result tables), `skills/` and the notebook, not the
-  example data or the tests; the wheel holds `pylmm/` only.
+  URLs. The sdist ships the package, `sims/` (without result tables), `skills/`, the notebook and the docs
+  they link to (including `data/README.md`, the example data's provenance and licence), not the example
+  data or the tests; the wheel holds `pylmm/` only.
 - `docs/replication.md`: the reanalysis of two published HMDP mouse GWAS by an agent working from
   the docs alone (Farber 2011 BMD: partially replicated, all 5 published loci have a nearby signal (median −log10 p
   0.47 below published), 1/5 pass Bonferroni and 3/5 the paper's threshold; Bennett 2010 HDL:
@@ -380,6 +383,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   indexing, since `Z @ W` spreads a missing call to every animal.
 
 ### Internal
+- `sims` runner: the `--jobs` cap 6 -> the CPU count minus 2 (at least 1); `--no-job-cap` still lifts it.
 - Goldens `gwas_cli_bed_snps50_refit.out` and `gwas_cli_bed_snps50_removeMissing.out` were regenerated for the
   REML refit (py2 originals in `tests/golden/py2_original/`); `generate_golden.py` now refuses to run under
   Python 3.

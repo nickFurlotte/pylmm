@@ -128,13 +128,15 @@ ported it: the GeneNetwork port [pylmm_gn2](https://github.com/genenetwork/pylmm
 with [numerical comparisons](https://kbroman.org/lmmlite/assets/compare2pylmm.html) to PyLMM; and The
 Jackson Laboratory's [pylmm3](https://github.com/TheJacksonLaboratory/pylmm3) (2026), an independent
 Python 3 modernisation. Version 1.0 is a rewrite by the original author: Python 3, a new API and command
-line, and validation against the original code and published results.
+line, and validation against the original code and published results. The rewrite was done with Claude
+Code (AI-assisted); every change went through code review (AI reviewers and the author), was tested
+against the outputs of the original Python 2 code and was checked in simulations.
 
 ## Links
 
 - [User guide](docs/guide.md) · [Conventions](docs/conventions.md) · [CHANGELOG](CHANGELOG.md)
 - [Replication of published GWAS](docs/replication.md) · [Example data](data/README.md)
-- [Issues](https://github.com/nickFurlotte/pylmm/issues)
+- [Issues](https://github.com/nickFurlotte/pylmm/issues) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 Development uses `uv`, `pytest`, `ruff` and `mypy`: `just test`, `just lint` and `just typecheck` (see
 the [justfile](justfile) and [AGENTS.md](AGENTS.md)).
@@ -146,4 +148,4 @@ this repository" button reads it).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Code: MIT (see [LICENSE](LICENSE)). Example data in `data/`: see [data/README.md](data/README.md).

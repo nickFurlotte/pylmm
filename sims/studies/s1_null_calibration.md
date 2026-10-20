@@ -95,7 +95,7 @@ One replicate takes about 2.4 to 2.8 s single-core at n = 600 with 5000 SNPs
 per test set (three scans per set, each about 0.4 s of pylmm and the rest
 in OLS and p-value bookkeeping). The full grid is 25 cells x 80 reps = 2000 tasks,
 about 5200 core-seconds. At `--jobs 6` that is about 15 min if cores scale
-perfectly; allow about 20 to 25 min on the shared laptop. Memory per worker
+perfectly; allow about 20 to 25 min on a shared machine. Memory per worker
 is under 300 MB. `--reps` can be raised on top of an existing run
 (only new replicates run) if the 1e-4 CIs are too wide.
 
