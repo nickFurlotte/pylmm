@@ -11,10 +11,9 @@ minute) and is covered instead by ``just readme-example`` and the CLI tests
 that compare the same command with the original Python 2 goldens
 (tests/test_cli_gwas.py).  Its Python quick start runs.
 
-What is not executed: ``docs/research/*.md`` (and the other reports under
-``docs/``).  The research notes are background surveys of other
-tools' formats and methods, with sketches of external APIs, not instructions
-that an agent or user is meant to run.
+What is not executed: the other reports under ``docs/`` (the Python 2
+baseline, port and simulation reports), which record results rather than
+give instructions that an agent or user is meant to run.
 
 How blocks are run
 ------------------

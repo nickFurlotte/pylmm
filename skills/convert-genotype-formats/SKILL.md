@@ -7,7 +7,7 @@ description: Convert genotype data to the PLINK 1 BED/BIM/FAM files pylmm reads 
 
 pylmm reads **PLINK 1 BED/BIM/FAM** (SNP-major, biallelic, hard calls), PLINK TPED and EMMA text. Convert
 everything else to BED with standard tools. Full recipes, every caveat and how each was verified:
-[reference.md](reference.md); background: [docs/research/io-formats.md](../../docs/research/io-formats.md).
+[reference.md](reference.md).
 
 Blocks marked `skip-ci` need plink2 (≥ 2.0 alpha 6; checked with v2.0.0-a.7.13), bcftools (checked
 1.24) or vcztools (checked 0.2.0); the other blocks run in CI, in order, from the repository root.

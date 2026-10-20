@@ -1,6 +1,6 @@
 # Conversion reference: recipes, caveats and how they were checked
 
-Companion to [SKILL.md](SKILL.md). Research background: [docs/research/io-formats.md](../../docs/research/io-formats.md).
+Companion to [SKILL.md](SKILL.md).
 The commands below are not run in CI (they need external tools). In October 2026 each recipe
 was run on a small test VCF (8 samples; a multiallelic site, a half-call, an `R2` INFO field, a `DS`
 FORMAT field) with **plink2 v2.0.0-a.7.13 (15 Oct 2026)**, **bcftools 1.24**, **bio2zarr 0.2.1** and
@@ -80,8 +80,7 @@ plink2 --pfile g --max-alleles 2 --make-bed --out g_hc         # hard calls (los
 
 * **plink2 now requires a REF/ALT mode**: without one it stops with `--bgen now requires a REF/ALT mode
   ('ref-first', 'ref-last', or 'ref-unknown')` and notes that raw biobank files are typically
-  `ref-first`, older and PLINK-exported files `ref-last` (*checked*; the research note in
-  `docs/research/io-formats.md` predates this). The wrong mode swaps REF and ALT for every variant
+  `ref-first`, older and PLINK-exported files `ref-last` (*checked*). The wrong mode swaps REF and ALT for every variant
   (*checked*: reading a `ref-last` file as `ref-first` swapped them).
 * `--sample` is optional for BGEN v1.2+ files with embedded sample IDs. Add `--keep`, `--extract`,
   `--maf` to subset; convert one chromosome at a time to bound memory.

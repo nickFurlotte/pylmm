@@ -183,9 +183,6 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   namespace and a scratch directory; `skip-ci: <reason>` opts a block out, `needs=<module>` skips it when
   a module is missing; a block in an unknown language is an error; the pytest summary lists the counts).
   `just docs-test` runs it alone.
-- `docs/research/io-formats.md`: the I/O formats review, with a verification of its
-  conversion recipes (plink2 `--extract-if-info`, vcztools `view-plink -o/--max-alleles`, and two
-  corrections: plink2 BGEN import needs a REF/ALT mode, and dosage import rejects multiallelic records).
 
 #### Sample IDs and alignment
 - New module `pylmm.samples`: sample IDs are `(FID, IID)` pairs (`SampleID`); `align_samples()` aligns any
@@ -319,6 +316,8 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   are length-checked.
 
 ### Removed
+- `docs/research/` (the I/O formats survey and the literature review): background notes, not user
+  documentation; the conversion facts the skills rely on are in `convert-genotype-formats/reference.md`.
 - `pylmmGWAS --kfile2`.
 
 ### Fixed
