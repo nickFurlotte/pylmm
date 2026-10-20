@@ -5,15 +5,19 @@ iterator and of ``iter_blocks`` at a few block sizes, with and without
 standardisation (``norm_genotype``), on
 
 * the bundled 1219-mouse BED file ``data/snps.132k.clean.noX`` (98,740 SNPs;
-  the first 8,192 with ``--quick``), and
+  with ``--quick``, a copy of its first 8,192 SNPs written to a temporary
+  directory), and
 * a seeded synthetic BED file (written to a temporary directory) with an
   individual count that is not a multiple of 4 and 2% missing calls.
 
 It also checks, outside the timed runs, that every block column is bit for bit
 the per-SNP vector (``numpy.array_equal(..., equal_nan=True)``), and that the
 block variants are the ``.bim`` lines.  Times are the median of ``--repeats``
-runs, after the ``.bim`` file has been read once (``PlinkReader.variants``,
-timed separately).  BLAS is pinned to one thread: ``python -m
+runs (default 5 with ``--quick``, 3 otherwise).  Each timed run opens a new
+``PlinkReader`` and reads the whole file, so both methods pay for reading the
+``.fam`` and ``.bim`` (``iter_snps`` a ``.bim`` line per SNP, ``iter_blocks``
+the whole ``.bim`` up front, for ``PlinkReader.variants``).  BLAS is pinned
+to one thread: ``python -m
 sims.bench.bed_blocks`` imports the ``sims`` package, which sets the thread
 variables, before numpy (decoding uses no BLAS anyway).
 
@@ -30,6 +34,7 @@ import argparse
 import itertools
 import os
 import platform
+import shutil
 import statistics
 import sys
 import tempfile
@@ -50,6 +55,9 @@ def write_synthetic_bed(
     prefix: str, n: int, m: int, missing: float = 0.02, seed: int = 0
 ) -> np.ndarray:
     """Write a random SNP-major BED/BIM/FAM set; return its raw genotypes (fraction of A2).
+
+    The same as ``tests/synthetic_bed.py`` (tests/sims/test_bench_bed_blocks.py
+    checks that they write identical files).
 
     Allele frequencies are uniform on (0.05, 0.5), genotypes Hardy-Weinberg,
     each call missing with probability `missing`.  The ``.bim`` spreads the
@@ -84,8 +92,8 @@ def write_synthetic_bed(
     return G
 
 
-def _consume(it: Iterator[object], limit: int | None) -> None:
-    for _ in itertools.islice(it, limit):
+def _consume(it: Iterator[object]) -> None:
+    for _ in it:
         pass
 
 
@@ -98,52 +106,58 @@ def _median_time(run: Callable[[], None], repeats: int) -> float:
     return statistics.median(times)
 
 
-def check_identity(prefix: str, m: int, norm: bool, block_size: int) -> bool:
-    """Every block column of the first `m` SNPs equals the per-SNP vector bit for bit."""
+def copy_first_snps(src: str, dst: str, m: int) -> None:
+    """Write the first `m` SNPs of the BED file set `src` as `dst` (``.bed/.bim/.fam``)."""
+    n = PlinkReader(src).N
+    with open(src + ".bed", "rb") as f:
+        data = f.read(3 + m * ((n + 3) // 4))
+    with open(dst + ".bed", "wb") as f:
+        f.write(data)
+    with open(src + ".bim") as f, open(dst + ".bim", "w") as g:
+        g.writelines(itertools.islice(f, m))
+    shutil.copyfile(src + ".fam", dst + ".fam")
+
+
+def check_identity(prefix: str, norm: bool, block_size: int) -> bool:
+    """Every block column equals the per-SNP vector bit for bit, with the same SNP name."""
     snps = PlinkReader(prefix, norm_genotype=norm).iter_snps()
     blocks = PlinkReader(prefix, norm_genotype=norm)
-    names = list(blocks.variants.snp[:m])
+    names = blocks.variants.snp.tolist()
     k = 0
     for G, v in blocks.iter_blocks(block_size):
         for j in range(G.shape[1]):
-            if k == m:
-                return True
             g, name = next(snps)
             if not (np.array_equal(g, G[:, j], equal_nan=True) and name == v.snp[j] == names[k]):
                 return False
             k += 1
-    return k == m
+    return k == len(names) and next(snps, None) is None
 
 
-def time_variants(prefix: str) -> tuple[float, int]:
-    """Seconds to read the whole ``.bim`` file (``PlinkReader.variants``), and its SNP count."""
-    reader = PlinkReader(prefix)
-    t0 = time.perf_counter()
-    m = len(reader.variants)
-    return time.perf_counter() - t0, m
+def bench_file(label: str, prefix: str, repeats: int) -> list[dict[str, object]]:
+    """Time per-SNP vs block reading of all the SNPs of `prefix`, norm off and on.
 
-
-def bench_file(label: str, prefix: str, m: int, repeats: int) -> list[dict[str, object]]:
-    """Time per-SNP vs block decoding of the first `m` SNPs.
-
-    `m` should be a multiple of every block size (or all the SNPs), so that
-    every method decodes the same SNPs.  Each row also says whether the block
-    columns were bit-identical to the per-SNP vectors (checked for these and
-    two more block sizes, 1 and 777, outside the timing).
+    Each timed run opens a new reader (so the ``.bim`` is read in both).  Each
+    row also says whether the block columns were bit-identical to the per-SNP
+    vectors (checked outside the timing for these and two more block sizes, 1
+    and 777).
     """
     rows: list[dict[str, object]] = []
     n = PlinkReader(prefix).num_samples
+    m = len(PlinkReader(prefix).variants)
     for norm in (False, True):
-        reader = PlinkReader(prefix, norm_genotype=norm)
-        _ = reader.variants  # read the .bim once, outside the timing
-        same = all(check_identity(prefix, m, norm, b) for b in (*BLOCK_SIZES, 1, 777))
+        same = all(check_identity(prefix, norm, b) for b in (*BLOCK_SIZES, 1, 777))
         common = {"data": label, "n": n, "snps": m, "norm": norm, "identical": same}
-        base = _median_time(lambda r=reader: _consume(r.iter_snps(), m), repeats)
+        base = _median_time(
+            lambda norm=norm: _consume(PlinkReader(prefix, norm_genotype=norm).iter_snps()),
+            repeats,
+        )
         rows.append({**common, "method": "iter_snps", "sec": base, "speedup": 1.0})
         for b in BLOCK_SIZES:
-            nblocks = -(-m // b)
             sec = _median_time(
-                lambda r=reader, b=b, k=nblocks: _consume(r.iter_blocks(b), k), repeats
+                lambda b=b, norm=norm: _consume(
+                    PlinkReader(prefix, norm_genotype=norm).iter_blocks(b)
+                ),
+                repeats,
             )
             rows.append(
                 {**common, "method": "iter_blocks(%d)" % b, "sec": sec, "speedup": base / sec}
@@ -180,9 +194,16 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m sims.bench.bed_blocks", description=__doc__.split("\n")[0]
     )
     ap.add_argument("--quick", action="store_true", help="fewer SNPs (well under a minute)")
-    ap.add_argument("--repeats", type=int, default=3, help="timed runs per cell (median reported)")
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=None,
+        help="timed runs per cell, median reported (default 5 with --quick, else 3)",
+    )
     ap.add_argument("--seed", type=int, default=20261020, help="seed of the synthetic BED")
     args = ap.parse_args(argv)
+    if args.repeats is None:
+        args.repeats = 5 if args.quick else 3
 
     if args.quick:
         bundled_m, syn_n, syn_m = 8192, 1001, 8192
@@ -190,19 +211,18 @@ def main(argv: list[str] | None = None) -> int:
         bundled_m, syn_n, syn_m = None, 5003, 40960
 
     rows: list[dict[str, object]] = []
-    notes = []
     with tempfile.TemporaryDirectory() as tmp:
         syn = os.path.join(tmp, "synthetic")
         write_synthetic_bed(syn, syn_n, syn_m, missing=0.02, seed=args.seed)
-        rows += bench_file("synthetic (2% missing)", syn, syn_m, args.repeats)
-        sec, m_all = time_variants(syn)
-        notes.append("synthetic .bim (%d SNPs) read in %.3f s" % (m_all, sec))
-    if os.path.isfile(BUNDLED + ".bed"):
-        sec, m_all = time_variants(BUNDLED)
-        notes.append("bundled .bim (%d SNPs) read in %.3f s" % (m_all, sec))
-        rows += bench_file("bundled 1219 mice", BUNDLED, bundled_m or m_all, args.repeats)
-    else:
-        print("(bundled data %s not found; skipped)" % BUNDLED, file=sys.stderr)
+        rows += bench_file("synthetic (2% missing)", syn, args.repeats)
+        if os.path.isfile(BUNDLED + ".bed"):
+            bundled = BUNDLED
+            if bundled_m is not None:
+                bundled = os.path.join(tmp, "bundled_first")
+                copy_first_snps(BUNDLED, bundled, bundled_m)
+            rows += bench_file("bundled 1219 mice", bundled, args.repeats)
+        else:
+            print("(bundled data %s not found; skipped)" % BUNDLED, file=sys.stderr)
 
     print(
         "pylmm %s, numpy %s, Python %s, %s %s, %d CPUs, OPENBLAS_NUM_THREADS=%s, "
@@ -221,9 +241,6 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     print(format_table(rows))
-    print(
-        "\n" + "; ".join(notes) + " (PlinkReader.variants, once per reader; not in the times above)"
-    )
     ok = all(r["identical"] for r in rows)
     print("\nblock columns bit-identical to iter_snps: %s" % ("yes" if ok else "NO"))
     return 0 if ok else 1
