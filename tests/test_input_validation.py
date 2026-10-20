@@ -1,7 +1,7 @@
 """Input validation (Phase 5.2): the S5 robustness targets.
 
-Each test names its target in sims/studies/s5_edge_cases.md ("P0-2" etc.)
-and docs/phase4-simulations.md section 7.  Before Phase 5.2 these inputs
+Each test names its target in sims/studies/s5_edge_cases.md ("P0-2" etc.;
+docs/phase4-simulations.md section 6 lists what was fixed).  Before Phase 5.2 these inputs
 gave a finite t where none exists, a bare scipy/numpy exception, or no
 warning at all.
 """

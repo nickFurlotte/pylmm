@@ -23,7 +23,7 @@ pylmmGWAS,--REML,no,pylmm gwas,--reml,no,renamed,"REML is the default, so the fl
 pylmmGWAS,--ML,no,pylmm gwas,--ml,no,renamed,
 pylmmGWAS,-v/--verbose,no,pylmm gwas,-v/--verbose,no,behaviour-changed,"logs INFO messages as `pylmm: info: ...`; the null fit line is now `null model: heritability=..., sigma=...`; the library's own eigendecomposition diagnostics need --debug"
 pylmmGWAS,-h/--help,no,pylmm gwas,-h/--help,no,unchanged,
-pylmmGWAS,--kfile2,yes,pylmm gwas,,,removed-earlier,removed in Phase 5.2 (it never worked: bug 6); no replacement
+pylmmGWAS,--kfile2,yes,pylmm gwas,,,removed-earlier,removed before the single pylmm command (it never worked: bug 6); no replacement
 pylmmKinship,,yes,pylmm kinship,-o/--out,yes,renamed,was the positional OUTFILE argument; the output file is a required option now
 pylmmKinship,--bfile,yes,pylmm kinship,--bfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
 pylmmKinship,--tfile,yes,pylmm kinship,--tfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required

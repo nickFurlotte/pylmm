@@ -569,7 +569,7 @@ def _check_input_files(args: argparse.Namespace, reader: plink_io.PlinkReader) -
     """Fail early, before the kinship is read, if it or a phenotype or covariate file is missing."""
     if not os.path.isfile(args.kinship):
         raise UsageError("--kinship %s: no such file" % args.kinship)
-    # No phenotype file is a usage error (bug 14, fixed in Phase 5.2: this
+    # No phenotype file is a usage error (bug 14, fixed in 1.0.0: this
     # used to be os.path.isfile(None), a TypeError).
     pheno_file = args.pheno or reader.fbase + ".phenos"
     if args.emma_pheno:

@@ -54,7 +54,7 @@ the null-fit modes; Bonferroni 6.3). Individual-level SNP h² 0.80 [0.75, 0.85] 
   (Bennett) strains lack verified genotypes; the SNP sets and the kinship differ from the papers'.
 * Effect direction is **not assessed**: neither paper gives a signed effect for a named allele.
 * Heritability is estimated, not compared: neither paper reports a numerical h².
-* Bennett's published p = 4.4e-10 (Table 1, an image) was not re-verified in the second session, and its
+* Bennett's published p = 4.4e-10 (Table 1, an image) was not re-verified, and its
   secondary loci were not assessed (Table 1 and Supplemental Table 4 were not available).
 * Data acquisition, strain repair and method matching were iterative (the intervals and thresholds were
   not); every mode tried is reported. A third study (Parker et al. 2016, CFW mice) was not assessed: its

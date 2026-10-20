@@ -1,4 +1,4 @@
-# sims/: Phase 4 simulation framework
+# sims/: simulation framework
 
 This directory holds simulation studies that check whether pylmm gives the
 right answers, and that measure the suspected bugs listed in

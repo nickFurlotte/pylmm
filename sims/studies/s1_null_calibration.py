@@ -30,7 +30,7 @@ for every SNP with a missing call (about 1.4% of calls are missing, so nearly
 every SNP).  Tested SNPs must have MAF >= 0.05.
 
 Run:  just sim s1_null_calibration --quick
-      just sim s1_null_calibration --jobs 6          # full grid (the manager runs this)
+      just sim s1_null_calibration --jobs 6          # full grid
 """
 
 import json

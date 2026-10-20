@@ -28,7 +28,7 @@ merged mouse HapMap / wild-type genotype file, NCBI build 37 (mm9):
 <https://data.broadinstitute.org/mouse/hapmap/> → `Merged_Hapmap_WT_Genotypes.txt.gz`
 (20,446,478 bytes, last modified 2009-02-20, SHA-256 `dd4f80e9e737635c02a9f2f2e843ee3666a91d9b4ed4903ce453128bb126796f`;
 the paper-era URL `http://www.mousehapmap.org/` redirects there over plain HTTP; HTTPS on that hostname
-fails). This was not documented when the data was added; the Phase R replication established it
+fails). This was not documented when the data was added; the replication ([docs/replication.md](../docs/replication.md)) established it
 empirically (2026-10-19): **the same number of rows (132,285)**, and across the 27 strains whose names
 appear in both files, **122,242 informative rows with 0 discordances** between the 0/1 codes and the
 Broad base calls. The other 10,043 rows show one base only in those 27 strains, so they are consistent
@@ -89,7 +89,7 @@ bone mineral density; Bennett et al. 2010, HDL cholesterol) from their phenotype
 | `snps.132k.clean.noX.bed/.bim/.fam` | PLINK 1 BED of 1219 inbred mice (one row per animal: replicate animals of inbred strains, so K has rank about 110) at 98,740 autosomal SNPs. SNP IDs are `mm37-<chr>-<bp>`, positions on build 37; every position is a row of the HMDP marker map. The `.bim` alleles are `1`/`2` (no letters). The `.fam` has numeric FID = IID `1`–`1219` and **no strain labels**. |
 | `snps.132k.clean.noX.fake.phenos` | **FAKE phenotype**: `FID IID value`, one random value per animal, no header. It carries no biology; use it only to exercise the software (README example, tests). It cannot replicate or refute anything. |
 | `snps.132k.clean.noX.pylmm.kin` | 1219 × 1219 kinship of all 98,740 SNPs from the original 2013 code, as text; the README example and the golden tests use it. `pylmm kinship --bfile data/snps.132k.clean.noX` recomputes it. |
-| `snps.132k.clean.noX.pylmm.kin.id` | its ID sidecar (`FID IID` per row, in `.fam` order), added in Phase 5b.1 so `pylmm gwas` aligns the kinship by ID. |
+| `snps.132k.clean.noX.pylmm.kin.id` | its ID sidecar (`FID IID` per row, in `.fam` order), added in 1.0.0 so `pylmm gwas` aligns the kinship by ID. |
 
 ## Checksums (SHA-256)
 

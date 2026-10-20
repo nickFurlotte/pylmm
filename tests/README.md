@@ -1,6 +1,6 @@
 # Regression tests
 
-A small pytest suite that checks pylmm against the Phase 1 golden outputs in
+A small pytest suite that checks pylmm against the golden outputs of the original Python 2 code in
 `tests/golden/` (see `tests/golden/README.md` for what each file holds). Its
 job is to tell us whether a change, in particular the Python 3 port, changed
 any numbers. It is not a unit-test suite.
@@ -84,13 +84,13 @@ All of them are defined in `helpers.py`, with the measurements behind them.
 - nan positions must match exactly in every comparison.
 
 Today, on Python 2.7, every value matches bit for bit. The looser tiers are
-headroom for Phase 3. If a Phase 3 failure falls just outside them, check
+headroom for the Python 3 port. If a failure on Python 3 falls just outside them, check
 whether the cause is an optimiser path difference before loosening anything,
 and record the reason here.
 
 ## CLI inputs must be header-less
 
-Before Phase 5.1, `pylmmGWAS.py` read `--kfile` (now `pylmm gwas --kinship`) with `np.fromfile(sep=' ')`,
+Before 1.0.0, `pylmmGWAS.py` read `--kfile` (now `pylmm gwas --kinship`) with `np.fromfile(sep=' ')`,
 which stops at the first `#`, and then `K.resize()` zero-filled the rest
 without a warning (`docs/phase1-baseline.md` bug 16); it now rejects any
 non-numeric token with an error. `tests/golden/hmdp_K_npdump.txt` has `#`

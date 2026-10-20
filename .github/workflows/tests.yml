@@ -59,8 +59,7 @@ jobs:
       # Same single-threaded BLAS setting as the py27 baseline image.
       OPENBLAS_NUM_THREADS: "1"
     steps:
-      # NOTE: every job clones the ~215MB example data in data/.  Accepted for
-      # now; it goes away when the example data moves to Zenodo (cleanup phase).
+      # NOTE: every job clones the ~215MB example data in data/.
       - uses: actions/checkout@v7
 
       # setup-uv stopped publishing floating major tags after v7, so this is

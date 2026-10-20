@@ -84,7 +84,7 @@ def _matrix_mult(A: ArrayLike, B: ArrayLike) -> Any:
     """Matrix product of ``A`` and ``B`` (a thin wrapper over `numpy.dot`)."""
     # The original code tried scipy.linalg.fblas.dgemm first.  scipy has had
     # no linalg.fblas since 0.12, so that path was dead and every call fell
-    # back to np.dot -- which is what the Phase 1 goldens were computed with.
+    # back to np.dot -- which is what the golden outputs (tests/golden/) were computed with.
     return np.dot(A, B)
 
 
@@ -138,7 +138,7 @@ def calculate_kinship(W: ArrayLike, center: bool = False) -> FloatArray:
     1.0
     """
     # Work on a copy: the caller's W is not imputed or standardised in place
-    # (bug 12, fixed in Phase 5.2).
+    # (bug 12, fixed in 1.0.0).
     W = np.array(W, dtype=np.float64)
     n = W.shape[0]
     m = W.shape[1]
@@ -167,7 +167,7 @@ def calculate_kinship(W: ArrayLike, center: bool = False) -> FloatArray:
 
 
 # ---------------------------------------------------------------------------
-# Input checks shared by GWAS, LMM and the CLI (Phase 5.2)
+# Input checks shared by GWAS, LMM and the CLI
 # ---------------------------------------------------------------------------
 
 # Relative tolerance of the estimability check: a column whose part outside
@@ -1202,7 +1202,7 @@ class LMM:
                 # Bounded to the bracketing grid interval [H[i-1], H[i+1]].  The
                 # unbounded optimize.brent used before could step above h = 1,
                 # where LL is nan, and scipy >= 1.11 then raised BracketError
-                # (bug 4, fixed in Phase 5.1).  With xatol this small the
+                # (bug 4, fixed in 1.0.0).  With xatol this small the
                 # stopping rule is ~sqrt(eps)*|h| relative, like optimize.brent.
                 # Strictly, this is "the local optimum within the first grid
                 # peak's bracket".  The old unbounded Brent could in principle
@@ -1439,7 +1439,7 @@ class LMM:
 
         L, beta, sigma, beta_var = self.log_likelihood(h, design, stack=False, reml=reml)
         q = len(beta)
-        # ML test: sigma^2 = Q/n, the ML estimate (bug 9, Phase 5.2); REML
+        # ML test: sigma^2 = Q/n, the ML estimate (bug 9, fixed in 1.0.0); REML
         # keeps Q/(n-q).  The reference distribution is t(n-q) either way.
         if not reml:
             sigma = sigma * (float(self.N) - q) / float(self.N)
@@ -1490,7 +1490,8 @@ class LMM:
             If the inputs are not scalar-like (more than one test).
         """
 
-        # TODO(6.3): the log option is wrong (adds 2, not log 2; bug 5) and unreachable.
+        # Known issue (bug 5, see AGENTS.md): the log option is wrong (adds 2, not log 2)
+        # and unreachable.
         ts = beta / np.sqrt(var * sigma)
         # ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
         # sf == survival function - this is more accurate -- could also use logsf if the precision is not good enough

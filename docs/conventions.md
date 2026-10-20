@@ -26,7 +26,7 @@ ruff allows the symbols through `[tool.ruff.lint.pep8-naming] ignore-names`
 (`[A-Z]`, `[A-Z][0-9]`, `[A-Z][0-9][0-9]`), so they need no `noqa`. ruff does not check
 attribute names; the rule applies to them all the same.
 
-## Verbs, return values and defaults (Phase 5b)
+## Verbs, return values and defaults
 
 - `read_*` reads a file and returns (or stores) its data: `PlinkReader.read_phenos`,
   `read_covariates`, `read_kinship`, `pylmm.samples.read_id_file`. `iter_*` returns an iterator:
@@ -40,9 +40,9 @@ attribute names; the rule applies to them all the same.
 - Individuals are matched by ID (`pylmm.samples`), never by row position, except for EMMA input,
   which has no IDs.
 
-## Command line (Phase 5b.2)
+## Command line
 
-The CLI exception of Phase 5.4 (camelCase flags such as `pylmmGWAS --removeMissingGenotypes`
+The earlier CLI exception to the PEP 8 rename (camelCase flags such as `pylmmGWAS --removeMissingGenotypes`
 and optparse `dest` names such as `options.phenoFile`) is resolved: there is one command,
 `pylmm`, with subcommands (`pylmm gwas`, `pylmm kinship`), and
 
@@ -70,8 +70,8 @@ and optparse `dest` names such as `options.phenoFile`) is resolved: there is one
 `old_command`, `old_flag`, `old_takes_value`, `new_command`, `new_flag`, `new_takes_value`
 (`yes`/`no`), `kind` and `notes`. The flag columns hold only flags (a positional argument has
 an empty flag and is described in `notes`), and `kind` is one of `renamed`, `value→flag`
-(an option that took a value is now a flag), `removed`, `removed-earlier` (gone before Phase
-5b.2), `new`, `behaviour-changed`, `semantics-changed` (same option, different meaning of its
+(an option that took a value is now a flag), `removed`, `removed-earlier` (gone before the single
+`pylmm` command), `new`, `behaviour-changed`, `semantics-changed` (same option, different meaning of its
 value) or `unchanged`. `tests/test_cli.py` checks the schema and that every option of the
 parser has a row.
 
@@ -85,15 +85,15 @@ These are data or user-facing interface and keep their spelling:
 
 ## Renames
 
-The Phase 5.4 rename is a clean break (no aliases). `docs/migration/name-map.csv` maps
+The PEP 8 rename of 1.0.0 is a clean break (no aliases). `docs/migration/name-map.csv` maps
 every changed pylmm name, old to new (`module` is where the name lives after the rename: the
 module, `module.Class`, or the function that takes the parameter);
 `docs/migration/rename_5_4.py` is the script that applied it and wrote the CSV (`--csv`).
 The row `next,__next__` records that the py2 `reader.next()` method is gone: callers should use
 `next(reader)`.
 
-Phase 5b.1 added its renames and signature changes to the same CSV, which now has a `phase`
-column (`5.4` or `5b.1`) and a `notes` column. Rows whose `old_name` equals `new_name`
+A second round of renames and signature changes is in the same CSV, which has a `phase`
+column (`5.4` for the first round, `5b.1` for the second; both are in 1.0.0) and a `notes` column. Rows whose `old_name` equals `new_name`
 (`kind=signature`, or `parameter`) record a change of type or default, not of name. A name renamed
 twice has a row per phase (`getSNPIterator` -> `get_snp_iterator` in 5.4, -> `iter_snps` in 5b.1).
 `rename_5_4.py --csv` rewrites the 5.4 rows and keeps the later ones.
