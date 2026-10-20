@@ -94,6 +94,28 @@ CLI_PRINT_ATOL = 1.0e-3 + 1e-9
 # with an absolute tolerance scaled by the largest eigenvalue.
 EIG_ATOL_SCALE = 1e-10
 
+# Batched vs one-SNP-at-a-time Wald tests (LMM.association_batch vs
+# LMM.association; gwas() and `pylmm gwas` with and without --no-batch): the
+# same formulas at the same h, different floating-point order (one GEMM over a
+# block instead of a GEMV per SNP, a GLS residual instead of a (q+1)x(q+1)
+# inverse).  |a - b| <= BATCH_RTOL * |b| + BATCH_ATOL_SCALE * max|b|; the
+# second term covers values near 0 (t ~ 1e-3), whose error is absolute.
+#
+# Measurement (Phase 6.1, macOS arm64, numpy 2.5 / Accelerate): every
+# comparison of tests/test_batch.py (143 arrays: synthetic data with 0-4
+# covariates of scales 1 to 100 and 1e-3, REML and ML, the HMDP and README BED
+# data, the EMMA CLI with and without --emma-covar), recorded by running it
+# with PYLMM_RECORD_BATCH=<file>:
+#   max |a - b| / max|b|                        3.5e-12  (p-values, EMMA CLI)
+#   max |a - b| / |b| for |b| >= 1% of max|b|   9.5e-11  (BETA, EMMA CLI with
+#       --emma-covar; against a whitened-QR least-squares reference the
+#       per-SNP path was off by 9.5e-11 there, the batched one by 2.1e-12)
+# and sims/bench/gwas_batch.py (n = 500 and 2000, up to 20,000 SNPs) stayed
+# below both.  BATCH_RTOL is 10x the worst relative difference, BATCH_ATOL_SCALE
+# ~6x the worst absolute one; both are far below any change of the model.
+BATCH_RTOL = 1e-9
+BATCH_ATOL_SCALE = 2e-11
+
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|
 PSD_RTOL = 1e-10  # min eigenvalue >= -PSD_RTOL * max eigenvalue
@@ -132,6 +154,35 @@ def assert_fit_close(actual, expected, what=""):
 def assert_pvalues_close(actual, expected, what=""):
     """p-values: purely relative (atol=0), so p=1e-12 vs 2e-12 fails too."""
     assert_close(actual, expected, rtol=RTOL_P, atol=0.0, what=what)
+
+
+def assert_batch_close(actual, expected, what=""):
+    """Batched vs per-SNP test statistics (t, p, beta, se): see BATCH_RTOL.
+
+    nan in exactly the same places.  For p-values, compare the p-values
+    themselves (a p that underflows to 0.0 in one path must in the other).
+    """
+    expected_arr = np.asarray(expected, dtype=np.float64)
+    ok = ~np.isnan(expected_arr)
+    scale = np.abs(expected_arr[ok]).max() if ok.any() else 0.0
+    _record_batch_diff(actual, expected_arr, scale, what)
+    assert_close(actual, expected_arr, rtol=BATCH_RTOL, atol=BATCH_ATOL_SCALE * scale, what=what)
+
+
+def _record_batch_diff(actual, expected, scale, what):
+    fn = os.environ.get("PYLMM_RECORD_BATCH")
+    if not fn:
+        return
+    a = np.asarray(actual, dtype=np.float64)
+    ok = ~np.isnan(a) & ~np.isnan(expected)
+    if not ok.any() or scale == 0:
+        return
+    d = np.abs(a[ok] - expected[ok])
+    big = np.abs(expected[ok]) >= 1e-2 * scale
+    with open(fn, "a") as f:
+        f.write(
+            "%s\t%.3e\t%.3e\n" % (what, d.max() / scale, (d[big] / np.abs(expected[ok][big])).max())
+        )
 
 
 def assert_pvalues_valid(ps, what=""):

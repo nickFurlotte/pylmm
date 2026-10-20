@@ -92,10 +92,11 @@ def test_kva_kve_none_only(data):
 
 
 def test_gwas_numbers_unchanged_by_the_cleanups(data):
-    """gwas() and a manual loop over association() agree exactly."""
+    """gwas(batch=False) and a manual loop over association() agree exactly
+    (the batched default agrees to rounding: tests/test_batch.py)."""
     W, K, y = data
     with contextlib.redirect_stderr(io.StringIO()):
-        t, p = gwas(y, W[:, :6], K)
+        t, p = gwas(y, W[:, :6], K, batch=False)
     L = LMM(y, K)
     L.fit()
     for j in range(6):

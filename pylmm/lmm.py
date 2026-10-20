@@ -8,8 +8,9 @@
 
 This module provides the numerical core of pylmm: a kinship matrix estimator
 (`calculate_kinship`), the model class `LMM` (variance-component fit, Wald
-test of one SNP), the scan `gwas` that applies it to many SNPs, and the input
-checks they share (`check_covariates`, `check_ids`, `snp_estimable`).
+test of one SNP or, batched, of a block of SNPs), the scan `gwas` that
+applies it to many SNPs, and the input checks they share
+(`check_covariates`, `check_ids`, `snp_estimable`).
 
 The model, for ``n`` individuals, is::
 
@@ -264,6 +265,46 @@ def snp_estimable(
     return bool(np.dot(r, r) > max(rtol * ref, _ESTIMABLE_FLOOR * np.dot(x, x)))
 
 
+# A column whose residual on span(X0), computed for the whole block, has squared
+# norm above this share of the column's own squared norm is estimable for sure
+# (see _estimable_columns); anything else is decided by snp_estimable itself.
+_ESTIMABLE_CLEAR = 1e-6
+
+
+def _estimable_columns(
+    X: FloatArray, X0: FloatArray, Q: FloatArray | None = None
+) -> NDArray[np.bool_]:
+    """`snp_estimable` (default ``rtol``) of every column of ``X`` (n, m), as a boolean (m,) array.
+
+    The same decisions as calling `snp_estimable` per column, computed for
+    the block at once.  A column is accepted here only if it is finite and
+    its residual ``r`` on span(X0), computed for the whole block, has
+    ``|r|^2 > _ESTIMABLE_CLEAR * |x|^2``.  `snp_estimable` computes the same
+    quantities in a different summation order; their difference is a
+    rounding error of order ``n * eps * |x|^2`` (below 1e-9 |x|^2 for any
+    realistic n), far below the margin between ``_ESTIMABLE_CLEAR`` (1e-6)
+    and the thresholds it applies (``ESTIMABLE_RTOL * ref`` with ``ref <=
+    |x|^2``, and 1e-20 |x|^2), so it accepts these columns too.  Every other
+    column (non-finite, constant, collinear or borderline) is passed to
+    `snp_estimable` itself.
+    """
+    n, q = X0.shape
+    m = X.shape[1]
+    if n - q - 1 < 1:
+        return np.zeros(m, dtype=bool)
+    if Q is None:
+        Q = linalg.qr(X0, mode="economic")[0] if q else np.zeros((n, 0))
+    finite = np.isfinite(X).all(axis=0)
+    Z = np.where(finite, X, 0.0)
+    R = Z - _matrix_mult(Q, _matrix_mult(Q.T, Z))
+    rr = np.einsum("ij,ij->j", R, R)
+    xx = np.einsum("ij,ij->j", Z, Z)
+    clear: NDArray[np.bool_] = finite & (rr > max(_ESTIMABLE_CLEAR, 1e4 * ESTIMABLE_RTOL) * xx)
+    for j in np.where(~clear)[0]:
+        clear[j] = snp_estimable(X[:, j], X0, Q=Q)
+    return clear
+
+
 def _column_list(cols: Sequence[object] | NDArray[Any]) -> str:
     """Comma-separated string of the items of ``cols`` (for error messages)."""
     return ", ".join(str(c) for c in cols)
@@ -473,6 +514,34 @@ class LogLikResult(NamedTuple):
     xx_inv: FloatArray
 
 
+class AssociationResult(NamedTuple):
+    """The result of `LMM.association_batch` (a tuple: ``t, p, beta, beta_var = ...``).
+
+    Each field is an ``(m,)`` float64 array, one entry per tested SNP, with
+    the same meaning as the scalars `LMM.association` returns.
+
+    Attributes
+    ----------
+    t : (m,) array
+        Wald t statistics.
+    p : (m,) array
+        Two-sided p-values.
+    beta : (m,) array
+        SNP effect estimates.
+    beta_var : (m,) array
+        Their variances (``beta_var = (beta / t) ** 2``).
+    """
+
+    t: FloatArray
+    p: FloatArray
+    beta: FloatArray
+    beta_var: FloatArray
+
+
+GWAS_BLOCK_SIZE = 1000
+"""Default number of SNPs tested together by `gwas` (and ``pylmm gwas --block-size``)."""
+
+
 def gwas(
     Y: ArrayLike,
     X: ArrayLike,
@@ -484,6 +553,8 @@ def gwas(
     refit: bool = False,
     ids: Sequence[Any] | None = None,
     kinship_ids: Sequence[Any] | None = None,
+    batch: bool = True,
+    block_size: int = GWAS_BLOCK_SIZE,
 ) -> tuple[list[float], list[float]]:
     """Scan SNPs one at a time with the mixed model (Wald test per SNP).
 
@@ -526,6 +597,17 @@ def gwas(
     ids, kinship_ids : sequence, optional
         Individual IDs of ``Y`` and of the rows of ``K``; if both are given
         they must match, in order.
+    batch : bool, default True
+        Test the complete SNPs (no ``nan``) in blocks with
+        `LMM.association_batch`: one matrix product rotates a whole block,
+        then closed-form per-SNP formulas.  Much faster, and the same
+        statistics as the per-SNP path up to rounding (at worst about
+        1e-10 relative, for values near 0).  False tests every SNP with `LMM.association`, the code
+        path of pylmm 1.0.0.  Ignored with ``refit=True``; SNPs with
+        missing calls always take the per-SNP path.
+    block_size : int, default `GWAS_BLOCK_SIZE` (1000)
+        Number of SNPs per block with ``batch=True`` (bounds the memory of
+        the rotated block, ``n * block_size`` floats).
 
     Returns
     -------
@@ -546,16 +628,17 @@ def gwas(
     the standardised genotype.  With ``norm_genotype=False`` it is per 0 -> 1
     step of the A2-allele fraction, i.e. two copies of A2, so the sign and
     scale differ from PLINK's per-A1-copy convention.  (`gwas` returns only
-    ``t`` and ``p``; use `LMM.association` with ``return_beta=True`` for
-    ``beta``.)
+    ``t`` and ``p``; use `LMM.association` with ``return_beta=True``, or
+    `LMM.association_batch`, for ``beta``.)
 
     Raises
     ------
     ValueError
         For an infinite or constant phenotype, ``X`` or ``X0`` with the wrong
         number of rows, nan/inf or rank-deficient ``X0``, ``n <= q + 1``
-        observations, mismatching ``ids``/``kinship_ids``, and everything
-        `LMM` raises for ``K`` (wrong shape, nan/inf, bad ``kva``/``kve``).
+        observations, mismatching ``ids``/``kinship_ids``, ``block_size <
+        1``, and everything `LMM` raises for ``K`` (wrong shape, nan/inf, bad
+        ``kva``/``kve``).
 
     Warns
     -----
@@ -584,8 +667,13 @@ def gwas(
     (4, 4)
     >>> bool(p_values[0] < 1e-3)               # the causal SNP
     True
+    >>> t_old, p_old = gwas(y, X, K, batch=False)  # one SNP at a time, as in 1.0.0
+    >>> bool(np.allclose(t_stats, t_old, rtol=1e-9))
+    True
     """
     _check_eigen_args(kva, kve)
+    if block_size < 1:
+        raise ValueError("block_size must be at least 1, got %d" % block_size)
     Y = _check_phenotype(Y)
     X = np.asarray(X, dtype=np.float64)
     n = len(Y)
@@ -629,45 +717,34 @@ def gwas(
         L.fit(reml=reml)
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
 
-    p_values = []
-    t_stats = []
+    t_stats: list[float] = [np.nan] * m
+    p_values: list[float] = [np.nan] * m
     counts: dict[str, int] = {}
 
     n = X.shape[0]
     m = X.shape[1]
+    use_batch = batch and not refit
 
-    for i in range(m):
-        x = X[:, i].reshape((n, 1))
-        v = np.isnan(x).reshape((-1,))
-        if v.sum():
-            keep = ~v
-            xs = x[keep, :]
-            ys = Y[keep]
-            x0s = X0[keep, :]
-            if not subset_testable(xs, ys, x0s, counts):
-                p_values.append(np.nan)
-                t_stats.append(np.nan)
-                continue
-
-            ks = K[keep, :][:, keep]
-            ls = LMM(ys, ks, X0=x0s, validate=False)
-            if refit:
-                ls.fit(X=xs, reml=reml)
-            else:
-                ls.fit(reml=reml)
-            ts, ps = ls.association(xs, reml=reml)
+    for start in range(0, m, block_size):
+        stop = min(start + block_size, m)
+        if use_batch:
+            complete = ~np.isnan(X[:, start:stop]).any(axis=0)
         else:
-            if not snp_estimable(x, X0, Q=Q0):
-                p_values.append(np.nan)
-                t_stats.append(np.nan)
-                continue
-
-            if refit:
-                L.fit(X=x, reml=reml)
-            ts, ps = L.association(x, reml=reml)
-
-        p_values.append(ps)
-        t_stats.append(ts)
+            complete = np.zeros(stop - start, dtype=bool)
+        for j in start + np.where(~complete)[0]:  # one SNP at a time
+            res = _gwas_one_snp(X[:, [j]], Y, K, X0, Q0, L, reml, refit, counts)
+            if res is not None:
+                t_stats[j], p_values[j] = res
+        # the complete, estimable SNPs of this block, tested together
+        cand = start + np.where(complete)[0]
+        batched = [int(i) for i in cand[_estimable_columns(X[:, cand], X0, Q0)]]
+        if batched:
+            r = L.association_batch(X[:, batched], reml=reml)
+            for k, i in enumerate(batched):
+                if np.isfinite(r.t[k]):
+                    t_stats[i], p_values[i] = r.t[k], r.p[k]
+                else:  # not expected for an estimable SNP; keep the per-SNP answer
+                    t_stats[i], p_values[i] = L.association(X[:, i], reml=reml)
 
     if counts.get("collinear"):
         warnings.warn(
@@ -676,6 +753,44 @@ def gwas(
             stacklevel=2,
         )
     return t_stats, p_values
+
+
+def _gwas_one_snp(
+    x: FloatArray,
+    Y: FloatArray,
+    K: FloatArray,
+    X0: FloatArray,
+    Q0: FloatArray,
+    L: LMM,
+    reml: bool,
+    refit: bool,
+    counts: dict[str, int],
+) -> tuple[np.float64, np.float64] | None:
+    """Test one SNP column ``x`` (n, 1) of `gwas` on its own; None if it cannot be tested.
+
+    A SNP with missing calls is tested on the called individuals (a new
+    `LMM` on that subset); a complete one with ``L`` (refitted if ``refit``).
+    """
+    v = np.isnan(x).reshape((-1,))
+    if v.sum():
+        keep = ~v
+        xs = x[keep, :]
+        ys = Y[keep]
+        x0s = X0[keep, :]
+        if not subset_testable(xs, ys, x0s, counts):
+            return None
+        ks = K[keep, :][:, keep]
+        ls = LMM(ys, ks, X0=x0s, validate=False)
+        if refit:
+            ls.fit(X=xs, reml=reml)
+        else:
+            ls.fit(reml=reml)
+        return ls.association(xs, reml=reml)
+    if not snp_estimable(x, X0, Q=Q0):
+        return None
+    if refit:
+        L.fit(X=x, reml=reml)
+    return L.association(x, reml=reml)
 
 
 def subset_testable(
@@ -1448,6 +1563,122 @@ class LMM:
         if return_beta:
             return ts, ps, beta[q - 1].sum(), float(beta_var[q - 1, q - 1] * sigma)
         return ts, ps
+
+    def association_batch(
+        self, X: ArrayLike, h: float | None = None, reml: bool = True
+    ) -> AssociationResult:
+        """Wald tests of many SNPs at a fixed heritability, one SNP at a time in the model.
+
+        The same tests as `LMM.association` (``return_beta=True``) applied to
+        each column of ``X``, computed together: the block is rotated into
+        the eigenbasis of ``K`` with one matrix product, and the per-SNP
+        generalized least squares fit is written in closed form against the
+        null model (below), so no ``(q + 1) x (q + 1)`` system is solved per
+        SNP.  Call `fit` first unless ``h`` is given.
+
+        Parameters
+        ----------
+        X : (N, m) array, or (N,) for one SNP
+            SNPs (raw, original individual order, over the individuals with a
+            phenotype), one per column, with NO missing values (a ``nan`` or
+            ``inf`` column gives ``nan`` results).
+        h : float, optional
+            Heritability to use.  Default: ``self.opt_h`` from the last
+            `fit`.
+        reml : bool, default True
+            True: ``sigma2 = Q / (N - p)``; False: ``Q / N`` (as
+            `association`), with ``p = q + 1``.
+
+        Returns
+        -------
+        AssociationResult
+            Named tuple ``(t, p, beta, beta_var)`` of ``(m,)`` float64 arrays:
+            the Wald t statistic, its two-sided p-value from ``t(N - p)``,
+            the SNP effect (per unit of the ``X`` column) and its variance.
+
+        Notes
+        -----
+        With weights ``S = 1 / (h * kva + 1 - h)``, rotated covariates
+        ``x0t`` and phenotype ``yt``, let ``r0`` be the null-model GLS
+        residual of ``yt`` and ``xr`` the GLS residual of a rotated SNP
+        ``xt`` on ``x0t``.  Then (Frisch-Waugh-Lovell)::
+
+            s    = xr' S xr            # 1 / (X'SX)^-1[-1, -1]
+            beta = xr' S r0 / s
+            Q    = (r0 - beta xr)' S (r0 - beta xr)
+            beta_var = sigma2 / s,  t = beta / sqrt(beta_var)
+
+        These equal `association`'s numbers up to rounding: in the tests and
+        benchmarks at most ~1e-10 relative (for values near 0, or an
+        ill-conditioned ``X0``; the batched values were then the closer
+        ones to a QR least-squares reference) and a few 1e-12 of the largest
+        value.  Columns are
+        not checked for being constant or collinear with ``X0`` (use
+        `snp_estimable`, as `gwas` does): for such a column ``s`` is zero or
+        rounding noise, and the result is ``nan`` (``s <= 0``) or
+        meaningless.  The p-value is exactly 0.0 when it underflows.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from pylmm.lmm import LMM, calculate_kinship
+        >>> rng = np.random.default_rng(5)
+        >>> W = rng.binomial(2, 0.3, size=(80, 300)).astype(float)
+        >>> K = calculate_kinship(W)
+        >>> y = 1.0 * W[:, 0] + rng.normal(size=80)
+        >>> model = LMM(y, K)
+        >>> _ = model.fit()
+        >>> res = model.association_batch(W[:, :50])
+        >>> res.t.shape
+        (50,)
+        >>> t, p, b, var = model.association(W[:, 0], return_beta=True)
+        >>> bool(np.isclose(res.t[0], t, rtol=1e-10) and np.isclose(res.beta_var[0], var))
+        True
+        """
+        if h is None:
+            h = self.opt_h
+        G = np.asarray(X, dtype=np.float64)
+        if G.ndim == 1:
+            G = G.reshape(-1, 1)
+        if G.ndim != 2 or G.shape[0] != self.N:
+            raise ValueError(
+                "X must have shape (%d, m) or (%d,) (one row per individual with a "
+                "phenotype), got %s" % (self.N, self.N, np.shape(X))
+            )
+        S = 1.0 / (h * self.kva + (1.0 - h))
+        xt = _matrix_mult(self.kve.T, G)  # (N, m): the one O(N^2 m) step
+        yt = self.yt[:, 0]
+        if self.q:
+            # GLS of yt and of every SNP on the covariates, with weights S
+            sx0 = self.x0t * S[:, None]
+            cho = linalg.cho_factor(_matrix_mult(self.x0t.T, sx0))
+            r0 = yt - _matrix_mult(
+                self.x0t, linalg.cho_solve(cho, _matrix_mult(sx0.T, yt), check_finite=False)
+            )
+            xr = xt - _matrix_mult(
+                self.x0t, linalg.cho_solve(cho, _matrix_mult(sx0.T, xt), check_finite=False)
+            )
+        else:
+            r0 = yt
+            xr = xt
+        sxr = xr * S[:, None]
+        s = np.einsum("ij,ij->j", sxr, xr)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            beta = _matrix_mult(sxr.T, r0) / s
+            resid = r0[:, None] - xr * beta
+            Q = np.einsum("ij,ij->j", resid * S[:, None], resid)
+            p = self.q + 1
+            sigma = Q / (float(self.N) - float(p))
+            if not reml:  # as in association: Q / N (bug 9)
+                sigma = sigma * (float(self.N) - p) / float(self.N)
+            beta_var = sigma / s
+            t = beta / np.sqrt(beta_var)
+            bad = ~(s > 0) | ~np.isfinite(t)
+            t[bad] = np.nan
+            beta[bad] = np.nan
+            beta_var[bad] = np.nan
+            pv = 2.0 * stats.t.sf(np.abs(t), self.N - p)
+        return AssociationResult(t, np.asarray(pv, dtype=np.float64), beta, beta_var)
 
     def tstat(
         self,
