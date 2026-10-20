@@ -67,7 +67,8 @@ import numpy as np  # isort: skip
 
 SIMS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(SIMS_DIR)
-MAX_JOBS = 6  # 8-core laptop (4 performance cores), 16 GB RAM
+# Default cap on --jobs: leave two cores free (6 on the 8-core benchmark machine).
+MAX_JOBS = max(1, (os.cpu_count() or 2) - 2)
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +363,7 @@ def run(
     err_path = path.replace(".jsonl", ".errors.jsonl")
     if jobs > job_cap:
         sys.stderr.write(
-            "note: --jobs %d capped at %d (laptop budget; pass a "
+            "note: --jobs %d capped at %d (the CPU count minus 2; pass a "
             "higher job_cap/--no-job-cap to override)\n" % (jobs, job_cap)
         )
         jobs = job_cap

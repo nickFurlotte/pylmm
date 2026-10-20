@@ -122,9 +122,9 @@ separate estimator, optimizer and clamp effects.
 | `bed` | S1–S4 | random subsets of the bundled 1,219 mice. 300 or 600 mice are 97 or 108 distinct genotypes, K has rank ≈ 96–109, and the 5,000 test SNPs act like ≈ 18 independent tests (S4 item 18) |
 | `hmdp` | S4 (bug 8) | the 94-strain text data |
 
-**Compute actually used.** Everything ran on one laptop (Apple M1, 8 cores,
-16 GB) with numpy 2.5.4, scipy 1.18.1 and Python 3.13.9. S1–S3 used
-`--jobs 4`; the README cap is 6. Wall time and task time below are from each
+**Compute actually used.** The benchmarks ran on an Apple M1, 8 cores,
+16 GB, with numpy 2.5.4, scipy 1.18.1 and Python 3.13.9. S1–S3 used
+`--jobs 4`; the runner's default cap on that machine is 6. Wall time and task time below are from each
 `summary.md` header.
 
 | study | tasks (cells × reps) | wall | total task CPU |

@@ -382,6 +382,7 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   indexing, since `Z @ W` spreads a missing call to every animal.
 
 ### Internal
+- `sims` runner: the `--jobs` cap 6 -> the CPU count minus 2 (at least 1); `--no-job-cap` still lifts it.
 - Goldens `gwas_cli_bed_snps50_refit.out` and `gwas_cli_bed_snps50_removeMissing.out` were regenerated for the
   REML refit (py2 originals in `tests/golden/py2_original/`); `generate_golden.py` now refuses to run under
   Python 3.

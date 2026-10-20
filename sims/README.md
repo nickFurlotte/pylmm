@@ -89,9 +89,9 @@ def report(df, outdir):      # optional; the default is a mean/SE table per cell
 
 - `--quick` is a smoke test. It must finish in under about 3 min on one core,
   and ideally within seconds. CI runs `example_null --quick`.
-- Full runs: the laptop has 8 cores (4 performance) and 16 GB of RAM. Use
-  `--jobs 6` at most; the runner caps `--jobs` at 6 unless you pass
-  `--no-job-cap`. Workers are spawned with `OMP/OPENBLAS/MKL/VECLIB/NUMEXPR_NUM_THREADS=1`.
+- Full runs: the runner caps `--jobs` at the number of CPUs minus 2 (at
+  least 1; 6 on the 8-core, 16 GB machine the benchmarks ran on) unless you
+  pass `--no-job-cap`. Workers are spawned with `OMP/OPENBLAS/MKL/VECLIB/NUMEXPR_NUM_THREADS=1`.
   Keep each worker under about 1.5 GB:
   - A 1219×1219 kinship plus its eigenvectors is about 24 MB.
   - A full BED matrix is about 960 MB, so subset SNPs with
