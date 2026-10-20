@@ -1,3 +1,7 @@
+# Historical one-shot script, kept for the record: it is the snake_case rename that produced the
+# 1.0.0 API, and the source of the 5.4 rows of name-map.csv.  It is not meant to be run again, and
+# `--apply` refuses to run on the current tree (pylmm/plink_io.py already exists).  `--csv` still
+# rewrites the 5.4 rows of name-map.csv from RENAMES and keeps the later rows.
 """The Phase 5.4 snake_case rename, as a reviewable script.
 
     uv run python docs/migration/rename_5_4.py --apply   # rewrite the tree
