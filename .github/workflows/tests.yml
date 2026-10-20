@@ -2,7 +2,8 @@ name: tests
 
 on:
   push:
-    branches: [main, master]
+    # phase6: the integration branch for the next release (Phase 6 PRs merge there first).
+    branches: [main, master, phase6]
   pull_request:
   workflow_dispatch:
 
@@ -127,6 +128,15 @@ jobs:
 
       - name: Show resolved versions
         run: uv run --resolution lowest-direct python -c "import numpy, scipy; print('numpy', numpy.__version__, 'scipy', scipy.__version__)"
+
+      # Diagnostics for a one-off failure on this job (old numpy's OpenBLAS
+      # returned wrong matrix products on one runner): record the CPU and the
+      # BLAS build and core type, so a recurrence can be matched to hardware.
+      # If it recurs, set OPENBLAS_CORETYPE=Haswell for this job only.
+      - name: Show CPU and BLAS
+        run: |
+          lscpu
+          uv run --resolution lowest-direct --with threadpoolctl python -c "import json, threadpoolctl; print(json.dumps(threadpoolctl.threadpool_info(), indent=1))"
 
       - name: Run tests
         run: uv run --resolution lowest-direct pytest

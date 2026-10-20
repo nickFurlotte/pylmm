@@ -57,6 +57,10 @@ sim STUDY *args:
 sim-report STUDY *args:
     uv run --group sims python -m sims report "$@"
 
+# Run a benchmark from sims/bench/, e.g. `just bench gwas_batch --quick`
+bench NAME *args:
+    name="$1"; shift; uv run --group sims python -m "sims.bench.$name" "$@"
+
 # Run scripts/example.py
 example:
     uv run python scripts/example.py
