@@ -134,7 +134,7 @@ line, and validation against the original code and published results.
 
 - [User guide](docs/guide.md) · [Conventions](docs/conventions.md) · [CHANGELOG](CHANGELOG.md)
 - [Replication of published GWAS](docs/replication.md) · [Example data](data/README.md)
-- [Issues](https://github.com/nickFurlotte/pylmm/issues)
+- [Issues](https://github.com/nickFurlotte/pylmm/issues) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 Development uses `uv`, `pytest`, `ruff` and `mypy`: `just test`, `just lint` and `just typecheck` (see
 the [justfile](justfile) and [AGENTS.md](AGENTS.md)).

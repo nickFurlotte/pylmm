@@ -356,6 +356,8 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 ### Docs
 - README rewritten for 1.0 (what pylmm does, how it is validated, install, quick start, agents, migration);
   new `CITATION.cff` for the software.
+- `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reports; 1.0.x supported) and a bug report
+  issue template.
 - `data/README.md`: a licence and citation section. The example data is third-party research data, not
   covered by the MIT licence of the code; it says which sources to cite and that the 1219-animal BED's
   origin is undocumented. The README's license section points to it.
