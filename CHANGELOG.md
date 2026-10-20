@@ -360,8 +360,9 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
   covered by the MIT licence of the code; it says which sources to cite and that the 1219-animal BED's
   origin is undocumented. The README's license section points to it.
 - Package metadata: description, Production/Stable and Python 3.11-3.14 classifiers, keywords, project
-  URLs. The sdist ships the package, `sims/` (without result tables), `skills/` and the notebook, not the
-  example data or the tests; the wheel holds `pylmm/` only.
+  URLs. The sdist ships the package, `sims/` (without result tables), `skills/`, the notebook and the docs
+  they link to (including `data/README.md`, the example data's provenance and licence), not the example
+  data or the tests; the wheel holds `pylmm/` only.
 - `docs/replication.md`: the reanalysis of two published HMDP mouse GWAS by an agent working from
   the docs alone (Farber 2011 BMD: partially replicated, all 5 published loci have a nearby signal (median −log10 p
   0.47 below published), 1/5 pass Bonferroni and 3/5 the paper's threshold; Bennett 2010 HDL:
