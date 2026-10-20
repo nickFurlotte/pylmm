@@ -46,6 +46,17 @@ with a header row and a first column of ``FID IID`` labels).  A plain matrix
 is in genotype order unless an ID sidecar ``<k_file>.id`` (one ``FID IID``
 per line, written by ``pylmm kinship``) names its rows.
 
+Variant metadata and blocks of SNPs
+-----------------------------------
+`PlinkReader.variants` holds the metadata of every SNP (chromosome, SNP id,
+cM, position, A1, A2 from the ``.bim``, or the ``.map`` columns for a TPED
+without a ``.bim``; SNP names only for EMMA), as a
+:class:`pylmm.genotypes.Variants`.  `PlinkReader.iter_blocks` returns the
+genotypes a block of SNPs at a time, ``(G, variants)`` with ``G`` of shape
+``(len(indivs), b)``, the same values as the per-SNP iterator; a BED file is
+decoded a block at once.  Together with ``sample_ids`` and ``num_samples``
+they make `PlinkReader` a :class:`pylmm.genotypes.GenotypeSource`.
+
 Genotype coding
 ---------------
 A genotype is the **fraction of copies of the second allele** (the ``A2``
@@ -137,16 +148,25 @@ True
 from __future__ import annotations
 
 import contextlib
+import copy
+import itertools
 import logging
 import os
 import warnings
 from collections.abc import Iterator, Sequence
-from typing import IO, Any, cast
+from typing import IO, TYPE_CHECKING, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from pylmm import samples
+from pylmm.genotypes import (
+    DEFAULT_BLOCK_SIZE,
+    GenotypeSource,
+    Variants,
+    check_block_size,
+    normalize_genotype,
+)
 from pylmm.samples import InputError, SampleID
 
 log = logging.getLogger(__name__)
@@ -175,10 +195,12 @@ class PlinkReader:
 
     The object is its own iterator: ``for g, name in reader.iter_snps()``
     (or ``for g, name in reader``) yields one SNP at a time as
-    ``(genotypes, snp_name)``.  It is also a context manager that closes its
-    files (``with PlinkReader(...) as reader:``); `close` does the same.  See
-    the module docstring for the file formats, the genotype coding, missing
-    values and ID alignment.
+    ``(genotypes, snp_name)``; `iter_blocks` yields blocks of SNPs with
+    their metadata (`variants`), which makes the reader a
+    :class:`pylmm.genotypes.GenotypeSource`.  It is also a context manager
+    that closes its files (``with PlinkReader(...) as reader:``); `close`
+    does the same.  See the module docstring for the file formats, the
+    genotype coding, missing values and ID alignment.
 
     Parameters
     ----------
@@ -234,6 +256,11 @@ class PlinkReader:
         ``FID IID ...`` header; None for a file without one.
     indivs_removed : list
         Individuals of the genotype file that were dropped (see `indivs`).
+    sample_ids, num_samples
+        `indivs` and its length (the `GenotypeSource` names).
+    variants : pylmm.genotypes.Variants
+        Metadata of every SNP (read from the ``.bim`` / ``.map`` file on
+        first use).
     num_snps : int
         Number of SNPs (set when iteration starts; -1 for EMMA, unknown).
     have_read : int
@@ -268,6 +295,7 @@ class PlinkReader:
     # Positions (in the genotype file) of `indivs`; None while that is all of them, in order.
     _geno_index: NDArray[np.intp] | None
     _exhausted: bool
+    _variants: Variants | None
 
     def __init__(
         self,
@@ -284,6 +312,7 @@ class PlinkReader:
         self.fhandle = None
         self.snp_file_handle = None
         self._exhausted = False
+        self._variants = None
         self.num_snps = 0
         self.have_read = 0
         if type not in GENOTYPE_TYPES:
@@ -607,6 +636,11 @@ class PlinkReader:
     # written high bit first.
     _BED_CODE_VALUES = np.array([0.0, np.nan, 0.5, 1.0])
     _BED_SHIFTS = np.array([0, 2, 4, 6], dtype=np.uint8)
+    # The four genotype values of each of the 256 bytes (row = byte), built from the
+    # two tables above, for decoding a block of SNPs at once (`_decode_bed_block`).
+    _BED_BYTE_VALUES = _BED_CODE_VALUES[
+        (np.arange(256, dtype=np.uint8)[:, None] >> _BED_SHIFTS) & 3
+    ]
 
     def _format_binary_genotypes(self, X: bytes, norm: bool = True) -> NDArray[np.float64]:
         """Decode the raw BED bytes of one SNP (``_bytes_to_read`` of them).
@@ -626,6 +660,9 @@ class PlinkReader:
     def normalize_genotype(self, G: NDArray[np.float64]) -> NDArray[np.float64]:
         """Standardise one SNP: mean-impute missing values, centre, scale to unit variance.
 
+        The same as :func:`pylmm.genotypes.normalize_genotype`, which does the
+        work (it does not depend on the reader).
+
         Parameters
         ----------
         G : numpy.ndarray
@@ -641,29 +678,206 @@ class PlinkReader:
             all-missing SNP is returned unchanged (all nan), and a SNP that
             is constant up to rounding is returned as zeros.
         """
-        x = ~np.isnan(G)
-        # All missing: return the all-nan SNP unchanged (length n), which the
-        # CLIs then skip.  It used to return an empty array (bug 11).
-        if not x.any():
-            return G
-        m = G[x].mean()
-        # A SNP that is constant up to rounding (e.g. an EMMA dosage) is
-        # returned as zeros, which the CLIs skip: standardising it would blow
-        # its rounding noise up to unit variance (issue 19).
-        if np.ptp(G[x]) <= 1e-12 * max(1.0, abs(m)):
-            G = np.zeros_like(G)
-            return G
-        if G[x].var() == 0:
-            s = 1.0
-        else:
-            s = np.sqrt(G[x].var())
-        G = np.where(np.isnan(G), m, G)
-        if s == 0:
-            G = G - m
-        else:
-            G = (G - m) / s
+        return normalize_genotype(G)
 
-        return G
+    # -- variant metadata and SNP blocks (the GenotypeSource interface) -------
+
+    @property
+    def sample_ids(self) -> list[SampleID] | list[int]:
+        """The individuals of the genotype vectors and blocks: `indivs`."""
+        return self.indivs
+
+    @property
+    def num_samples(self) -> int:
+        """``len(indivs)``: the length of a genotype vector, the rows of a block."""
+        return len(self.indivs)
+
+    @property
+    def variants(self) -> Variants:
+        """Metadata of every SNP of the file, in iteration order (read on first use).
+
+        For a BED file, the six columns of the ``.bim`` file (``chrom``,
+        ``snp``, ``cm``, ``bp``, ``a1``, ``a2``).  For a TPED file, those of
+        the ``.bim`` file if it exists, otherwise the ``.map`` file's
+        (``chrom``, ``snp``, ``cm``, ``bp``; no alleles, and no ``cm`` for a
+        three-column ``.map``).  For EMMA input, the names ``SNP_1``,
+        ``SNP_2``, ... of its non-blank rows and no other column.  The
+        ``snp`` column holds the names `iter_snps` returns.
+
+        Raises
+        ------
+        InputError
+            (A ``ValueError``.)  If a ``.bim`` line does not have 6 fields, a
+            ``.map`` line 3 or 4, or a position is not a number.
+
+        Examples
+        --------
+        >>> import os, tempfile
+        >>> from pylmm.plink_io import PlinkReader
+        >>> tmp = tempfile.TemporaryDirectory()
+        >>> base = os.path.join(tmp.name, "toy")
+        >>> with open(base + ".fam", "w") as f:
+        ...     _ = f.write("F1 I1 0 0 1 -9\\nF1 I2 0 0 1 -9\\nF2 I3 0 0 2 -9\\n")
+        >>> with open(base + ".bim", "w") as f:
+        ...     _ = f.write("1 rs1 0 100 A G\\n2 rs2 0.5 200 C T\\n")
+        >>> with open(base + ".bed", "wb") as f:
+        ...     _ = f.write(bytes([0x6C, 0x1B, 0x01, 0b00111000, 0b00000111]))
+        >>> r = PlinkReader(base)
+        >>> r.variants[1]
+        Variant(chrom='2', snp='rs2', cm=0.5, bp=200, a1='C', a2='T')
+        >>> r.variants.chrom.tolist(), r.variants.bp.tolist()
+        (['1', '2'], [100, 200])
+        >>> tmp.cleanup()
+        """
+        if self._variants is None:
+            if self.type == "emma":
+                with open(self.fbase) as f:
+                    m = sum(1 for line in f if line.strip())
+                self._variants = Variants.from_names(["SNP_%d" % (k + 1) for k in range(m)])
+            elif self.type == "t" and not os.path.isfile(self.fbase + ".bim"):
+                self._variants = _read_variant_file(self.fbase + ".map")
+            else:
+                self._variants = _read_variant_file(self.fbase + ".bim")
+        return self._variants
+
+    def iter_blocks(
+        self, block_size: int = DEFAULT_BLOCK_SIZE
+    ) -> Iterator[tuple[NDArray[np.float64], Variants]]:
+        """Iterate over the SNPs in blocks: ``(G, variants)`` per block.
+
+        ``G`` is float64, shape ``(len(indivs), b)``, ``b <= block_size``
+        (only the last block is shorter): column ``j`` is exactly (bit for
+        bit) the genotype vector `iter_snps` returns for that SNP, in the
+        order of `indivs` and standardised if ``norm_genotype``.  ``variants``
+        is the `Variants` of the block's SNPs (a slice of `variants`).
+
+        A BED file is decoded a block at a time (one vectorised pass over the
+        block's bytes), which is several times faster than `iter_snps` when
+        the genotypes are not standardised; TPED and EMMA blocks are
+        stacked from the per-SNP reader.  The iteration is independent of
+        `iter_snps` (it opens its own file handle, closed when the iteration
+        ends or the iterator is discarded) and uses the individuals of the
+        time of the call.  A block holds ``8 * len(indivs) * block_size``
+        bytes, and the decoding about as much again.
+
+        Parameters
+        ----------
+        block_size : int, default 1024
+            The number of SNPs per block.
+
+        Yields
+        ------
+        G : numpy.ndarray
+            ``(len(indivs), b)`` float64 genotypes.
+        variants : pylmm.genotypes.Variants
+            The metadata of the ``b`` SNPs.
+
+        Raises
+        ------
+        ValueError
+            If `block_size` is not a positive integer.
+        InputError
+            (A ``ValueError``.)  As `variants` and `__next__`, e.g. for a
+            truncated BED file.
+
+        Examples
+        --------
+        >>> import os, tempfile
+        >>> import numpy as np
+        >>> from pylmm.plink_io import PlinkReader
+        >>> tmp = tempfile.TemporaryDirectory()
+        >>> base = os.path.join(tmp.name, "toy")
+        >>> with open(base + ".fam", "w") as f:
+        ...     _ = f.write("F1 I1 0 0 1 -9\\nF1 I2 0 0 1 -9\\nF2 I3 0 0 2 -9\\n")
+        >>> with open(base + ".bim", "w") as f:
+        ...     _ = f.write("1 rs1 0 100 A G\\n1 rs2 0 200 C T\\n2 rs3 0 50 A C\\n")
+        >>> with open(base + ".bed", "wb") as f:
+        ...     _ = f.write(bytes([0x6C, 0x1B, 0x01, 0b00111000, 0b00000111, 0b00101100]))
+        >>> r = PlinkReader(base, norm_genotype=False)
+        >>> for G, v in r.iter_blocks(2):
+        ...     print(v.snp.tolist(), G.tolist())
+        ['rs1', 'rs2'] [[0.0, 1.0], [0.5, nan], [1.0, 0.0]]
+        ['rs3'] [[0.0], [1.0], [0.5]]
+        >>> W = np.column_stack([g for g, _ in r.iter_snps()])
+        >>> blocks = np.hstack([G for G, _ in r.iter_blocks(2)])
+        >>> np.array_equal(W, blocks, equal_nan=True)
+        True
+        >>> tmp.cleanup()
+        """
+        block_size = check_block_size(block_size)
+        variants = self.variants
+        if self.type == "b":
+            self._check_bed_header()
+            return self._iter_blocks_bed(block_size, variants)
+        return self._iter_blocks_stacked(block_size, variants)
+
+    def _iter_blocks_bed(
+        self, block_size: int, variants: Variants
+    ) -> Iterator[tuple[NDArray[np.float64], Variants]]:
+        """`iter_blocks` for a BED file: decode `block_size` SNPs at a time."""
+        n_file = self.N
+        bytes_per_snp = (n_file + 3) // 4
+        index = self._geno_index
+        norm = self.norm_genotype
+        m = len(variants)
+        with open(self.fbase + ".bed", "rb") as fh:
+            fh.read(3)  # magic number and SNP-major flag, checked by iter_blocks
+            for start in range(0, m, block_size):
+                b = min(block_size, m - start)
+                buf = fh.read(b * bytes_per_snp)
+                if len(buf) != b * bytes_per_snp:
+                    raise InputError(
+                        "Truncated BED file %s.bed: expected %d bytes for SNP %d, got %d"
+                        % (
+                            self.fbase,
+                            bytes_per_snp,
+                            start + len(buf) // bytes_per_snp + 1,
+                            len(buf) % bytes_per_snp,
+                        )
+                    )
+                R = self._decode_bed_block(buf, b, n_file)  # (b, N), one SNP per row
+                if index is not None:
+                    R = R[:, index]
+                if norm:
+                    for j in range(b):
+                        R[j] = normalize_genotype(R[j])
+                yield R.T, variants[start : start + b]
+
+    @classmethod
+    def _decode_bed_block(cls, buf: bytes, b: int, n: int) -> NDArray[np.float64]:
+        """Decode the BED bytes of `b` consecutive SNPs of `n` individuals: shape ``(b, n)``.
+
+        The values of `_format_binary_genotypes`, for a block of SNPs at once:
+        each byte is looked up in `_BED_BYTE_VALUES` (its four genotypes).
+        """
+        B = np.frombuffer(buf, dtype=np.uint8).reshape(b, -1)
+        R: NDArray[np.float64] = np.take(cls._BED_BYTE_VALUES, B, axis=0).reshape(b, -1)[:, :n]
+        return R
+
+    def _iter_blocks_stacked(
+        self, block_size: int, variants: Variants
+    ) -> Iterator[tuple[NDArray[np.float64], Variants]]:
+        """`iter_blocks` for TPED and EMMA input: stack the vectors of the per-SNP reader."""
+        reader = copy.copy(self)  # its own file handles; same individuals and options
+        reader.fhandle = reader.snp_file_handle = None
+        reader.iter_snps()
+        # Call __next__ directly: iter(reader) (as in islice) would restart the iteration.
+        try:
+            start = 0
+            done = False
+            while not done:
+                cols: list[NDArray[np.float64]] = []
+                while len(cols) < block_size:
+                    try:
+                        cols.append(next(reader)[0])
+                    except StopIteration:
+                        done = True
+                        break
+                if cols:
+                    yield np.column_stack(cols), variants[start : start + len(cols)]
+                    start += len(cols)
+        finally:
+            reader.close()
 
     # -- individuals --------------------------------------------------------
 
@@ -1101,3 +1315,71 @@ class PlinkReader:
         self._restrict(al.rows["genotype file"])
         self.K = al.take_square("kinship", K)
         return self.K
+
+
+# Lines of a .bim / .map file parsed at a time by `_read_variant_file` (bounds the
+# memory of the Python strings of a file with millions of SNPs).
+_VARIANT_CHUNK = 65536
+
+
+def _read_variant_file(fn: str) -> Variants:
+    """Read a ``.bim`` (6 columns) or ``.map`` (3 or 4 columns) file into `Variants`.
+
+    ``.map``: ``chrom snp cm bp``, or ``chrom snp bp`` (no ``cm``), as PLINK
+    reads them; no alleles.  The columns are converted chunk by chunk, so
+    only one chunk of lines is held as Python strings at a time.
+
+    Raises
+    ------
+    InputError
+        If a line has the wrong number of fields (all lines of a ``.map`` must
+        have the same number) or ``cm`` / ``bp`` is not a number.
+    """
+    is_bim = fn.endswith(".bim")
+    allowed = (6,) if is_bim else (4, 3)
+    width: int | None = None
+    chunks: list[list[NDArray[Any]]] = []
+    lineno = 0
+    with open(fn) as f, _number_errors("SNP file %s" % fn):
+        while True:
+            rows = [line.split() for line in itertools.islice(f, _VARIANT_CHUNK)]
+            if not rows:
+                break
+            for r in rows:
+                lineno += 1
+                if width is None and len(r) in allowed:
+                    width = len(r)
+                if len(r) != width:
+                    raise InputError(
+                        "%s, line %d: expected %s fields (%s), found %d"
+                        % (
+                            fn,
+                            lineno,
+                            width or " or ".join(str(a) for a in allowed),
+                            "chromosome, SNP id, cM, position, A1, A2"
+                            if is_bim
+                            else "chromosome, SNP id, [cM,] position",
+                            len(r),
+                        )
+                    )
+            chunk = [np.array(c, dtype=str) for c in zip(*rows)]
+            if width == 3:  # chrom snp bp
+                chunk[2] = chunk[2].astype(np.int64)
+            else:
+                chunk[2] = chunk[2].astype(np.float64)
+                chunk[3] = chunk[3].astype(np.int64)
+            chunks.append(chunk)
+    if not chunks:
+        return Variants.from_names([])
+    c = [np.concatenate(col) for col in zip(*chunks)]
+    if width == 3:
+        return Variants(chrom=c[0], snp=c[1], bp=c[2])
+    if width == 4:
+        return Variants(chrom=c[0], snp=c[1], cm=c[2], bp=c[3])
+    return Variants(chrom=c[0], snp=c[1], cm=c[2], bp=c[3], a1=c[4], a2=c[5])
+
+
+if TYPE_CHECKING:
+    # PlinkReader implements the GenotypeSource protocol (checked by mypy).
+    def _is_genotype_source(r: PlinkReader) -> GenotypeSource:
+        return r
