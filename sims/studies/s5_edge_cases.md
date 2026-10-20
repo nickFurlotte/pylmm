@@ -6,6 +6,8 @@ Study code: `sims/studies/s5_edge_cases.py`. Full table (161 cases, one row each
 outcome over 6 replicates): `sims/results/s5_edge_cases/summary.md` / `summary.csv`.
 Reproduce: `just sim s5_edge_cases --jobs 6` then `just sim-report s5_edge_cases`
 (`--quick`: 22 cells, about 5 s).
+The `warn` texts in the committed `summary.csv` had their absolute paths shortened after they were
+truncated to 120 characters, so a rerun (which shortens first) shows longer texts.
 
 pylmm as on `phase4-sims-framework` was run unchanged. Nothing here modifies `pylmm/`.
 

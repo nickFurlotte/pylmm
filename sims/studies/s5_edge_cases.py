@@ -442,16 +442,27 @@ BUILDERS = {
 # ---------------------------------------------------------------------------
 
 
-# An absolute path up to a repo package directory, e.g. "/opt/clone/pylmm/lmm.py:220"
-# -> "pylmm/lmm.py:220", so the summary never records the machine-specific checkout path.
-_ABS_TO_REPO = re.compile(
-    r"(?:[A-Za-z]:)?[\\/]\S*[\\/]"  # the absolute prefix (greedy: up to the last match)
-    r"(?=(?:pylmm|sims|tests)[\\/](?:[\w.-]+[\\/])*[\w.-]+\.py)"  # a repo .py path follows
+# Shorten absolute paths in error and warning text, so the summary never records the
+# machine-specific checkout path: "/opt/clone/pylmm/lmm.py:220" -> "pylmm/lmm.py:220", and
+# ".../site-packages/scipy/optimize/_optimize.py" -> "scipy/optimize/_optimize.py".
+# A path counts as absolute only where it starts a token ("/" or "C:\\" not preceded by a word
+# character, ".", ":", "/", "\\" or "-"), so relative paths and URLs are left alone.
+_ABS_PATH = re.compile(r"(?<![\w.:/\\-])(?:[A-Za-z]:)?[\\/][^\s\"',;()<>]*")
+_SITE_PACKAGES = re.compile(r"^.*[\\/](?:site|dist)-packages[\\/]")
+_REPO_PREFIX = re.compile(
+    r"^.*[\\/]"  # greedy: the last separator that a repo .py path follows
+    r"(?=(?:pylmm|sims|tests)[\\/](?:[\w.-]+[\\/])*[\w.-]+\.py)"
 )
 
 
+def _shorten(m):
+    p = m.group(0)
+    q = _SITE_PACKAGES.sub("", p, count=1)
+    return q if q != p else _REPO_PREFIX.sub("", p, count=1)
+
+
 def _relpaths(s):
-    return _ABS_TO_REPO.sub("", s)
+    return _ABS_PATH.sub(_shorten, s)
 
 
 def _err(e):
