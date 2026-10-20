@@ -153,7 +153,8 @@ def test_parallel_matches_serial(fake, tmp_path, monkeypatch):
     runner.run(fake, verbose=False)
     serial = {(r["cell_id"], r["rep"]): r["metrics"] for r in _rows()}
     monkeypatch.setenv("SIMS_RESULTS_DIR", str(tmp_path / "results_par"))
-    s = runner.run(fake, jobs=2, chunk=1, verbose=False)
+    # job_cap explicitly: the default (CPU count - 2) may be 1 on a small machine.
+    s = runner.run(fake, jobs=2, chunk=1, verbose=False, job_cap=2)
     assert s["jobs"] == 2 and s["ran"] == 6
     par = {(r["cell_id"], r["rep"]): r["metrics"] for r in _rows()}
     assert par == serial

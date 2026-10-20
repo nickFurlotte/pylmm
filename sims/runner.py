@@ -363,8 +363,8 @@ def run(
     err_path = path.replace(".jsonl", ".errors.jsonl")
     if jobs > job_cap:
         sys.stderr.write(
-            "note: --jobs %d capped at %d (the CPU count minus 2; pass a "
-            "higher job_cap/--no-job-cap to override)\n" % (jobs, job_cap)
+            "note: --jobs %d capped at %d (job_cap; its default is the CPU count "
+            "minus 2; pass a higher job_cap or --no-job-cap to override)\n" % (jobs, job_cap)
         )
         jobs = job_cap
     jobs = max(1, int(jobs))
