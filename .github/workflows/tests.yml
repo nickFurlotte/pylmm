@@ -136,7 +136,7 @@ jobs:
       - name: Show CPU and BLAS
         run: |
           lscpu
-          uv run --resolution lowest-direct --with threadpoolctl python -c "import json, threadpoolctl; print(json.dumps(threadpoolctl.threadpool_info(), indent=1))"
+          uv run --resolution lowest-direct --with "threadpoolctl>=3.1" python -c "import json, numpy, threadpoolctl; print(json.dumps(threadpoolctl.threadpool_info(), indent=1))"
 
       - name: Run tests
         run: uv run --resolution lowest-direct pytest
