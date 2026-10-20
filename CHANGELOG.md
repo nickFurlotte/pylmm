@@ -356,6 +356,9 @@ with `phase` and `notes` columns; `kind=signature` rows are changes of types or 
 ### Docs
 - README rewritten for 1.0 (what pylmm does, how it is validated, install, quick start, agents, migration);
   new `CITATION.cff` for the software.
+- `data/README.md`: a licence and citation section. The example data is third-party research data, not
+  covered by the MIT licence of the code; it says which sources to cite and that the 1219-animal BED's
+  origin is undocumented. The README's license section points to it.
 - Package metadata: description, Production/Stable and Python 3.11-3.14 classifiers, keywords, project
   URLs. The sdist ships the package, `sims/` (without result tables), `skills/` and the notebook, not the
   example data or the tests; the wheel holds `pylmm/` only.

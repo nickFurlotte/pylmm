@@ -147,3 +147,5 @@ this repository" button reads it).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Code: MIT. Example data in `data/`: see [data/README.md](data/README.md).
