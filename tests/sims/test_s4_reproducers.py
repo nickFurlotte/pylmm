@@ -1044,6 +1044,12 @@ def test_bug17_ml_fit_warns_when_ill_posed():
         # an intercept-free model: the null direction 1 is not absorbed
         with quiet():
             LMM(y, K, X0=G[:, :1] - G[:, :1].mean()).fit(reml=False)
+    # the exact condition (review N1): a covariate that is not the intercept
+    # but has a component along the null direction 1 also absorbs it
+    x0 = G[:, :1] + 0.5
+    assert oracle.fit(y, K, x0, reml=False, n_grid=51).ml_unbounded
+    with quiet(), pytest.warns(UserWarning, match="ML likelihood has no maximum"):
+        LMM(y, K, X0=x0).fit(reml=False)
 
 
 # ---------------------------------------------------------------------------

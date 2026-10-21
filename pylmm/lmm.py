@@ -439,6 +439,14 @@ def _check_eigen_args(kva: ArrayLike | None, kve: ArrayLike | None) -> None:
         )
 
 
+def _orthonormal_columns(X: FloatArray) -> FloatArray:
+    """An orthonormal basis (numpy's reduced QR) of the columns of ``X``, of full column rank."""
+    if not X.shape[1]:
+        return X
+    q: FloatArray = np.linalg.qr(X)[0]
+    return q
+
+
 def _snp_column(X: ArrayLike, n: int) -> FloatArray:
     """One SNP, given as (n,) or (n, 1), as an (n, 1) float64 column."""
     x = np.ascontiguousarray(X, dtype=np.float64)
@@ -1251,6 +1259,10 @@ class LMM:
         self.x0t = _matrix_mult(self.kve.T, self.X0)
         self.x0t_stack = np.hstack([self.x0t, np.ones((self.N, 1))])
         self.q = self.x0t.shape[1]
+        # An orthonormal basis of the rotated covariates: the likelihood is
+        # invariant to X0 -> X0 A, and on this basis its weighted normal
+        # equations stay well conditioned whatever the covariates' scale.
+        self._x0t_ortho = _orthonormal_columns(self.x0t)
 
     def ml_solution(
         self, h: float, X: FloatArray
@@ -1420,7 +1432,7 @@ class LMM:
         """
 
         if X is None:
-            X = self.x0t
+            X = self.x0t if self.legacy_fit else self._x0t_ortho
         elif stack:
             self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
             X = self.x0t_stack
@@ -1516,24 +1528,46 @@ class LMM:
         best = max(c[0] for c in cands)
         return np.float64(min(c[1] for c in cands if c[0] >= best))
 
+    def _warn_boundary(self, h: float, p: int) -> None:
+        """Warn when ``h`` is at 1 and ``K`` is rank-deficient beyond the design.
+
+        With no residual variance the data lie in the span of ``K``: only
+        about ``rank(K) - p`` directions carry information, but ``sigma2`` and
+        the Wald test use ``N - p`` degrees of freedom, so the test is
+        anti-conservative (a known model boundary, not a search error).
+        """
+        if h >= 0.999 and int((self.kva <= 1e-6).sum()) > p:
+            warnings.warn(
+                "h is at its upper boundary (>= 0.999) and the kinship matrix is "
+                "rank-deficient: the residual variance is ~0, so sigma^2 and the Wald test's "
+                "N - p degrees of freedom overstate the information (p-values too small); "
+                "see the estimate-heritability and interpret-gwas-results skills",
+                stacklevel=3,
+            )
+
     def _check_ml_ill_posed(self) -> bool:
         """Whether the ML likelihood is unbounded as ``h -> 1`` (bug 17), cached.
 
-        It is when ``K`` is singular and its null space (the eigenvectors
-        whose eigenvalue was raised to the 1e-6 floor) lies in the span of
-        the covariates ``X0``: the covariates then absorb ``y`` in those
-        directions, whose variance ``sigma2 * (1 - h)`` goes to 0 as
-        ``h -> 1``.  The common case is a centred kinship (``K 1 = 0``, as
-        `calculate_kinship` builds) from more SNPs than individuals, whose
-        null space is exactly the intercept.  REML is not affected.
+        In the rotated basis the null directions of ``K`` (the eigenvalues
+        raised to the 1e-6 floor) have variance ``sigma2 * (1 - h)``.  If the
+        covariates can fit ``y`` exactly in all of them -- the rows of the
+        rotated ``X0`` for those directions have full row rank -- the
+        residual there is zero for every ``h``, and the ML log-likelihood
+        gains ``-d/2 log(1 - h)`` (``d`` null directions) without bound; the
+        exact condition, checked here.  The common case is a centred kinship
+        (``K 1 = 0``, as `calculate_kinship` builds) from more SNPs than
+        individuals, whose null space is exactly the intercept.  Otherwise the
+        residual in a null direction makes the likelihood fall to -inf at
+        ``h = 1`` (bounded).  REML is not affected.
         """
         if self._ml_ill_posed is None:
             null = self.kva <= 1e-6
+            d = int(null.sum())
             ill = False
-            if null.any() and self.q and null.sum() <= self.q:
-                basis = linalg.qr(self.x0t, mode="economic")[0]
-                inside = (basis[null, :] ** 2).sum(axis=1)  # 1 = in the span of X0
-                ill = bool((inside > 1.0 - 1e-6).all())
+            if d and d <= self.q:
+                # rows of an orthonormal basis of the rotated X0 (well scaled)
+                rows = self._x0t_ortho[null, :]
+                ill = bool(np.linalg.matrix_rank(rows, tol=1e-6) == d)
             self._ml_ill_posed = ill
         return self._ml_ill_posed
 
@@ -1651,18 +1685,30 @@ class LMM:
         -----
         UserWarning
             Under ML (``reml=False``) when the ML likelihood has no maximum:
-            ``K`` is singular and its null space lies in the span of the
-            covariates, as for a centred kinship built from more SNPs than
-            individuals with an intercept (bug 17).  The likelihood then grows
-            without bound as ``h -> 1``, held back only by the 1e-6
-            eigenvalue floor, so the ML ``h`` (an interior local maximum or a
-            spike at 1) is unreliable; use REML.  Not with ``legacy_fit``.
+            ``K`` is singular and the covariates can fit ``y`` exactly along
+            its null space (the rotated covariates' rows for the null
+            directions have full row rank), as for a centred kinship built
+            from more SNPs than individuals with an intercept (bug 17).  The
+            likelihood then grows without bound as ``h -> 1``, held back only
+            by the 1e-6 eigenvalue floor, so the ML ``h`` (an interior local
+            maximum or a spike at 1) is unreliable; use REML.
+            When ``h >= 0.999`` and ``K`` has more floored (null) eigenvalues
+            than the design has columns: with no residual variance the data
+            lie in the span of ``K``, and ``sigma2`` and the Wald test's
+            ``N - p`` degrees of freedom overstate the information (e.g.
+            strain means expanded to replicate animals).  Neither warning
+            with ``legacy_fit``; neither changes a number.
 
         Notes
         -----
-        A grid of step 0.01 finds every peak of the profile that is at
-        least one grid step away from the others; two peaks closer than
-        that are refined as one.  ``h = 1`` is returned when the profile
+        The likelihood is evaluated on an orthonormal basis of the (rotated)
+        design: it is invariant to ``X -> X A``, and so the fitted ``h`` does
+        not depend on how a covariate is scaled or centred, also near
+        ``h = 1`` where the weights span many orders of magnitude.  ``beta``
+        and ``sigma`` are then computed in the given parametrisation
+        (`ml_solution`).  A grid of step 0.01 finds every peak of the profile
+        that is at least one grid step away from the others; two peaks
+        closer than that are refined as one.  ``h = 1`` is returned when the profile
         increases up to 1 (the residual variance is then 0).
 
         Examples
@@ -1698,14 +1744,22 @@ class LMM:
             H = np.array(range(ngrids)) / float(ngrids)
         else:
             H = np.arange(ngrids + 1) / float(ngrids)
-        grid_ll = np.array([self.log_likelihood(h, design, stack=False, reml=reml).ll for h in H])
+        # The default search evaluates the likelihood on an orthonormal basis of
+        # the design (the same likelihood: it is invariant to X -> X A), so that
+        # a badly scaled covariate cannot spoil it where the weights span many
+        # orders of magnitude (h near 1 with a singular K).
+        search = design if self.legacy_fit else _orthonormal_columns(design)
+        grid_ll = np.array([self.log_likelihood(h, search, stack=False, reml=reml).ll for h in H])
         self.ll_grid = grid_ll
 
         if self.legacy_fit:
             hmax = self._get_max(H, design, reml)
+            L, beta, sigma, _ = self.log_likelihood(hmax, design, stack=False, reml=reml)
         else:
-            hmax = self._get_best(H, design, reml)
-        L, beta, sigma, beta_stderr = self.log_likelihood(hmax, design, stack=False, reml=reml)
+            hmax = self._get_best(H, search, reml)
+            L = self.log_likelihood(hmax, search, stack=False, reml=reml).ll
+            beta, sigma, _, _, _ = self.ml_solution(hmax, design)  # by QR, in X's terms
+            self._warn_boundary(float(hmax), design.shape[1])
         if not reml and not self.legacy_fit:
             p = float(design.shape[1])
             sigma = sigma * (float(self.N) - p) / float(self.N)  # the ML Q / N (bug 9)
