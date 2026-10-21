@@ -94,16 +94,33 @@ KINDS = [
 MISSING = ["none", "sparse", "heavy", "rows", "equal_counts", "constant_rows"]
 
 
+# Missing values with other nan bits than np.nan: R's NA_real_ (a signalling nan, what
+# survives when an R matrix reaches numpy without arithmetic) and a negative quiet nan
+# with a payload.
+R_NA = np.array([0x7FF00000000007A2], dtype=np.uint64).view(np.float64)[0]
+NEG_PAYLOAD_NAN = np.array([0xFFF8000000000ABC], dtype=np.uint64).view(np.float64)[0]
+
+
+def _with_nan(R, bits):
+    """R with every nan replaced by the nan `bits` (np.nan: R itself)."""
+    R = R.copy()
+    R[np.isnan(R)] = bits
+    return R
+
+
 def _check(R):
-    """The block path on R (C-contiguous) and on R in padded rows (a BED block's layout)."""
-    want = _per_snp(R)
+    """The block path on R (C-contiguous) and on R in padded rows (a BED block's layout),
+    with the missing values as np.nan, as R's NA (signalling) and as a payload nan."""
     b, n = R.shape
-    padded = np.full((b, n + 3), 7.0)[:, :n]
-    padded[...] = R
-    for got in (R.copy(), padded):
-        _normalize_c_rows(got)
-        bad = [j for j in range(b) if not np.array_equal(_bits(want[j]), _bits(got[j]))]
-        assert not bad, "rows %s differ (n=%d)" % (bad[:5], n)
+    for bits in (np.nan, R_NA, NEG_PAYLOAD_NAN):
+        R1 = _with_nan(R, bits)
+        want = _per_snp(R1)
+        padded = np.full((b, n + 3), 7.0)[:, :n]
+        padded[...] = R1
+        for got in (R1.copy(), padded):
+            _normalize_c_rows(got)
+            bad = [j for j in range(b) if not np.array_equal(_bits(want[j]), _bits(got[j]))]
+            assert not bad, "rows %s differ (n=%d, missing %r)" % (bad[:5], n, bits)
 
 
 @pytest.mark.parametrize("n", NS)
@@ -264,3 +281,72 @@ def test_normalize_rows_long_rows_with_missing_calls_one_by_one(monkeypatch, mis
     got = R.copy()
     _normalize_rows(got)
     assert np.array_equal(_bits(got), _bits(_per_snp(R)))
+
+
+def test_signalling_nan_missing_values():
+    """R's NA_real_ as the missing value (review of #28, S1): [NA, 0, 1, 0.5] was zeroed,
+    because np.fmax.reduce does not skip a signalling nan."""
+    x = np.array([R_NA, 0.0, 1.0, 0.5])
+    X = x[None].copy()
+    _normalize_rows(X)
+    assert np.array_equal(_bits(X[0]), _bits(normalize_genotype(x.copy())))
+    assert X[0, 1] < 0 < X[0, 2]
+    rng = np.random.default_rng(1)
+    G = rng.integers(0, 3, (200, 400)).astype(float)
+    G[rng.random(G.shape) < 0.05] = R_NA
+    G[:, 7] = R_NA  # all missing: kept, bits included
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no FP warning from a signalling nan either
+        B = np.hstack([g for g, _ in ArraySource(G).iter_blocks(100)])
+    want = np.column_stack([normalize_genotype(G[:, j].copy()) for j in range(G.shape[1])])
+    assert np.array_equal(_bits(B), _bits(want))
+    assert np.array_equal(_bits(B[:, 7]), _bits(G[:, 7]))
+
+
+def test_probe_covers_small_call_counts(monkeypatch):
+    """A numpy whose row reduction differed only for 2-7 values (review of #28, S2): the
+    probe rejects it, and _normalize_rows then falls back, with one warning."""
+
+    class _Add:
+        def __getattr__(self, name):
+            return getattr(np.add, name)
+
+        @staticmethod
+        def reduce(a, axis=None, **kw):
+            a = np.asarray(a)
+            if a.ndim == 2 and axis == 1 and 2 <= a.shape[1] < 8:
+                return np.add.reduce(np.ascontiguousarray(a[:, ::-1]), axis=1, **kw)
+            return np.add.reduce(a, axis=axis, **kw)
+
+    class _Numpy:
+        add = _Add()
+
+        def __getattr__(self, name):
+            return getattr(np, name)
+
+    rng = np.random.default_rng(4)
+    R = rng.uniform(0, 2, (50, 1219)) * 10.0 ** rng.integers(-3, 4, (50, 1219))
+    for j in range(50):
+        R[j, rng.choice(1219, 1219 - (2 + j % 6), replace=False)] = np.nan  # 2-7 calls
+    monkeypatch.setattr(genotypes, "np", _Numpy())
+    monkeypatch.setattr(genotypes, "_ROWS_MATCH", {})
+    monkeypatch.setattr(genotypes, "_PROBE_WARNED", False)
+    X = R.copy()
+    _normalize_c_rows(X)  # the simulated numpy does change the block result ...
+    assert not np.array_equal(_bits(X), _bits(_per_snp(R)))
+    assert not genotypes._rows_match_per_snp(1219)  # ... and the probe sees it
+    calls = []
+    monkeypatch.setattr(genotypes.log, "warning", lambda *a: calls.append(a))
+    got = R.copy()
+    _normalize_rows(got)
+    _normalize_rows(got[:0])
+    _normalize_rows(R[:, :1000].copy())  # another failing n: still one warning
+    assert genotypes._ROWS_MATCH[1219] is False and len(calls) == 1
+    assert "SNP by SNP" in calls[0][0]
+    assert np.array_equal(_bits(got), _bits(_per_snp(R)))
+
+
+@pytest.mark.parametrize("n", [1, 7, 130, 1219, 2048, 2049, 5000])
+def test_probe_accepts_with_signalling_nans_and_padding(n):
+    """The probe (signalling and payload nans, padded rows, the count sweep) passes."""
+    assert genotypes._rows_match_per_snp(n)

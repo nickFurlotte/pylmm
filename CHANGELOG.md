@@ -79,7 +79,8 @@ maps them).
   so also `pylmm gwas` and `pylmm kinship`): `normalize_genotype` called on each SNP in a Python loop -> a
   whole block standardised in a few vectorised passes, with every SNP's float64 bits unchanged (the sums
   are taken over the same values in the same order and layout; a per-row-length probe falls back to the
-  per-SNP loop if a numpy ever sums otherwise; fuzzed bit for bit in CI, numpy 1.23.2 to current; SNPs of
+  per-SNP loop, with one warning, if a numpy ever sums otherwise; any nan is a missing value, signalling ones
+  such as R's `NA_real_` included; fuzzed bit for bit in CI, numpy 1.23.2 to current; SNPs of
   more than 2048 individuals with missing calls still go one by one, which is as fast there). Standardised
   `iter_blocks` throughput on the bundled BED file: 1.6-1.7x (2.1-2.3x that of `iter_snps`, was 1.3-1.4x);
   `pylmm gwas` on 20,000 README SNPs (1 BLAS thread, 15 interleaved runs): 2.27 s -> 2.11 s. Output of

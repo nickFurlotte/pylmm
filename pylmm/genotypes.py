@@ -398,8 +398,14 @@ def normalize_genotype(G: NDArray[np.float64]) -> NDArray[np.float64]:
 # checked: once per process for each row length n, `_rows_match_per_snp(n)` runs a
 # small block of awkward SNPs through both paths and compares the bits; if any differs
 # (a numpy or platform that sums otherwise), `_normalize_rows` standardises the SNPs
-# one at a time with `normalize_genotype` instead.  tests/test_normalize_rows.py fuzzes
-# the two paths against each other on every CI job (numpy 1.23.2 to current, x86-64).
+# one at a time with `normalize_genotype` instead (logged once, as a warning).
+#
+# Missing values are recognised with np.isnan, as in `normalize_genotype`, so any nan is
+# a missing value: quiet or signalling (R's NA_real_), with any payload.  No arithmetic,
+# max or min touches one (np.fmax.reduce, for one, does not skip a signalling nan).
+#
+# tests/test_normalize_rows.py fuzzes the two paths against each other on every CI job
+# (numpy 1.23.2 to current, x86-64), signalling and payload nans included.
 
 # `_normalize_rows` works on a block in parts of about 8 MiB of float64 (whole rows),
 # which bounds its temporaries (the compacted called values, masks) for any block size,
@@ -414,6 +420,7 @@ _GROUP_MAX_N = 2048
 
 # Row length n -> whether `_normalize_rows` matches `normalize_genotype` (the probe).
 _ROWS_MATCH: dict[int, bool] = {}
+_PROBE_WARNED = False
 
 
 def _normalize_rows(R: NDArray[np.float64]) -> None:
@@ -425,12 +432,22 @@ def _normalize_rows(R: NDArray[np.float64]) -> None:
     separated by padding, as a decoded BED block); otherwise a row-major
     copy is made, and written back.
     """
+    global _PROBE_WARNED
     b, n = R.shape
     if b == 0 or n == 0:  # n == 0: every row is all missing, kept
         return
     ok = _ROWS_MATCH.get(n)
     if ok is None:
         ok = _ROWS_MATCH[n] = _rows_match_per_snp(n)
+        if not ok and not _PROBE_WARNED:
+            _PROBE_WARNED = True
+            log.warning(
+                "standardising a block of SNPs at once does not reproduce normalize_genotype "
+                "bit for bit with this numpy (%s, SNPs of %d individuals); standardising SNP "
+                "by SNP instead: slower, same results",
+                np.__version__,
+                n,
+            )
     if not ok:
         for j in range(b):
             R[j] = normalize_genotype(R[j])
@@ -439,46 +456,64 @@ def _normalize_rows(R: NDArray[np.float64]) -> None:
     X = R if rows_contiguous else np.ascontiguousarray(R)
     step = max(1, _PART_BYTES // (8 * n))
     for r0 in range(0, b, step):
-        P = X[r0 : r0 + step]
-        if n > _GROUP_MAX_N:
-            some = np.flatnonzero(np.isnan(P).any(axis=1))  # SNPs with a missing call
-            if len(some):
-                for j in some.tolist():
-                    P[j] = normalize_genotype(P[j])
-                if len(some) < len(P):
-                    rest = np.flatnonzero(~np.isin(np.arange(len(P)), some))
-                    Y = P[rest]
-                    _normalize_c_rows(Y)
-                    P[rest] = Y
-                continue
-        _normalize_c_rows(P)
+        _normalize_part(X[r0 : r0 + step])
     if X is not R:
         R[...] = X
 
 
+def _normalize_part(P: NDArray[np.float64]) -> None:
+    """`_normalize_rows` for rows that are contiguous, without the probe.
+
+    SNPs of more than `_GROUP_MAX_N` individuals with a missing call go
+    through `normalize_genotype`; everything else through `_normalize_c_rows`.
+    """
+    if P.shape[1] > _GROUP_MAX_N:
+        has = np.isnan(P).any(axis=1)  # SNPs with a missing call
+        if has.any():
+            for j in np.flatnonzero(has).tolist():
+                P[j] = normalize_genotype(P[j])
+            if not has.all():
+                rest = np.flatnonzero(~has)
+                Y = P[rest]
+                _normalize_c_rows(Y)
+                P[rest] = Y
+            return
+    _normalize_c_rows(P)
+
+
 def _normalize_c_rows(X: NDArray[np.float64]) -> None:
-    """`_normalize_rows` for a ``(b, n)`` array whose rows are contiguous, without the probe.
+    """The block code of `_normalize_rows`, for a ``(b, n)`` array whose rows are contiguous.
 
     Every reduction is along the rows: of `X` itself (whose rows are
-    contiguous), or of a C-contiguous array of compacted called values.
+    contiguous), or of a C-contiguous array of compacted called values.  No
+    arithmetic, max or min touches a missing value (any nan, quiet or
+    signalling, with any payload): the missing values are set to 0 first,
+    every statistic of a SNP with missing calls is taken over its compacted
+    called values, and all-missing SNPs are restored from a copy at the end.
     """
     b, n = X.shape
     miss = np.isnan(X)
     cnt = n - np.count_nonzero(miss, axis=1)  # called values per row
     ncall = np.maximum(cnt, 1)  # (no division by zero for all-missing rows, unused)
-    # The sums of called.mean() and called.var().  A row without missing calls is
-    # reduced where it is (contiguous); its variance is done below.  The rows with
-    # some, not all, calls missing are compacted: their called values, row after
-    # row with the rows sorted by call count, so that each group of rows with
-    # equal count c is a C-contiguous (rows, c) array, reduced along its rows.
-    sums = np.add.reduce(X, axis=1)
-    ssd = np.zeros(b)  # sums of squared deviations (all-missing rows: 0, unused)
-    part = np.flatnonzero((cnt > 0) & (cnt < n))
+    part = np.flatnonzero((cnt > 0) & (cnt < n))  # some, not all, calls missing
+    empty = np.flatnonzero(cnt == 0)
+    kept = X[empty]  # all missing: returned unchanged (their nan bits too)
     if len(part):
+        # The called values of these rows, row after row with the rows sorted by
+        # call count, so that each group of rows with equal count c is a
+        # C-contiguous (rows, c) array.
         order = part[np.argsort(cnt[part], kind="stable")]
         counts = cnt[order]
         bounds = np.r_[0, np.flatnonzero(np.diff(counts)) + 1, len(order)]
         called = X[order][~miss[order]]
+    if len(part) or len(empty):
+        np.copyto(X, 0.0, where=miss)  # the reductions below then see no nan
+    # Rows without missing calls are reduced where they are (contiguous); the values
+    # of the other rows are replaced below.
+    sums = np.add.reduce(X, axis=1)
+    ptp = np.maximum.reduce(X, axis=1) - np.minimum.reduce(X, axis=1)  # np.ptp(called)
+    ssd = np.zeros(b)  # sums of squared deviations
+    if len(part):
         off = 0
         for a, z in zip(bounds[:-1].tolist(), bounds[1:].tolist()):
             c = int(counts[a])
@@ -486,17 +521,14 @@ def _normalize_c_rows(X: NDArray[np.float64]) -> None:
             off += (z - a) * c
             rows = order[a:z]
             sums[rows] = s1 = np.add.reduce(C, axis=1)
+            ptp[rows] = np.maximum.reduce(C, axis=1) - np.minimum.reduce(C, axis=1)
             D = C - (s1 / c)[:, None]  # called - called.mean(), as in called.var()
             ssd[rows] = np.add.reduce(np.multiply(D, D, out=D), axis=1)
         del called
     m = sums / ncall  # called.mean()
-    # np.ptp(called): fmax and fmin skip the missing calls (max and min are exact).
-    ptp = np.fmax.reduce(X, axis=1) - np.fmin.reduce(X, axis=1)
     am = np.abs(m)
     const = ptp <= 1e-12 * np.where(am > 1.0, am, 1.0)  # 1e-12 * max(1.0, abs(m))
-    dead = np.flatnonzero((cnt == 0) | const)
-    kept = X[dead]  # all-missing rows (kept) and constant ones (zeros), restored below
-    kept[const[dead]] = 0.0
+    const[empty] = False
     # The elementwise passes, a chunk of rows at a time.
     full = cnt == n
     step = min(b, max(1, _CHUNK_BYTES // (8 * n)))
@@ -515,34 +547,76 @@ def _normalize_c_rows(X: NDArray[np.float64]) -> None:
         s = np.sqrt(var)
         s[var == 0] = 1.0
         X1 /= s[:, None]
-    if len(dead):
-        X[dead] = kept
+    X[const] = 0.0  # constant up to rounding: zeros
+    if len(empty):
+        X[empty] = kept
+
+
+# Call counts of the probe: around the boundaries of numpy's pairwise summation (a
+# plain loop below 8 values, 8 accumulators up to 128, recursive halving above).
+_PROBE_COUNTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 31, 32, 33, 127, 128, 129, 255, 256, 257)
+# Missing values with other nan bits: R's NA_real_ (signalling), a negative quiet
+# nan with a payload.
+_NAN_BITS = np.array([0x7FF00000000007A2, 0xFFF8000000000ABC], dtype=np.uint64).view(np.float64)
 
 
 def _rows_match_per_snp(n: int) -> bool:
-    """Whether `_normalize_c_rows` gives `normalize_genotype`'s bits for SNPs of length `n`.
+    """Whether the block code gives `normalize_genotype`'s bits for SNPs of length `n`.
 
-    The probe of `_normalize_rows`: a fixed (seeded) block of 16 SNPs of
-    length `n`, each with values of many magnitudes (so that a sum done in
-    another order would round differently), with no missing call, one, a few,
-    all but one, all, and repeated call counts, plus constant and
-    near-constant SNPs.  Compared as raw bits.
+    The probe of `_normalize_rows`: a fixed (seeded) block of SNPs of length
+    `n`, with values of many magnitudes (so that a sum done in another order
+    would round differently), standardised by `_normalize_part` in a
+    C-contiguous array and in padded rows (a decoded BED block's layout), and
+    compared with `normalize_genotype` as raw bits.  The SNPs: no missing
+    call (mixed magnitudes, BED values, near-constant, constant), all
+    missing (plain and signalling nan), and, for ``n <= _GROUP_MAX_N``, one
+    SNP for each call count of `_PROBE_COUNTS` below n and for n - 2,
+    n - 1, n // 2 and n // 3, plus a second SNP for counts 2, 9, 129 and
+    n - 1 (groups of two rows): the counts whose compacted values are
+    reduced as ``(rows, c)`` arrays.  Two of them use a signalling and a
+    payload nan as their missing value.
+
+    The cost is bounded: about 45 SNPs of length n up to `_GROUP_MAX_N` (a
+    few ms).  Above it, SNPs with missing calls are standardised one by one
+    anyway (there is no compaction to check), so the probe has 10 SNPs: about
+    0.5 s per row length at n = 1,000,000 (the earlier 16-SNP probe: 1 s), once
+    per process.  A bounded
+    probe checks the reduction machinery at this n; it is not a proof for
+    every input (the CI fuzz is the wider net).
     """
     rng = np.random.default_rng(n)
-    R = rng.uniform(0.0, 2.0, (16, n)) * 10.0 ** rng.integers(-3, 4, (16, n))
-    R[1] = rng.integers(0, 3, n) / 2.0  # BED values
-    R[2] = 0.3 + 1e-16 * rng.standard_normal(n)  # constant up to rounding
-    R[3] = 1.0
-    for j, k in ((4, 1), (5, n // 3), (6, n // 3), (7, n - 1), (8, n), (9, 2), (10, n // 2)):
-        R[j, rng.choice(n, min(k, n), replace=False)] = np.nan
-    R[11:13, : n // 2] = np.nan  # two rows with the same count, same positions
-    X = R.copy()
-    _normalize_c_rows(X)
-    for j in range(len(R)):
-        want = normalize_genotype(R[j].copy())
-        if not np.array_equal(want.view(np.int64), X[j].view(np.int64)):
-            log.debug("block standardisation differs from normalize_genotype at n=%d", n)
-            return False
+
+    def mixed(k: int) -> NDArray[np.float64]:
+        return rng.uniform(0.0, 2.0, (k, n)) * 10.0 ** rng.integers(-3, 4, (k, n))
+
+    fixed = [
+        mixed(3),
+        rng.integers(0, 3, (1, n)) / 2.0,  # BED values
+        0.3 + 1e-16 * rng.standard_normal((1, n)),  # constant up to rounding
+        np.ones((1, n)),
+        np.full((1, n), np.nan),
+        np.full((1, n), _NAN_BITS[0]),
+    ]
+    if n <= _GROUP_MAX_N:
+        counts = sorted({c for c in (*_PROBE_COUNTS, n - 2, n - 1, n // 2, n // 3) if 0 < c < n})
+        counts += [c for c in (2, 9, 129, n - 1) if 0 < c < n]
+    else:
+        counts = [n - 1, n // 2]
+    R = np.vstack([*fixed, mixed(len(counts))])
+    first = len(R) - len(counts)
+    for j, c in enumerate(counts, start=first):
+        R[j, rng.choice(n, n - c, replace=False)] = np.nan
+    for j, bits in zip(range(len(R) - 1, first - 1, -1), _NAN_BITS):
+        R[j][np.isnan(R[j])] = bits
+    want = [normalize_genotype(R[j].copy()) for j in range(len(R))]
+    padded = np.full((len(R), n + 3), 7.0)[:, :n]
+    for X in (R.copy(), padded):
+        X[...] = R
+        _normalize_part(X)
+        for j in range(len(R)):
+            if not np.array_equal(want[j].view(np.int64), X[j].view(np.int64)):
+                log.debug("block standardisation differs from normalize_genotype at n=%d", n)
+                return False
     return True
 
 
