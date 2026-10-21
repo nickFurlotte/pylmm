@@ -146,6 +146,57 @@ BATCH_ATOL_SCALE = 2e-11
 BATCH_REF_RTOL = 1e-8
 BATCH_REF_ATOL_SCALE = 1e-10
 
+# Kinship files (pylmm.kinship_io, tests/test_kinship_io.py).
+#
+# FLOAT32_ROUND_RTOL: a float64 value rounded to float32 (round to nearest, normal
+# range) moves by at most 2**-24 of itself.  A derived bound, not a measurement: a
+# GRM read back is exactly K rounded so (test_grm_round_trip_is_float32_rounding),
+# and plink2's float32 GRM vs its float64 .rel.bin stays within it.
+FLOAT32_ROUND_RTOL = 2.0**-24
+#
+# A scan on a GCTA GRM (float32, `pylmm kinship --out-format grm` + `pylmm gwas
+# --grm`) vs the same scan on the float64 text kinship (-o FILE + --kinship
+# FILE): K differs by the float32 rounding of each entry (relative <= 2**-24,
+# about 6e-8), which moves h and every statistic a little.  Measurement
+# (Phase 6.2c, macOS arm64, numpy 2.x / Accelerate; synthetic BEDs with 2%
+# missing calls, n/m/h2 = 100/500/0.5, 200/1000/0.8, 300/2000/0.3,
+# 400/1500/0.95, 150/800/0.05; script in PR #29):
+#   max |dt| 1.3e-7, max |p_grm - p_text| / p_text 3.2e-7,
+#   max |d log10 p| 1.4e-7 (BETA and t relative errors reach 2.8e-4 only for
+#   t ~ 1e-4, so t is compared absolutely).
+# The same against plink2's float64 .rel.bin on the plink2 fixtures (50 and 53
+# samples, 12 heritable phenotypes each): max |dt| 1.2e-7, rel dp 2.0e-7.
+# GRM_FLOAT32_ATOL_T is ~80x and GRM_FLOAT32_RTOL_P ~30x the worst.  These are
+# EMPIRICAL, not a bound for arbitrary data: a K perturbation can move the h
+# grid optimum near a boundary or a flat likelihood, and then t moves by more.
+# The CI case (n = 200) is deterministic.
+GRM_FLOAT32_ATOL_T = 1e-5
+GRM_FLOAT32_RTOL_P = 1e-5
+#
+# plink2's TEXT .rel (`--make-rel`, default or `square`) prints K with %g: 6
+# significant digits, so each entry is off by at most half a unit in the 6th
+# digit, 5e-6 of itself (derived; measured: max relative 4.9e-6 on the 50-sample
+# fixture and on the review's 53-sample plink2 run).  REL_TEXT_K_RTOL is that
+# bound plus float64 slack.
+REL_TEXT_K_RTOL = 5e-6 * (1 + 1e-9)
+# A scan on the text .rel vs on plink2's float64 .rel.bin of the same GRM
+# (Phase 6.2c, script in the PR #29 review reply: tests/data/plink2, 50 samples, and the
+# review's 53-sample plink2 files; 12 phenotypes each, h2 0.3/0.6/0.9, 4 seeds):
+#   max |dt| 8.0e-6, max rel dp 1.7e-5 (text triangle and square alike).
+# ~60x worse than a float32 GRM.  REL_TEXT_ATOL_T and REL_TEXT_RTOL_P are ~12x
+# the worst; empirical as above.
+REL_TEXT_ATOL_T = 1e-4
+REL_TEXT_RTOL_P = 2e-4
+#
+# A precomputed eigendecomposition (`pylmm gwas --eigen`, given, or reordered by
+# its sample IDs) vs the scan that computes its own: the same K, but eigh's output
+# may be permuted rows of another eigh, or another LAPACK call.  Measured
+# (tests/test_kinship_io.py, Phase 6.2c): max |a - b| 2.3e-13, max relative
+# 2.9e-11 (a reordered decomposition, values near 0); exactly 0 when nothing is
+# reordered.  EIGEN_REUSE_RTOL is ~35x and EIGEN_REUSE_ATOL ~40x the worst.
+EIGEN_REUSE_RTOL = 1e-9
+EIGEN_REUSE_ATOL = 1e-11
+
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|
 PSD_RTOL = 1e-10  # min eigenvalue >= -PSD_RTOL * max eigenvalue

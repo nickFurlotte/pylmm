@@ -70,8 +70,39 @@ maps them).
 - `sims/studies/s6_kinship_kinds.py` (`just sim s6_kinship_kinds [--quick]`): h2 recovery and null
   calibration of the three kinds on a synthetic RI-like inbred panel (`sims.genotypes.inbred_panel`, a new
   genotype source) and on the bundled HMDP strains; findings in `s6_kinship_kinds.md`.
+- GCTA binary GRMs, read and written natively (`pylmm.kinship_io`): `read_grm(prefix)` -> `(K, ids)` from
+  `prefix.grm.bin` (float32 lower triangle, row-major, with the diagonal) and `prefix.grm.id`;
+  `write_grm(prefix, K, ids, n_snps)` writes those and `prefix.grm.N.bin`; `read_grm_counts`. File sizes
+  are checked against the `.grm.id` (an `InputError` naming the expected size, with a hint for a float64
+  triangle or a square matrix). `pylmm gwas --grm PREFIX` (GCTA's `--grm`) reads one in place of
+  `--kinship`, aligned by ID like a kinship with a `.id` file; `pylmm kinship --out-format grm -o PREFIX`
+  writes one (`.grm.N.bin`: the `m` K was divided by, for every pair; not for EMMA input, which has no IDs).
+  A GRM is float32: K is rounded to about 7 significant digits, so a scan on it differs from the scan on
+  the text kinship by rounding (synthetic data: max |Δt| 1.3e-7, relative Δp 3.2e-7). Checked against
+  files written by plink2 v2.0.0-a.7.13 `--make-grm-bin` (`tests/data/plink2/`): pylmm reads them and
+  rewrites them byte for byte. `PlinkReader.read_kinship` also reads a `.grm.bin`.
+- plink2 `--make-rel` matrices, read only: `kinship_io.read_rel` reads `X.rel` / `X.rel.gz` (text, lower
+  triangle or square), `X.rel.bin` (float64 or `bin4` float32, square or triangle) with `X.rel.id` (a
+  `#FID IID` or `#IID` header; no FID -> `0`, as plink2 writes to a `.fam`). `pylmm gwas --kinship X.rel`
+  (or `.rel.gz` / `.rel.bin`) and `PlinkReader.read_kinship` use it. A plink2 `.rel` used to fail (the
+  `#FID IID` header was read as a sample, a triangle as a ragged matrix). plink2's text `.rel` holds 6
+  significant digits (`%g`), less than a float32 GRM (scans: |Δt| up to 8e-6 vs 1.2e-7 against its float64
+  `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
+  matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
+- `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
 
 ### Changed
+- `pylmm kinship --eigen-npz`: arrays `Kva`, `Kve` -> also `fid`, `iid` (the samples of Kve's rows; not for
+  EMMA input) and `kinship_type` (plain arrays, no pickle; 1.0.0 readers still find `Kva` and `Kve`).
+- `pylmm gwas --eigen`: the decomposition was used only if no individual was dropped or reordered, its rows
+  assumed to be the kinship's -> with sample IDs (the new `.npz`, or `PATH.id` / `PATH.grm.id` next to
+  `--eigen-text`'s `PATH.kva`/`.kve`) they are matched to the tested individuals: one missing is a usage
+  error (it is another kinship's decomposition), a permutation is reordered and used (a kinship realigned by
+  its IDs no longer forces a recomputation), and extra individuals (dropped since) make it ignored and
+  recomputed, as before. A file without IDs (1.0.0's) is used as before, with a warning. The `--eigen` file
+  is now read (and must exist) even when it is then ignored.
+- `pylmm gwas`: `--kinship` was required -> one of `--kinship` and `--grm` is (`one of the arguments
+  --kinship --grm is required`). With `--kinship` the output is unchanged.
 - `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
   bit for bit unchanged for one SNP (1-d input, the documented use; 2-d input also gives the 1.0.0 result,
   tested on a few arrays).

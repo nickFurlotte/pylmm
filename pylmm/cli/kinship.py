@@ -25,6 +25,14 @@ Next to the kinship ``FILE`` (``-o``) it writes ``FILE.id``, the (FID, IID) of e
 (one ``FID IID`` per line), which ``pylmm gwas --kinship FILE`` uses to align
 the matrix to its genotype file by ID.  EMMA input has no IDs, so no ID file
 is written for it (and a stale one is removed).
+
+``--out-format grm`` writes a GCTA binary GRM instead
+(`pylmm.kinship_io.write_grm`): ``FILE.grm.bin`` (K's lower triangle in
+float32), ``FILE.grm.N.bin`` (the ``m`` K was divided by, for every entry)
+and ``FILE.grm.id``, for ``pylmm gwas --grm FILE``, GCTA and plink2.  The
+eigendecomposition (``--eigen-text``, ``--eigen-npz``) is then that of the
+float32-rounded K the GRM holds.  The ``--eigen-npz`` file carries the
+sample IDs (arrays ``fid``, ``iid``) and the ``kinship_type``.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
 
-from pylmm import plink_io, samples
+from pylmm import kinship_io, plink_io, samples
 from pylmm.cli._common import (
     UsageError,
     add_logging_options,
@@ -67,13 +75,16 @@ Compute a kinship matrix from genotypes, for `pylmm gwas --kinship`: by
 default the standardized relatedness matrix K = Z Z'/m (Z: the standardised
 SNPs, missing calls mean-imputed; m: the SNPs used).  Writes K as
 whitespace-separated text to FILE (-o) and the sample IDs of its rows to
-FILE.id (not for EMMA input, which has no IDs), and logs the scale of K (its
-mean diagonal), the scale of the heritability fitted with it."""
+FILE.id (not for EMMA input, which has no IDs), or with --out-format grm as a
+GCTA binary GRM (FILE.grm.bin, FILE.grm.N.bin, FILE.grm.id; float32), and logs
+the scale of K (its mean diagonal), the scale of the heritability fitted with
+it."""
 
 _EPILOG = """\
 examples:
   pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
   pylmm kinship --bfile study -o study.kin --eigen-npz study.eig.npz
+  pylmm kinship --bfile study --out-format grm -o study
   pylmm kinship --emma-geno snps.emma -o K.txt
   pylmm kinship --emma-geno snps.emma --kinship-type ibs -o K.ibs.txt"""
 
@@ -147,7 +158,17 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="FILE",
         required=True,
         help="(required) write the kinship to FILE and its sample IDs to FILE.id (both "
-        "overwritten)",
+        "overwritten); with --out-format grm, FILE is the prefix of the GRM files",
+    )
+    output.add_argument(
+        "--out-format",
+        choices=("text", "grm"),
+        default="text",
+        help="text: an n x n text matrix FILE plus FILE.id (the default; all digits); grm: a "
+        "GCTA binary GRM, FILE.grm.bin (the lower triangle in float32, about 7 significant "
+        "digits), FILE.grm.N.bin (the number of SNPs) and FILE.grm.id, as gcta --make-grm "
+        "and plink2 --make-grm-bin write it (for `pylmm gwas --grm FILE`, GCTA, plink2; "
+        "needs --bfile or --tfile: EMMA genotypes have no IDs) (default: text)",
     )
     output.add_argument(
         "--eigen-text",
@@ -158,8 +179,10 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     output.add_argument(
         "--eigen-npz",
         metavar="NPZ",
-        help="also write the eigendecomposition to NPZ, arrays Kva and Kve (for "
-        "`pylmm gwas --eigen NPZ`; binary, exact and faster to read than --eigen-text)",
+        help="also write the eigendecomposition to NPZ, arrays Kva and Kve, with the sample "
+        "IDs of Kve's rows (arrays fid, iid; not for EMMA input) and the kinship_type (for "
+        "`pylmm gwas --eigen NPZ`, which checks the IDs; binary, exact and faster to read "
+        "than --eigen-text)",
     )
     performance = p.add_argument_group("performance")
     performance.add_argument(
@@ -189,6 +212,11 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--emma-num-snps applies only to --emma-geno")
     if args.legacy_kinship and args.kinship_type != "standardized":
         parser.error("--legacy-kinship applies only to --kinship-type standardized")
+    if args.out_format == "grm" and args.emma_geno:
+        parser.error(
+            "--out-format grm needs sample IDs (FILE.grm.id), and EMMA genotypes have none: "
+            "use --bfile or --tfile, or --out-format text"
+        )
     check_log_file(parser, args)
 
 
@@ -251,7 +279,7 @@ def compute_kinship(
     block_size: int,
     kind: str = "standardized",
     legacy: bool = False,
-) -> FloatArray:
+) -> tuple[FloatArray, int]:
     """The kinship of all the SNPs of ``reader``, ``block_size`` SNPs at a time.
 
     `pylmm.kinship.KinshipAccumulator`, fed the raw genotypes: the same K as
@@ -275,8 +303,11 @@ def compute_kinship(
 
     Returns
     -------
-    numpy.ndarray
+    K : numpy.ndarray
         The ``(n, n)`` kinship.
+    m : int
+        The number of SNPs K was divided by (with ``legacy``, all SNPs
+        read; otherwise the SNPs used).
 
     Raises
     ------
@@ -324,13 +355,14 @@ def compute_kinship(
     skipped = acc.n_snps - acc.n_used - acc.n_all_missing
     if skipped:
         log.info("skipped %d constant SNPs", skipped)
+    m = acc.n_snps if legacy else acc.n_used
     log.info(
         "kinship: %s, m = %d SNPs%s",
         kind,
-        acc.n_snps if legacy else acc.n_used,
+        m,
         " (--legacy-kinship: all SNPs read; %d used)" % acc.n_used if legacy else "",
     )
-    return K
+    return K, m
 
 
 def log_kinship_scale(K: FloatArray) -> None:
@@ -366,8 +398,25 @@ def write_kinship(K: FloatArray, reader: plink_io.PlinkReader, out_file: str) ->
         log.warning("removed the stale ID file %s (EMMA input has no IDs)", id_file)
 
 
-def write_eigen(K: FloatArray, out_file: str, text: bool, npz: str | None) -> None:
-    """Write the eigendecomposition of K as text (``out_file.kva/.kve``) and/or ``npz``."""
+def write_grm(K: FloatArray, m: int, reader: plink_io.PlinkReader, prefix: str) -> None:
+    """Write K as a GCTA binary GRM (`pylmm.kinship_io.write_grm`): ``prefix.grm.*``."""
+    log.info("Saving the kinship as a GCTA GRM to %s.grm.bin / .grm.N.bin / .grm.id", prefix)
+    kinship_io.write_grm(prefix, K, cast(list[samples.SampleID], reader.indivs), n_snps=m)
+
+
+def write_eigen(
+    K: FloatArray,
+    out_file: str,
+    text: bool,
+    npz: str | None,
+    ids: list[samples.SampleID] | None = None,
+    kinship_type: str | None = None,
+) -> None:
+    """Write the eigendecomposition of K as text (``out_file.kva/.kve``) and/or ``npz``.
+
+    The ``.npz`` also holds ``ids`` (the samples of K's rows; None for EMMA
+    input) and ``kinship_type`` (`pylmm.kinship_io.write_eigen`).
+    """
     if not (text or npz):
         return
     log.info("Obtaining Eigendecomposition")
@@ -378,7 +427,7 @@ def write_eigen(K: FloatArray, out_file: str, text: bool, npz: str | None) -> No
         np.savetxt(out_file + ".kve", kve)
     if npz:
         log.info("Saving eigendecomposition to %s", npz)
-        np.savez(npz, Kva=kva, Kve=kve)
+        kinship_io.write_eigen(npz, kva, kve, ids=ids, kinship_type=kinship_type)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -394,7 +443,13 @@ def run(args: argparse.Namespace) -> None:
     UsageError
         On a usage or input error.
     """
-    check_writable("--out", args.out)
+    grm = args.out_format == "grm"
+    out = kinship_io.grm_prefix(args.out) if grm else args.out
+    if grm:
+        for suffix in kinship_io.GRM_SUFFIXES:
+            check_writable("--out", out + suffix)
+    else:
+        check_writable("--out", out)
     if args.eigen_npz:
         # np.savez adds .npz to a name without it
         npz = args.eigen_npz
@@ -411,11 +466,16 @@ def run(args: argparse.Namespace) -> None:
                 "--emma-num-snps %d: the --emma-geno file %s has %d SNPs (non-blank lines); "
                 "fix the number or leave the option out" % (args.emma_num_snps, args.emma_geno, m)
             )
-    K = compute_kinship(reader, args.block_size, args.kinship_type, args.legacy_kinship)
+    K, m = compute_kinship(reader, args.block_size, args.kinship_type, args.legacy_kinship)
     log_kinship_scale(K)
+    ids = None if reader.type == "emma" else cast(list[samples.SampleID], reader.indivs)
     try:
-        write_kinship(K, reader, args.out)
-        write_eigen(K, args.out, args.eigen_text, args.eigen_npz)
+        if grm:
+            write_grm(K, m, reader, out)
+            K = kinship_io.round_like_grm(K)  # decompose the K the GRM holds
+        else:
+            write_kinship(K, reader, out)
+        write_eigen(K, out, args.eigen_text, args.eigen_npz, ids, args.kinship_type)
     except OSError as e:
         raise UsageError("cannot write the output: %s" % e) from e
 

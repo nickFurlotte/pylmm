@@ -305,6 +305,31 @@ share of monomorphic SNPs (7.5% on the HMDP strains); bug 8. `calculate_kinship(
 * With IDs, `PlinkReader(prefix, k_file="K")` reads K, reorders it to the genotype file, and drops
   genotype individuals that are not in it from `indivs`, `phenos` and the genotype vectors.
 
+### Kinship files of GCTA and plink2
+
+`pylmm.kinship_io` reads and writes GCTA's binary GRM (`gcta --make-grm`, `plink2 --make-grm-bin`:
+`P.grm.bin`, the lower triangle in float32; `P.grm.N.bin`, SNP counts; `P.grm.id`, `FID IID`) and reads
+plink2's `--make-rel` files (`P.rel` text, `P.rel.bin` float64 or float32, square or triangle, with
+`P.rel.id`). Both carry their sample IDs, so they align by ID like a kinship with a `.id` file:
+`PlinkReader(k_file="P.grm.bin")` or `k_file="P.rel"`, and on the command line `pylmm gwas --grm P` or
+`--kinship P.rel`. `pylmm kinship --out-format grm -o P` writes a GRM.
+
+A GRM holds K in **float32**, about 7 significant digits: what you read back is K rounded
+(`kinship_io.round_like_grm(K)`), and a scan on it matches the scan on the float64 text kinship to
+rounding (|Δt| about 1e-7 on synthetic data), not bit for bit. pylmm's own text kinship
+(`pylmm kinship -o K`) keeps every digit; use it when you need the exact K. A plink2 *text* `.rel` is
+the least precise of all: plink2 prints it with 6 significant digits (`%g`), so scans on it move by
+|Δt| up to about 1e-5. From plink2, prefer `--make-rel bin` (float64, exact) or `--make-grm-bin`.
+
+```python
+from pylmm import kinship_io
+
+kinship_io.write_grm("mini", K_2000, ids, n_snps=2000)   # mini.grm.bin, .grm.N.bin, .grm.id
+K_grm, grm_ids = kinship_io.read_grm("mini")
+assert grm_ids == ids and np.array_equal(K_grm, kinship_io.round_like_grm(K_2000))
+print("max relative rounding %.1e" % np.max(np.abs(K_grm - K_2000) / np.abs(K_2000)))
+```
+
 ## 5. The null fit and heritability
 
 A simulated phenotype with a known heritability makes the numbers checkable: `u ~ N(0, 0.6 K)` plus one
@@ -472,7 +497,8 @@ head -3 trait.tsv
 
 * `--kinship K` uses `K.id`, if it exists, to align K by ID; without it, it warns and assumes genotype
   order. With `--emma-geno` there are no IDs: K is in genotype order, with no warning (and `K.id`, if
-  present, is ignored with a warning).
+  present, is ignored with a warning). `--grm P` reads a GCTA GRM instead, and `--kinship P.rel` a plink2
+  one, both with their IDs (section 4).
 * The intercept is added unless `--no-intercept`; individuals with a missing phenotype or covariate are
   dropped (with a warning).
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
@@ -534,8 +560,12 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
   quick; K itself is 8 n² bytes (3.2 GB at n = 20,000), the practical limit.
 * Compute the eigendecomposition once and pass it: `LMM(Y, K, kva, kve)`, `gwas(Y, X, K, kva, kve)`. It is
   ignored (recomputed) when `Y` has missing values, because K is then subset.
-* `pylmm kinship --eigen-npz eig.npz` writes it for `pylmm gwas --eigen eig.npz`; it is used only when no
-  individual is dropped or reordered (otherwise it is ignored, with a warning).
+* `pylmm kinship --eigen-npz eig.npz` writes it for `pylmm gwas --eigen eig.npz`, with the sample IDs of
+  its rows. `pylmm gwas` matches them to the tested individuals: a sample it lacks is an error (the file
+  belongs to another kinship), a different order is fixed, and if individuals were dropped (a missing
+  phenotype, not in the kinship) it is ignored and recomputed, with a warning. A file without IDs
+  (pylmm 1.0.0's, or `--eigen-text` without its `.id`) is used only when no individual is dropped or
+  reordered, with a warning.
 * SNPs with missing calls under `--remove-missing-genotypes` (or library `gwas`) each cost an
   eigendecomposition; `--refit` costs a likelihood search per SNP.
 * Process SNPs in blocks with `reader.iter_blocks(block_size)` rather than building a full genotype matrix;

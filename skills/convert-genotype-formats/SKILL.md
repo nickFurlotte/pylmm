@@ -1,6 +1,6 @@
 ---
 name: convert-genotype-formats
-description: Convert genotype data to the PLINK 1 BED/BIM/FAM files pylmm reads - from VCF/BCF (bcftools + plink2), imputed VCF and BGEN (via PGEN, with the dosage and REF/ALT caveats), PGEN, VCF Zarr (vcztools view-plink), Hail MatrixTables and plain genotype tables (numpy, with the bundled plink_tools.py) - and prepare the other inputs, phenotype and covariate files (FID IID header, NA missing codes, matching IDs) and a kinship from another tool with its .id file (GCTA .grm.bin, plink2 .rel). Explains PLINK 1 vs PLINK 2 allele conventions and which allele pylmm counts. Use when the data is not already a PLINK BED file set, when downloading public genotype data for pylmm, or when preparing phenotype, covariate or kinship files.
+description: Convert genotype data to the PLINK 1 BED/BIM/FAM files pylmm reads - from VCF/BCF (bcftools + plink2), imputed VCF and BGEN (via PGEN, with the dosage and REF/ALT caveats), PGEN, VCF Zarr (vcztools view-plink), Hail MatrixTables and plain genotype tables (numpy, with the bundled plink_tools.py) - and prepare the other inputs, phenotype and covariate files (FID IID header, NA missing codes, matching IDs) and a kinship from another tool (GCTA .grm.bin and plink2 .rel are read natively, with their IDs; GEMMA text needs an .id file). Explains PLINK 1 vs PLINK 2 allele conventions and which allele pylmm counts. Use when the data is not already a PLINK BED file set, when downloading public genotype data for pylmm, or when preparing phenotype, covariate or kinship files.
 ---
 
 # Convert genotype data for pylmm
@@ -156,36 +156,44 @@ print(open("table.pheno").read())
 `plink_tools.write_pheno(path, ids, values, names)` writes such a file from arrays. Check the match before
 a long run: `align_samples(...).report()` lists the samples each file lacks.
 
-## A kinship from another tool, and its `.id` file
+## A kinship from another tool
 
-pylmm's `--kinship` is a plain n × n text matrix; its rows are named by `K.id` (`FID IID` per line).
-Without `K.id`, the rows are *assumed* to be in `.fam` order. Convert and write both:
+pylmm reads the kinship files of GCTA and plink2 natively, with their sample IDs, and aligns them to
+the genotypes by ID:
+
+| file | `pylmm gwas` | library (`pylmm.kinship_io`) |
+|---|---|---|
+| GCTA `--make-grm`, plink2 `--make-grm-bin`: `P.grm.bin`, `P.grm.N.bin`, `P.grm.id` | `--grm P` | `read_grm("P")`, `write_grm` |
+| plink2 `--make-rel`: `P.rel` / `P.rel.gz` (text, triangle or square), `P.rel.bin` (float64 or `bin4` float32, square or triangle), `P.rel.id` | `--kinship P.rel` (or `P.rel.bin`) | `read_rel("P.rel")` |
+| pylmm text: `K` plus `K.id` (`FID IID` per line) | `--kinship K` | `np.loadtxt`, `samples.read_id_file` |
+| GEMMA `-gk` (`output/*.cXX.txt`, `*.sXX.txt`): n × n text in `.fam` order, no IDs | `--kinship` after writing the `.fam` IDs as its `.id` | `np.loadtxt` |
+
+Precision, best first: pylmm's text K and plink2 `--make-rel bin` (float64, exact); a GRM or `bin4`
+(float32, about 7 significant digits: scans move by |Δt| ~ 1e-7); a plink2 **text** `.rel` (`%g`, only 6
+significant digits: |Δt| up to ~1e-5). From plink2, ask for `--make-rel bin` rather than the text
+default. `pylmm kinship --out-format grm -o P` writes a GRM (for GCTA, plink2 or `pylmm gwas --grm P`).
 
 ```python
-def read_gcta_grm(prefix):
-    """GCTA / plink2 --make-grm-bin: float32 lower triangle (row-major, with the diagonal) + .grm.id."""
-    ids = [tuple(row[:2]) for row in np.loadtxt(prefix + ".grm.id", dtype=str, ndmin=2)]
-    n = len(ids)
-    tri = np.fromfile(prefix + ".grm.bin", dtype=np.float32).astype(float)
-    assert tri.size == n * (n + 1) // 2, "not a GRM of %d samples" % n
-    K = np.zeros((n, n))
-    K[np.tril_indices(n)] = tri
-    return K + K.T - np.diag(K.diagonal()), ids
+from pylmm import kinship_io
 
-# a small GRM in GCTA's layout, to show the round trip
 K_true = np.array([[1.0, 0.5, 0.1, 0.0], [0.5, 1.0, 0.0, 0.2], [0.1, 0.0, 1.0, 0.3], [0.0, 0.2, 0.3, 1.0]])
-K_true[np.tril_indices(4)].astype(np.float32).tofile("other.grm.bin")
-samples.write_id_file("other.grm.id", fam)
-K_other, k_ids = read_gcta_grm("other")
-assert np.allclose(K_other, K_true)
-plink_tools.write_kinship("other.kin", K_other, k_ids)       # other.kin + other.kin.id
+kinship_io.write_grm("other", K_true, fam, n_snps=5000)    # other.grm.bin / .grm.N.bin / .grm.id
+K_other, k_ids = kinship_io.read_grm("other")              # float64 K, [(FID, IID), ...]
+assert k_ids == fam and np.allclose(K_other, K_true, rtol=1e-7)
 ```
 
-* plink2 `--make-rel square` writes a text `.rel` (plain n × n) and `.rel.id` with a `#FID IID` header;
-  `np.loadtxt` skips the `#` line, so `samples.write_id_file("K.id", ...)` from it works the same way.
-* GEMMA `-gk` output is plain n × n text in `.fam` order: write the `.fam` IDs as its `.id`.
+```bash
+pylmm gwas --bfile table --grm other --pheno table.pheno -o other.tsv -q
+```
+
+* Without a `.grm.id` / `.rel.id` / `K.id`, nothing names the rows: write one (`samples.write_id_file`) or
+  the rows are *assumed* to be in `.fam` order, with a warning.
+* A plink2 `.rel.id` with only an `#IID` column gets the FID `0` (what plink2 writes to a `.fam`); match
+  with `--id-match iid` if your `.fam` has other FIDs.
 * Scales differ: a GCTA-style GRM of inbred lines has diagonal ≈ 1 + F ≈ 2 (≈ 1.99 on the bundled mice),
   pylmm's ≈ 1. Test statistics do not care; h² does (see `estimate-heritability`).
+* plink2's missingness-corrected GRM need not be positive semi-definite; `pylmm gwas` warns and floors the
+  negative eigenvalues.
 
 ## After converting: checks
 

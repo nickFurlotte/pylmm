@@ -28,6 +28,12 @@ Module map
     centred or EMMA's IBS; also importable from ``pylmm.lmm``),
     :func:`~pylmm.kinship.kinship_scale` (the scale of h) and
     :class:`~pylmm.kinship.KinshipAccumulator`.
+``pylmm.kinship_io``
+    Kinship files of other tools: GCTA binary GRMs
+    (:func:`~pylmm.kinship_io.read_grm`, :func:`~pylmm.kinship_io.write_grm`) and
+    plink2 ``.rel`` matrices (:func:`~pylmm.kinship_io.read_rel`); eigendecomposition
+    ``.npz`` files with sample IDs (:func:`~pylmm.kinship_io.read_eigen`,
+    :func:`~pylmm.kinship_io.write_eigen`).
 ``pylmm.plink_io``
     Readers for PLINK and EMMA files (:class:`~pylmm.plink_io.PlinkReader`).
 ``pylmm.genotypes``

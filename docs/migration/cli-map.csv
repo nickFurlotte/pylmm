@@ -15,8 +15,8 @@ pylmmGWAS,-p,yes,pylmm gwas,--pheno-col,yes,semantics-changed,"now 1-based, like
 pylmmGWAS,--covfile,yes,pylmm gwas,--covar,yes,renamed,
 pylmmGWAS,--emmaCOV,yes,pylmm gwas,--emma-covar,yes,behaviour-changed,"renamed, and now mutually exclusive with --covar (--covfile used to win)"
 pylmmGWAS,--noMean,no,pylmm gwas,--no-intercept,no,renamed,
-pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,required; its rows are aligned by the IDs of FILE.id if that exists
-pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,unchanged,
+pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,"required (or --grm); its rows are aligned by the IDs of FILE.id if that exists; a plink2 .rel/.rel.gz/.rel.bin is read with its .rel.id (after 1.0.0)"
+pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,behaviour-changed,"after 1.0.0: a decomposition with sample IDs (.npz fid/iid, or PATH.id / PATH.grm.id for text) is matched to the tested individuals: an error if one is missing, reordered if permuted; one without IDs is used as before, with a warning"
 pylmmGWAS,--removeMissingGenotypes,no,pylmm gwas,--remove-missing-genotypes,no,renamed,
 pylmmGWAS,--refit,no,pylmm gwas,--refit,no,unchanged,
 pylmmGWAS,--REML,no,pylmm gwas,--reml,no,renamed,"REML is the default, so the flag can be dropped; --reml and --ml are mutually exclusive"
@@ -30,7 +30,7 @@ pylmmKinship,--tfile,yes,pylmm kinship,--tfile,yes,unchanged,one of --bfile/--tf
 pylmmKinship,--emmaSNP,yes,pylmm kinship,--emma-geno,yes,renamed,
 pylmmKinship,--emmaNumSNPs,yes,pylmm kinship,--emma-num-snps,yes,behaviour-changed,optional now: the SNPs of --emma-geno are counted; a given value that differs from the count is a usage error (exit 2). A wrong value used to compute K from the first M SNPs or crash
 pylmmKinship,-e/--efile,yes,pylmm kinship,--eigen-text,no,value→flag,the old value was ignored; still writes OUT.kva and OUT.kve
-pylmmKinship,--eigenNpz,yes,pylmm kinship,--eigen-npz,yes,renamed,the .npz arrays are still named Kva and Kve
+pylmmKinship,--eigenNpz,yes,pylmm kinship,--eigen-npz,yes,renamed,"the .npz arrays are still named Kva and Kve; after 1.0.0 also fid, iid (the sample IDs of Kve's rows; not for EMMA input) and kinship_type"
 pylmmKinship,-n,yes,pylmm kinship,--block-size,yes,renamed,"same meaning (SNPs held in memory at once), default 1000"
 pylmmKinship,-v/--verbose,no,pylmm kinship,-v/--verbose,no,behaviour-changed,logs INFO messages as `pylmm: info: ...`; progress every 10000 SNPs
 pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
@@ -45,3 +45,5 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm gwas,--no-batch,no,new,"test one SNP at a time, the 1.0.0 code path; added after 1.0.0"
 ,,,pylmm kinship,--kinship-type,yes,new,"{standardized,centered,ibs}; default standardized (1.0.0's formula; now m = the SNPs used and the library uses the CLI's missing-call convention); ibs = EMMA's IBS kinship; added after 1.0.0"
 ,,,pylmm kinship,--legacy-kinship,no,new,"the K of pylmm kinship 1.0.0, which counted skipped constant and all-missing SNPs in m (bug 8); added after 1.0.0"
+,,,pylmm gwas,--grm,yes,new,"a GCTA binary GRM PREFIX.grm.bin/.grm.id instead of --kinship (GCTA's --grm), aligned by ID; float32; added after 1.0.0"
+,,,pylmm kinship,--out-format,yes,new,"{text,grm}; default text; grm writes a GCTA binary GRM FILE.grm.bin/.grm.N.bin/.grm.id (float32; not for EMMA input); added after 1.0.0"
