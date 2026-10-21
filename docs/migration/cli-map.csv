@@ -41,3 +41,5 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,"pylmm gwas, pylmm kinship",-q/--quiet,no,new,log errors only (warnings still go to --log-file)
 ,,,"pylmm gwas, pylmm kinship",--log-file,yes,new,"also log to a file (timestamped, at least INFO)"
 ,,,"pylmm gwas, pylmm kinship",--debug,no,new,DEBUG messages and tracebacks
+,,,pylmm gwas,--block-size,yes,new,"SNPs read and tested together (batched Wald tests), default 1024 (pylmm.genotypes.DEFAULT_BLOCK_SIZE); added after 1.0.0"
+,,,pylmm gwas,--no-batch,no,new,"test one SNP at a time, the 1.0.0 code path; added after 1.0.0"

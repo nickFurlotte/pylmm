@@ -2,7 +2,9 @@
 
 All notable user-visible changes to pylmm. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmm gwas`, formerly `pylmmGWAS`,
-without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below. Entries written
+without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below, except by the batched tests of
+[Unreleased]: last-digit differences for well-conditioned covariates, up to a few 1e-6 relative with a badly
+scaled covariate (where the new numbers are the more accurate); see there. Entries written
 before the single `pylmm` command use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
 maps them).
 
@@ -30,11 +32,54 @@ maps them).
   `(n, m)` genotype matrix (e.g. read from VCF, BGEN or VCF Zarr with another library) with optional IDs and
   metadata. `normalize_genotype` is now also a function there (`PlinkReader.normalize_genotype` calls it).
 - `sims/bench/`: Phase 6 benchmarks; `python -m sims.bench.bed_blocks [--quick]`.
+- `LMM.association_batch(X, h=None, reml=True)`: the Wald test of `association(..., return_beta=True)` for
+  every column of `X` at once; returns `AssociationResult(t, p, beta, beta_var)`, arrays.
+- `gwas(..., batch=True, block_size=1024)`: `batch=False` -> one SNP at a time, the 1.0.0 code path;
+  a block takes about 6-8 arrays of `n * block_size` floats. The default is `pylmm.genotypes.DEFAULT_BLOCK_SIZE`
+  (the block size of `iter_blocks`), and `block_size` is checked with `check_block_size` (a non-integer such
+  as 1.5 or True is a `ValueError`).
+- `pylmm gwas --block-size N` (SNPs read and tested together, default 1024) and `--no-batch` (the 1.0.0
+  one-SNP-at-a-time path).
+- `pylmm.lmm.snp_estimable_columns(X, X0)`: `snp_estimable` for every column of a block at once, with exactly
+  its decisions.
+- `sims/bench/gwas_batch.py` (`just bench gwas_batch [--quick]`): batched vs per-SNP wall time and
+  differences, synthetic and on the bundled BED file.
 
 ### Changed
 - `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
   bit for bit unchanged for one SNP (1-d input, the documented use; 2-d input also gives the 1.0.0 result,
   tested on a few arrays).
+
+#### Batched association tests (faster scans)
+- `gwas()` and `pylmm gwas` (without `--refit`) test the SNPs without missing calls in blocks: one matrix
+  product rotates a block of SNPs into the eigenbasis of K, and each SNP's GLS fit is computed in closed form
+  against the null model, instead of a matrix-vector product and a small matrix inverse per SNP. One SNP at
+  a time -> blocks of 1024 SNPs. Speedup (single-threaded BLAS, `sims/bench/gwas_batch.py`, an 8-core
+  arm64 laptop): `gwas()` 7.7-8.6x at n = 500 (20,000 SNPs) and 17-19x at n = 2000 (10,000 SNPs);
+  `pylmm gwas` on 20,000 SNPs of the README data 9.1 s -> 2.6 s (3.5x, the whole command, kinship reading
+  included); one BLAS thread per core gave the same times.
+- Same model, same h, same statistics, computed in a different floating-point order. For well-conditioned
+  covariates the results agree with 1.0.0 to rounding: in the benchmark (single-threaded run) t and beta at most 4.7e-13
+  absolute (4.6e-10 relative, for values near 0), p 3.3e-13 absolute (1.9e-12 relative), se 1.8e-14
+  relative; in the tests at most 9.5e-11 relative for values >= 1% of the largest; nan in the same places. On the README
+  data (first 20,000 SNPs) the output files differ only in the last printed digits (17 of 20,000 lines byte-identical; max relative difference 1.6e-11 in BETA and
+  F_STAT, 2.9e-14 in P_VALUE); the goldens
+  pass at their existing tolerances.
+- With a badly scaled covariate next to the intercept (a raw date such as 20240131, a value like 1e4 +- 1, a
+  year column) 1.0.0's per-SNP path, which inverts `X'SX`, loses precision: old and new results can differ by
+  up to a few 1e-6 relative (a year column 2000-2020: 3e-10 to 2e-8 in our checks). The new values are the
+  more accurate ones (against an accurate reference: 1e-10 vs 3e-6 off for a date ~2e7; a 40-digit reference gave 3e-11 vs 3e-7 for
+  1e4 + N(0, 1)). Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are
+  the same and both paths are then accurate.
+- Which SNPs are tested (nan for constant, collinear or untestable SNPs) is unchanged: the block check makes
+  exactly the decisions of `snp_estimable`.
+- SNPs with missing calls (tested on their called individuals) and `refit=True` / `--refit` still test one SNP
+  at a time.
+- `pylmm gwas` writes each result line, in file order, as soon as it is known. If a SNP's test fails, every
+  SNP before it has its line and no later one does, as in 1.0.0 (byte for byte with `--no-batch`); if the
+  reader fails mid-file, the SNPs read before the failure are tested and written first. No SNP is tested
+  twice and no line is written twice; on Ctrl-C or a failed write the lines already written stay, and the
+  SNPs of the current block read but not yet written get none.
 
 ## [1.0.0] - 2026-10-19
 

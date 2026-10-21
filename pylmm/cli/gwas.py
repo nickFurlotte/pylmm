@@ -13,7 +13,8 @@ once (or per SNP with ``--refit``) and writes one tab-separated line per SNP:
 
 The steps are separate functions: `load_inputs` (genotypes, phenotype,
 covariates, kinship and its eigendecomposition, aligned by sample ID),
-`fit_null_model` and `scan` (the per-SNP tests, written as they go).
+`fit_null_model` and `scan` (the per-SNP tests, in blocks of ``--block-size``
+SNPs, written in file order).
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import gzip
 import os
 import time
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import IO, Any
 
@@ -40,9 +42,19 @@ from pylmm.cli._common import (
     log,
     positive_int,
 )
-from pylmm.lmm import LMM, check_covariates, snp_estimable, subset_testable
+from pylmm.genotypes import DEFAULT_BLOCK_SIZE, check_block_size
+from pylmm.lmm import (
+    LMM,
+    AssociationResult,
+    check_covariates,
+    snp_estimable,
+    snp_estimable_columns,
+    subset_testable,
+)
 
 FloatArray = NDArray[np.float64]
+SnpResult = tuple[Any, Any, Any, Any]
+"""One SNP's ``(beta, beta_sd, t, p)``."""
 
 OUTPUT_COLUMNS = ("SNP_ID", "BETA", "BETA_SD", "F_STAT", "P_VALUE")
 """The header of the output file (tab-separated)."""
@@ -74,7 +86,14 @@ examples:
 
   # EMMA-format inputs (no sample IDs: everything is in genotype order)
   pylmm gwas --emma-geno snps.emma --emma-pheno pheno.emma \\
-      --kinship K.txt -o results.tsv"""
+      --kinship K.txt -o results.tsv
+
+  # smaller blocks of SNPs tested together (less memory), or one SNP at a
+  # time as in pylmm 1.0.0 (slower; see --no-batch for how the numbers compare)
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
+      --block-size 200 -o results.tsv
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
+      --no-batch -o results.tsv"""
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +247,27 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "per SNP with missing calls",
     )
 
+    performance = p.add_argument_group("performance")
+    performance.add_argument(
+        "--block-size",
+        metavar="N",
+        type=positive_int,
+        default=DEFAULT_BLOCK_SIZE,
+        help="the number of SNPs read and tested together: the complete SNPs of a block (no "
+        "missing call) are rotated with one matrix product and tested in closed form; memory "
+        "is about 6-8 x n x N floats (default: %d)" % DEFAULT_BLOCK_SIZE,
+    )
+    performance.add_argument(
+        "--no-batch",
+        action="store_true",
+        help="test one SNP at a time (LMM.association), the code path of pylmm 1.0.0: slower.  "
+        "With well-conditioned covariates the numbers are the same up to rounding (within "
+        "about 1e-9 relative); with badly scaled ones (e.g. a raw date or year column) they "
+        "can differ by up to a few 1e-6 relative, the batched default being the more accurate: "
+        "centre or scale such covariates.  --refit and SNPs with missing calls always take "
+        "this path",
+    )
+
     output = p.add_argument_group("output")
     output.add_argument(
         "-o",
@@ -261,6 +301,10 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
     if args.emma_geno and args.id_match != "fid-iid":
         parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    try:
+        check_block_size(args.block_size)
+    except ValueError as e:
+        parser.error("--block-size: %s" % e)
     check_log_file(parser, args)
 
 
@@ -835,11 +879,84 @@ def _test_snp(
     return beta, np.sqrt(beta_var), ts, ps
 
 
+def iter_block_results(
+    G: FloatArray,
+    inputs: GwasInputs,
+    L: LMM,
+    Q0: FloatArray,
+    args: argparse.Namespace,
+    counts: dict[str, int],
+) -> Iterator[SnpResult | None]:
+    """Test a block of SNPs; yield one result per SNP, in column order, as soon as it is known.
+
+    Parameters
+    ----------
+    G : (len(inputs.reader.indivs), b) array
+        The SNPs of the block as columns, over all the reader's individuals,
+        as `pylmm.plink_io.PlinkReader.iter_blocks` returns them (or the
+        vectors of its SNP iterator stacked as columns); `inputs.keep`
+        selects the tested individuals.
+    inputs, L, Q0, args, counts
+        As for `_test_snp`: the inputs, the null model, an orthonormal
+        basis of the covariates, the options and the collinearity counter.
+
+    Yields
+    ------
+    tuple or None
+        ``(beta, beta_sd, t, p)`` per SNP, or None for a SNP that cannot
+        be tested.
+
+    Notes
+    -----
+    Unless ``--no-batch`` or ``--refit``, the complete SNPs of the block
+    (no missing call) that are estimable (`pylmm.lmm.snp_estimable_columns`)
+    are tested together with `LMM.association_batch`, the first time one of
+    them is reached; every other SNP is tested on its own (`_test_snp`) when
+    it is reached.  Nothing is computed twice.  If testing a SNP raises,
+    every SNP before it has been yielded and no later one is.
+    """
+    use_batch = not (args.no_batch or args.refit)
+    X = G[inputs.keep, :]
+    complete: NDArray[np.bool_] = np.zeros(X.shape[1], dtype=bool)
+    if use_batch:
+        complete = np.asarray(~np.isnan(X).any(axis=0), dtype=bool)
+    batched: dict[int, int] = {}  # column -> its index in the batch result
+    result: AssociationResult | None = None
+    for j in range(X.shape[1]):
+        if not complete[j]:
+            yield _test_snp(G[:, j], inputs, L, Q0, args, counts)
+            continue
+        if result is None:  # the first complete SNP: test them all together
+            cols = np.where(complete)[0]
+            cols = cols[snp_estimable_columns(X[:, cols], inputs.X0, Q0)]
+            batched = {int(c): k for k, c in enumerate(cols)}
+            result = L.association_batch(X[:, cols], reml=args.reml)
+        k = batched.get(j)
+        if k is None:  # constant or collinear with the covariates
+            yield None
+        elif np.isfinite(result.t[k]):
+            yield result.beta[k], np.sqrt(result.beta_var[k]), result.t[k], result.p[k]
+        else:  # not expected for an estimable SNP; keep the per-SNP answer
+            yield _test_snp(G[:, j], inputs, L, Q0, args, counts)
+
+
 def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> int:
     """Test every SNP of ``inputs.reader`` and write a result line for each.
 
-    A SNP that cannot be tested (constant, collinear with the covariates, or
-    too few called individuals) gets a line of ``nan``.
+    The SNPs are read in blocks of ``--block-size`` and tested together
+    (`iter_block_results`); each line is written, in file order, as soon as
+    its result is known.  A SNP that cannot be tested (constant, collinear
+    with the covariates, or too few called individuals) gets a line of
+    ``nan``.
+
+    On an error, the lines written are those of 1.0.0's one-SNP-at-a-time
+    scan: if the reader fails (e.g. a truncated file), the SNPs read before
+    the failure are tested and written, then the error is raised; if testing
+    a SNP fails, every SNP before it has its line and no later one does
+    (with ``--no-batch``, byte for byte the 1.0.0 output).  No SNP is tested
+    twice and no line is written twice.  On an interrupt (Ctrl-C) or a failed
+    write, the lines already written stay; the SNPs of the current block that
+    were read but not yet written get none.
 
     Returns
     -------
@@ -850,16 +967,40 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
     counts: dict[str, int] = {}
     count = 0
+    snps: Iterator[tuple[FloatArray, str]] = iter(inputs.reader)
+
+    def test_and_write(block: list[tuple[FloatArray, str]]) -> None:
+        if not block:
+            return
+        G = np.column_stack([snp for snp, _ in block])
+        results = iter_block_results(G, inputs, L, Q0, args, counts)
+        for (_, snp_id), result in zip(block, results):
+            if result is None:
+                write_result(out, snp_id, np.nan, np.nan, np.nan, np.nan)
+            else:
+                write_result(out, snp_id, *result)
+
     write_header(out)
-    for snp, snp_id in inputs.reader:
-        count += 1
-        if count % 1000 == 0:
-            log.info("At SNP %d", count)
-        result = _test_snp(snp, inputs, L, Q0, args, counts)
-        if result is None:
-            write_result(out, snp_id, np.nan, np.nan, np.nan, np.nan)
-        else:
-            write_result(out, snp_id, *result)
+    while True:
+        block: list[tuple[FloatArray, str]] = []
+        try:
+            while len(block) < args.block_size:
+                try:
+                    snp, snp_id = next(snps)
+                except StopIteration:
+                    break
+                count += 1
+                if count % 1000 == 0:
+                    log.info("At SNP %d", count)
+                block.append((snp, snp_id))
+        except Exception:
+            # The reader failed (e.g. a truncated file): write the SNPs read
+            # before it, as the one-SNP-at-a-time scan did, then report it.
+            test_and_write(block)
+            raise
+        test_and_write(block)
+        if len(block) < args.block_size:
+            break
     if counts.get("collinear"):
         log.info(
             "%d of %d SNPs are nan because, on the individuals with a called genotype, "

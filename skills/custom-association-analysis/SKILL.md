@@ -8,8 +8,11 @@ description: Write custom association analyses with the pylmm Python library (LM
 The building blocks (details in [docs/guide.md](../../docs/guide.md)):
 
 * `calculate_kinship(W)` → K; `scipy.linalg.eigh(K)` → `kva, kve` (compute once, reuse).
-* `LMM(Y, K, kva, kve, X0=X0)` then `.fit()` (null model, REML) and `.association(x)` (one SNP).
-* `gwas(Y, X, K, kva, kve, X0=X0)` → lists of t and p (handles missing calls).
+* `LMM(Y, K, kva, kve, X0=X0)` then `.fit()` (null model, REML) and `.association(x)` (one SNP), or
+  `.association_batch(X)` (many complete SNPs at once: arrays `t, p, beta, beta_var`; much faster in a
+  loop; check `snp_estimable` first, as for `association`).
+* `gwas(Y, X, K, kva, kve, X0=X0)` → lists of t and p (handles missing calls; batched by default,
+  `batch=False` for one SNP at a time).
 * `X0` is used as given: **always include `np.ones(n)`**.
 * Genotypes from `PlinkReader` are standardised (`norm_genotype=True`); the `.bim` columns are
   `reader.variants` (`chrom`, `snp`, `cm`, `bp`, `a1`, `a2` arrays, same order as the SNPs).
@@ -142,6 +145,15 @@ L_int = LMM(Y, K, kva, kve, X0=np.column_stack([X0, x]))
 L_int.fit()
 t_gxe, p_gxe = L_int.association(x * sex)
 print("SNP x sex: t=%.2f p=%.2f" % (t_gxe, p_gxe))
+```
+
+`association_batch` tests many columns against one fitted model at once. Every column shares `L_int`'s
+`X0`, which holds the lead SNP's main effect, not each SNP's own; a proper interaction scan needs one
+model per SNP:
+
+```python
+res = L_int.association_batch(W[:, :50] * sex[:, None])   # arrays of 50: t, p, beta, beta_var
+assert np.allclose(res.t[0], L_int.association(W[:, 0] * sex)[0], rtol=1e-9)
 ```
 
 ## Inbred strains with replicate animals
