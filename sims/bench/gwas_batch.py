@@ -191,27 +191,35 @@ def run_cli(
     base = os.path.join(workdir, "slice")
     m = write_bed_slice(base, m)
     timings = {}
-    runs: list[tuple[str, list[str], str | None]] = [
-        ("batched", [], None),
-        ("per_snp", ["--no-batch"], None),
+    # Each run imports pylmm from its own tree: this checkout (REPO), or the baseline.
+    runs: list[tuple[str, list[str], str]] = [
+        ("batched", [], REPO),
+        ("per_snp", ["--no-batch"], REPO),
     ]
     if baseline:
         runs.append(("baseline", [], os.path.abspath(baseline)))
+    trees = {}
     for tag, extra, path in runs:
         out = os.path.join(workdir, "%s.tsv" % tag)
         env = dict(os.environ)
-        if path:
-            env["PYTHONPATH"] = path + os.pathsep + env.get("PYTHONPATH", "")
-            # (run in workdir: `python -m` puts the working directory first on sys.path)
-            where = subprocess.run(
-                [sys.executable, "-c", "import pylmm; print(pylmm.__file__)"],
-                env=env,
-                cwd=workdir,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-            assert where.startswith(path), "the baseline imports pylmm from %s" % where
+        env["PYTHONPATH"] = path + os.pathsep + env.get("PYTHONPATH", "")
+        # Run in workdir (`python -m` puts the working directory first on sys.path),
+        # and check where pylmm is imported from.
+        where = subprocess.run(
+            [sys.executable, "-c", "import pylmm; print(pylmm.__file__)"],
+            env=env,
+            cwd=workdir,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if os.path.commonpath([os.path.realpath(where), os.path.realpath(path)]) != (
+            os.path.realpath(path)
+        ):
+            raise RuntimeError(
+                "%s run: pylmm is imported from %s, not from %s" % (tag, where, path)
+            )
+        trees[tag] = path
         cmd = [
             sys.executable,
             "-m",
@@ -246,6 +254,7 @@ def run_cli(
             baseline_result = {"s": timings["baseline"], "identical": f1.read() == f2.read()}
     return {
         "baseline": baseline_result,
+        "trees": trees,
         "m": m,
         "n": sum(1 for _ in open(BED_BASE + ".fam")),
         "batched_s": timings["batched"],
@@ -332,7 +341,8 @@ def print_cli(r: dict[str, Any] | None) -> None:
             "| %.2f | %.2f | %.2fx | %s |"
             % (b["s"], r["batched_s"], b["s"] / r["batched_s"], "yes" if b["identical"] else "NO")
         )
-    print("\n| column | max abs diff | max rel diff | nan positions equal |")
+    print("\npylmm imported from: %s\n" % "; ".join("%s: %s" % kv for kv in r["trees"].items()))
+    print("| column | max abs diff | max rel diff | nan positions equal |")
     print("|---|---|---|---|")
     for name, (a, rel, same) in r["cols"].items():
         print("| %s | %s | %s | %s |" % (name, _g(a), _g(rel), "yes" if same else "NO"))
