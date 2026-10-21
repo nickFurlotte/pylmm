@@ -20,7 +20,7 @@ uv run --group sims python -m sims list                # list studies
 
 | module | what it gives you |
 |---|---|
-| `genotypes` | `get(spec)` returns a cached, read-only `Genotypes(G, snp_ids, indiv_ids, pops, meta)`. Sources: `bed` (1219 mice, 98,740 SNPs, read with `pylmm.plink_io.PlinkReader`), `hmdp` (94 strains, about 132k SNPs, text), and seeded synthetic sources `unrelated`, `balding_nichols` (k populations with F_st, optional Dirichlet admixture) and `family` (nuclear sibships). `with_missing(G, rate, rng)` adds missing calls. |
+| `genotypes` | `get(spec)` returns a cached, read-only `Genotypes(G, snp_ids, indiv_ids, pops, meta)`. Sources: `bed` (1219 mice, 98,740 SNPs, read with `pylmm.plink_io.PlinkReader`), `hmdp` (94 strains, about 132k SNPs, text), and seeded synthetic sources `unrelated`, `balding_nichols` (k populations with F_st, optional Dirichlet admixture), `family` (nuclear sibships) and `inbred_panel` (0/1 inbred strains, mosaics of a few founders over linked chromosomes, RI-like). `with_missing(G, rate, rng)` adds missing calls. |
 | `kinship` | `get(geno_spec, snps=...)` returns a cached `Kinship(K, kva, kve)`. K is built by pylmm's own `calculate_kinship`, optionally on a separate SNP set. `split_snps(...)` splits SNPs into kinship and test sets. `from_matrix(K)` wraps any K. |
 | `phenotypes` | `simulate(kin, h2, rng, G=, causal_idx=, causal_var=, X0=/n_covariates=, missing_rate=)` simulates y = X0·α + Σβ_j g_j + u + e. `choose_causal(...)` picks causal SNPs. |
 | `methods` | Thin pylmm wrappers: `pylmm_null`, `pylmm_gwas` (that is, `lmm.gwas`), `pylmm_association`. Also `ols_gwas`, an OLS baseline. |
@@ -112,6 +112,13 @@ def report(df, outdir):      # optional; the default is a mean/SE table per cell
   restricts a run to some cells (ids from `python -m sims plan <study>`).
   Running with a larger `--reps` adds only the new replicates. `--force`
   discards that mode's raw results.
+
+**Results that predate the Phase 6.6 kinship.** The committed S1-S5 summaries were computed with
+pylmm 1.0.0's `calculate_kinship` (`sims.kinship` calls the library's default). Since Phase 6.6 the default
+standardises with the called genotypes' SD and does not count constant or all-missing SNPs in `m` (bug 8;
+`legacy=True` keeps the old K), so rerunning S1-S5 on sources with missing calls or constant SNPs (`bed`,
+`hmdp`) moves K's scale, and with it h, a little; t and p hardly move. Sources without either (the
+synthetic ones) give the same K. S4's bug-8 scenario uses `legacy=True` on purpose.
 
 ## Where results go, and what to commit
 

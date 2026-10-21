@@ -46,11 +46,45 @@ maps them).
   differences, synthetic and on the bundled BED file; `--cli-baseline DIR` also times the `pylmm gwas` of
   another checkout (e.g. an earlier revision) and checks that its output is byte-identical (every run
   imports `pylmm` from its own tree, which is checked).
+- `pylmm.kinship`, the new home of `calculate_kinship` (`from pylmm.lmm import calculate_kinship` still
+  works), with named kinships: `calculate_kinship(W, kind=...)` and `pylmm kinship --kinship-type ...`,
+  `standardized` (the default; 1.0.0's formula, with the convention change below), `centered` (centred,
+  not scaled: GEMMA `-gk 1`'s formula, on 0/1/2 counts in the CLI, i.e. twice the reader's 0/0.5/1 values;
+  an `--emma-geno` file must be coded 0/0.5/1, and values above 1 are warned about) and `ibs`, EMMA's
+  identity-by-state kinship (`emma.kinship(snps, method="additive", use="all")`, Kang et al. 2008:
+  genotypes 0 / 0.5 / 1, heterozygotes split into two 0/1 codings, missing calls at the SNP mean, diagonal
+  1), checked against a transliteration of EMMA's R code and against EMMA's output from R on a fixture.
+  `pylmm kinship` writes bit for bit the `calculate_kinship` of the same raw genotypes (for `centered`, of
+  twice them) at the same block size (`--block-size` defaults to the library's `KINSHIP_BLOCK_SIZE`, 1000).
+  `standardized` is GEMMA `-gk 2`'s formula only on complete genotypes: GEMMA standardises after mean
+  imputation (1.0.0's library convention) and by default drops SNPs with MAF < 0.01 or missingness > 0.05
+  before both `-gk 1` and `-gk 2`.
+- `kinship_scale(K)` -> `KinshipScale(mean_diag, centered_mean_diag)` (`trace(K)/n`, `trace(PKP)/(n-1)`), the
+  scale of the h fitted with K (PVE = `h c / (h c + 1 - h)`); `pylmm kinship -v` logs both, and the number
+  of SNPs used. `KinshipAccumulator`: build any kind one SNP at a time; it sums the blocks in place (two
+  n x n arrays plus an n x block buffer; `tracemalloc` peak of `calculate_kinship` at n = 3000, 2500 SNPs:
+  172 MB standardized / centered, 206 MB IBS).
+- `calculate_kinship(..., legacy=True)` and `pylmm kinship --legacy-kinship`: the 1.0.0 kinships, byte for
+  byte (checked on the bundled BED and HMDP data and a synthetic BED with missing calls and constant SNPs,
+  against v1.0.0 and the phase6 base, at block sizes 1000 and 300).
+- `sims/studies/s6_kinship_kinds.py` (`just sim s6_kinship_kinds [--quick]`): h2 recovery and null
+  calibration of the three kinds on a synthetic RI-like inbred panel (`sims.genotypes.inbred_panel`, a new
+  genotype source) and on the bundled HMDP strains; findings in `s6_kinship_kinds.md`.
 
 ### Changed
 - `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
   bit for bit unchanged for one SNP (1-d input, the documented use; 2-d input also gives the 1.0.0 result,
   tested on a few arrays).
+- Kinship normalisation (bug 8; `calculate_kinship` and `pylmm kinship`, default `standardized`): two
+  conventions for missing calls -> one, the reader's (each SNP centred and scaled with the mean and SD of its
+  called genotypes, missing calls then set to the mean), so the library and the CLI agree; and `m` = all
+  SNPs, including skipped constant and all-missing ones -> `m` = the SNPs used. Effect: with missing calls
+  the library's K moves to the CLI's (mean diagonal about 1 - the missing rate: bundled BED data 1.000 ->
+  0.987, HMDP strains 0.925 -> 0.979); with constant SNPs both grow by 1 / (the share used) (HMDP 7.5%
+  constant: CLI mean diagonal 0.905 -> 0.979). `pylmm kinship` on the bundled BED file (no constant SNPs) is
+  byte-identical to 1.0.0. h moves with the scale (HMDP, 20 transcripts, library: median h 0.440 -> 0.425,
+  PVE 0.423 both); t and p do not move for a pure rescaling (the CLI's change), and move slightly with the
+  library's missing-call convention (the two 1.0.0 conventions differed by max |Δt| 0.03 on HMDP, study S4). 1.0.0's kinships: `legacy=True`, `--legacy-kinship`.
 
 #### Batched association tests (faster scans)
 - `gwas()` and `pylmm gwas` (without `--refit`) test the SNPs without missing calls in blocks: one matrix

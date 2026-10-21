@@ -540,17 +540,16 @@ def test_bug14_no_pheno_file_is_a_usage_error(bed_toy):
 # ---------------------------------------------------------------------------
 
 
-def test_bug8_current_monomorphic_snps_shrink_k():
+def test_bug8_legacy_monomorphic_snps_shrink_k():
+    """1.0.0's behaviour, kept behind legacy=True."""
     G, _, _, _ = toy(n=30, m=40)
-    K = calculate_kinship(G.copy())
-    k_mono = calculate_kinship(np.hstack([G, np.zeros((30, 10))]))
+    K = calculate_kinship(G.copy(), legacy=True)
+    k_mono = calculate_kinship(np.hstack([G, np.zeros((30, 10))]), legacy=True)
     np.testing.assert_allclose(k_mono, K * 40 / 50, rtol=1e-12)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="bug 8: calculate_kinship divides by m including dropped monomorphic SNPs"
-)
 def test_bug8_monomorphic_snps_do_not_change_k():
+    """Fixed in Phase 6.6: m counts the SNPs used."""
     G, _, _, _ = toy(n=30, m=40)
     np.testing.assert_allclose(
         calculate_kinship(np.hstack([G, np.zeros((30, 10))])),
@@ -559,21 +558,21 @@ def test_bug8_monomorphic_snps_do_not_change_k():
     )
 
 
-def test_bug8_current_kinship_cli_counts_monomorphic_snps(tmp_path):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_bug8_kinship_cli_monomorphic_snps(tmp_path, legacy):
+    """1.0.0 (--legacy-kinship) counted the 4 monomorphic SNPs in m; now they are not counted."""
     rng = np.random.default_rng(2)
     G = rng.binomial(2, 0.4, size=(24, 12)) / 2.0
     base = str(tmp_path / "mono")
     write_bed(base, np.hstack([G, np.zeros((24, 4))]))  # 4 monomorphic SNPs
-    run_kinship(["--bfile", base, "-o", str(tmp_path / "k")])
+    run_kinship(["--bfile", base, "-o", str(tmp_path / "k"), *(["--legacy-kinship"] * legacy)])
     k_cli = np.loadtxt(str(tmp_path / "k"))
-    np.testing.assert_allclose(k_cli, calculate_kinship(G.copy()) * 12 / 16, rtol=1e-10)
+    c = 12 / 16 if legacy else 1.0
+    np.testing.assert_allclose(k_cli, calculate_kinship(G.copy()) * c, rtol=1e-10)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug 8: lmm.calculate_kinship and `pylmm kinship` normalise missing data differently",
-)
 def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
+    """Fixed in Phase 6.6: one missing-call convention (the reader's) for both."""
     rng = np.random.default_rng(3)
     G = rng.binomial(2, 0.4, size=(24, 12)) / 2.0
     G[rng.random(G.shape) < 0.1] = np.nan
@@ -583,6 +582,10 @@ def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
     np.testing.assert_allclose(
         np.loadtxt(str(tmp_path / "k")), calculate_kinship(G.copy()), atol=1e-8
     )
+    # 1.0.0's two conventions, kept behind the legacy switches, still differ
+    run_kinship(["--bfile", base, "-o", str(tmp_path / "k1"), "--legacy-kinship"])
+    d = np.abs(np.loadtxt(str(tmp_path / "k1")) - calculate_kinship(G.copy(), legacy=True)).max()
+    assert d > 1e-3
 
 
 # ---------------------------------------------------------------------------
@@ -798,8 +801,8 @@ def test_bug11_library_all_missing_snp():
 
 def test_bug11_cli_kinship_all_missing_snp(tmp_path):
     """Regression (bug 11, fixed in Phase 5.2): `pylmm kinship` skips the SNP
-    with a warning (it used to raise).  The denominator still counts it
-    (bug 8, Phase 6.3)."""
+    with a warning (it used to raise).  Since Phase 6.6 the denominator does
+    not count it (bug 8)."""
     rng = np.random.default_rng(4)
     G = rng.binomial(2, 0.4, size=(24, 6)) / 2.0
     G[:, 3] = np.nan
@@ -810,14 +813,16 @@ def test_bug11_cli_kinship_all_missing_snp(tmp_path):
         assert cli.main(["kinship", "--bfile", base, "-o", str(tmp_path / "k")]) == 0
     assert "pylmm: warning: skipped 1 SNPs with no called genotype" in err.getvalue()
     K = np.loadtxt(str(tmp_path / "k"))
-    np.testing.assert_allclose(K, calculate_kinship(G[:, [0, 1, 2, 4, 5]]) * 5 / 6, rtol=1e-10)
+    np.testing.assert_allclose(K, calculate_kinship(G[:, [0, 1, 2, 4, 5]]), rtol=1e-10)
 
 
 def test_bug11_calculatekinship_skips_all_missing_snp():
     G, _, _, _ = toy(n=30, m=10)
     K = calculate_kinship(np.hstack([G, np.full((30, 1), np.nan)]))
     assert np.isfinite(K).all()
-    np.testing.assert_allclose(K, calculate_kinship(G) * 10 / 11, rtol=1e-12)
+    np.testing.assert_allclose(K, calculate_kinship(G), rtol=1e-12)
+    k_legacy = calculate_kinship(np.hstack([G, np.full((30, 1), np.nan)]), legacy=True)
+    np.testing.assert_allclose(k_legacy, calculate_kinship(G) * 10 / 11, rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------

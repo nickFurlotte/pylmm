@@ -46,7 +46,9 @@ RESULT               per locus: our best SNP, chr:bp, -log10 p, threshold met?, 
 pylmm's `calculate_kinship` is the standardized (GRM-style) one. The *scale* changes h² but no test
 statistic (`estimate-heritability` section 3); the *formula* changes the weighting and so the p-values.
 An EMMA-style homozygous IBS kinship for 0/1 strain genotypes, centred and Gower-scaled so that it is on
-the same scale as `calculate_kinship(G, center=True)` (a named IBS option is planned):
+the same scale as `calculate_kinship(G, center=True)`. EMMA's own kinship is `calculate_kinship(G,
+kind="ibs")` (`pylmm kinship --kinship-type ibs`); with `center=True` it is this one up to the centring,
+which a fit with an intercept does not see:
 
 ```python
 import numpy as np
@@ -75,6 +77,8 @@ K_std = calculate_kinship(G, center=True)
 for K in (K_ibs, K_std):
     assert np.isclose(np.trace(K) / (n_strains - 1), 1.0)   # Gower scale: trace(PKP)/(n-1) = 1
 print("max |K_ibs - K_std| = %.2f" % np.abs(K_ibs - K_std).max())
+P = np.eye(n_strains) - 1.0 / n_strains
+assert np.allclose(P @ calculate_kinship(G, kind="ibs", center=True) @ P, K_ibs)
 ```
 
 **Observation unit.** A scan of animals (one row per animal, `K_animals = Z K_strains Z'`) and a scan of

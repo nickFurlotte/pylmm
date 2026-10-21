@@ -586,7 +586,8 @@ def _kinship_setup(params):
             g_kin = genotypes.with_missing(g_kin, params["miss"], rng)
         m = g_kin.shape[1]
         poly = np.array([np.nanvar(g_kin[:, j]) > 0 for j in range(m)])
-        k_lib = calculate_kinship(g_kin.copy())
+        # bug 8 as it was in 1.0.0 (fixed in Phase 6.6; legacy=True keeps the old K)
+        k_lib = calculate_kinship(g_kin.copy(), legacy=True)
         k_fix = k_lib * m / poly.sum()
         W = np.zeros((g_kin.shape[0], 0))
         cols = []
