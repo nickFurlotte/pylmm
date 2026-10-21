@@ -24,6 +24,13 @@ def test_s8_quick_cells_and_report(tmp_path):
         for name in ("all", "loco"):
             assert 0 <= out["h_" + name] <= 1 and 0.3 < out["lam_" + name] < 2
             assert out["qtl_nlp_" + name] >= 0 and out["causal_chi2_" + name] > 0
+    designs = {out["design"] for out in rows}
+    assert designs == {"split", "all"}
+    for out in rows:  # the iid-null calibration check of the "all" design
+        if out["design"] == "all":
+            assert 0.3 < out["lam_iid_all"] < 2 and 0.3 < out["lam_iid_loco"] < 2
+        else:
+            assert "lam_iid_loco" not in out
     s8.report(pd.DataFrame(rows), str(tmp_path))
     assert "LOCO" in (tmp_path / "summary.md").read_text()
 

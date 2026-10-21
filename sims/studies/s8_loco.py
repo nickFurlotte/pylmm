@@ -22,18 +22,32 @@ panel from the same SNPs).  The phenotype is::
 
     y = sqrt(h2) g + sqrt(q2) x_qtl + sqrt(1 - h2 - q2) e
 
-with ``g`` the polygenic background of ``n_causal`` per-SD effects on the
-*odd* autosomes, ``x_qtl`` one more SNP on an odd autosome (``q2 = 0.05``),
-each standardised in the sample, and ``e`` N(0, 1).  Tested SNPs
-(mean-imputed, MAF >= 0.05): up to ``n_null`` null SNPs on the *even*
-autosomes (no causal SNP on their chromosome), the QTL, and up to 100 of the
-background's causal SNPs.
+with ``g`` the polygenic background of ``n_causal`` per-SD effects,
+``x_qtl`` one more causal SNP (``q2 = 0.05``), each standardised in the
+sample, and ``e`` N(0, 1).  Two designs:
+
+* ``design = "split"``: the background and the QTL on the *odd* autosomes;
+  tested: up to ``n_null`` SNPs on the *even* autosomes (no causal SNP on
+  their chromosome).  This is where LOCO is right by construction: K_{-c}
+  of an even ``c`` holds the whole background.
+* ``design = "all"``: the background and the QTL on *every* autosome, as in
+  real traits; tested: up to ``n_null`` non-causal SNPs from every autosome.
+  Under LOCO these are partly associated through linkage with the causal
+  SNPs of their own chromosome (left out of K_{-c}), so their λ_GC is above
+  1 without any confounding: it measures linked signal, not calibration.
+  Calibration is measured on a separate iid N(0, 1) phenotype ("iid null")
+  scanned at the same SNPs.
+
+Tested SNPs are mean-imputed with MAF >= 0.05; also tested: the QTL and up
+to 100 of the background's causal SNPs.
 
 Per replicate, for ``all`` (one kinship, `pylmm.lmm.gwas`) and ``loco``
 (`pylmm.loco.gwas_loco`): the REML null h (``loco``: the mean over the
-tested chromosomes), λ_GC and type-I error over the null SNPs, -log10 p of
-the QTL and its power at 1e-3 and 1e-5, and the mean χ² (t²) of the tested
-background causal SNPs.
+tested chromosomes), λ_GC and type-I error over the tested non-causal SNPs
+(``lam``, ``t1e_*``), -log10 p of the QTL and its power at 1e-3 and 1e-5,
+the mean χ² (t²) of the tested background causal SNPs, and (``design =
+"all"``) λ_GC and type-I error of the iid-null phenotype (``lam_iid``,
+``t1e_iid_*``).
 
 Run:   just sim s8_loco --jobs 6       (full; a few minutes)
        just sim s8_loco --quick        (well under a minute)
@@ -49,7 +63,7 @@ import numpy as np
 from sims import genotypes, kinship, methods, metrics
 
 NAME = "s8_loco"
-STUDY_VERSION = 1
+STUDY_VERSION = 2
 
 ALPHAS = (0.05, 0.01, 1e-3)
 POWER_ALPHAS = (1e-3, 1e-5)
@@ -57,6 +71,7 @@ MIN_MAF = 0.05
 Q2 = 0.05
 
 GRID = {
+    "design": ["split", "all"],
     "panel": ["family", "inbred_panel", "hmdp"],
     "h2": [0.0, 0.3, 0.6, 0.9],
     "n_causal": [300],
@@ -64,6 +79,7 @@ GRID = {
 REPS = 100
 
 QUICK_GRID = {
+    "design": ["split", "all"],
     "panel": ["inbred_panel_quick"],
     "h2": [0.0, 0.6],
     "n_causal": [100],
@@ -137,6 +153,7 @@ def _setup(panel):
         "loco": loco,
         "kin_all": kin_all,
         "odd": odd,
+        "auto": np.where(ok)[0],
         "null": null,
         "n": G.shape[0],
         "m": G.shape[1],
@@ -159,17 +176,25 @@ def run_cell(params, seed):
     s = _setup(params["panel"])
     g_imp, n = s["g_imp"], s["n"]
     h2 = params["h2"]
-    pick = rng.choice(s["odd"], size=params["n_causal"] + 1, replace=False)
+    design = params.get("design", "split")
+    pool = s["odd"] if design == "split" else s["auto"]
+    pick = rng.choice(pool, size=params["n_causal"] + 1, replace=False)
     qtl, causal = pick[0], pick[1:]
+    if design == "split":
+        null_cols = s["null"]
+    else:  # non-causal SNPs from every autosome
+        noncausal = np.setdiff1d(s["auto"], pick)
+        size = min(_PANELS[params["panel"]]["n_null"], len(noncausal))
+        null_cols = np.sort(rng.choice(noncausal, size=size, replace=False))
     y = np.sqrt(Q2) * _std(g_imp[:, qtl]) + np.sqrt(1 - h2 - Q2) * _std(rng.standard_normal(n))
     if h2 > 0:
         gc = g_imp[:, causal]
         gc = (gc - gc.mean(axis=0)) / gc.std(axis=0)
         y = y + np.sqrt(h2) * _std(gc @ rng.standard_normal(len(causal)))
     tested_causal = causal[:100]
-    cols = np.concatenate([s["null"], [qtl], tested_causal])
+    cols = np.concatenate([null_cols, [qtl], tested_causal])
     X = g_imp[:, cols]
-    n_null = len(s["null"])
+    n_null = len(null_cols)
     out = {"n_indiv": n, "m_snps": s["m"], "n_chrom": s["n_chrom"], "n_null": n_null}
 
     res = {}
@@ -195,16 +220,27 @@ def run_cell(params, seed):
             out["power_%s_%s" % (metrics.alpha_label(a), name)] = float(p_qtl <= a)
         tc = t[n_null + 1 :]
         out["causal_chi2_" + name] = float(np.nanmean(tc**2))
+    if design == "all":  # calibration on an iid null phenotype, same SNPs and kinships
+        y0 = rng.standard_normal(n)
+        x_null = X[:, :n_null]
+        _, p0_all = methods.pylmm_gwas(y0, x_null, s["kin_all"], reml=True)
+        with methods._quiet():
+            p0_loco = gwas_loco(y0, x_null, s["chrom"][null_cols], kinships=s["loco"]).p_values
+        for name, p0 in (("all", np.asarray(p0_all)), ("loco", np.asarray(p0_loco))):
+            out["lam_iid_" + name] = metrics.lambda_gc(p0)
+            for k, v in metrics.type1_error(p0, ALPHAS).items():
+                out[k.replace("t1e_", "t1e_iid_") + "_" + name] = v
     return out
 
 
 def report(df, outdir):
     from sims import report as rpt
 
-    by = ["panel", "h2"]
+    by = ["design", "panel", "h2"]
     cols = []
     for name in ("all", "loco"):
-        cols += ["h_" + name, "lam_" + name]
+        cols += ["h_" + name, "lam_" + name, "lam_iid_" + name]
+        cols += ["t1e_iid_%s_%s" % (metrics.alpha_label(a), name) for a in ALPHAS]
         cols += ["t1e_%s_%s" % (metrics.alpha_label(a), name) for a in ALPHAS]
         cols += ["qtl_nlp_" + name]
         cols += ["power_%s_%s" % (metrics.alpha_label(a), name) for a in POWER_ALPHAS]
@@ -217,8 +253,12 @@ def report(df, outdir):
         notes=(
             "all: one standardized kinship of all SNPs (pylmm.lmm.gwas); loco: K_{-c} per "
             "chromosome (pylmm.loco.gwas_loco). h: REML null h (loco: mean over chromosomes). "
-            "lam / t1e: over null SNPs on even autosomes (no causal SNP on their chromosome). "
-            "qtl_nlp: -log10 p of the QTL (q2 = 0.05, odd autosome); power_<a>: share of "
+            "design split: causal SNPs on odd autosomes, lam / t1e over SNPs on even autosomes "
+            "(no causal SNP on their chromosome); design all: causal SNPs on every autosome, "
+            "lam / t1e over non-causal SNPs (linked to causal ones: under LOCO this is signal, "
+            "not miscalibration), lam_iid / t1e_iid over the same SNPs for an iid N(0, 1) "
+            "phenotype (the calibration check). "
+            "qtl_nlp: -log10 p of the QTL (q2 = 0.05); power_<a>: share of "
             "replicates with QTL p <= a. causal_chi2: mean t^2 of up to 100 background causal "
             "SNPs (h2 / n_causal each)."
         ),

@@ -10,11 +10,12 @@ Times, end to end on the command line (``python -m pylmm``, this checkout):
 
 and compares the two outputs: λ_GC, the number of SNPs below 1e-3 / 1e-5, and
 the top hits of each.  The full run uses the bundled README data (1219 mice x
-98,740 SNPs on 19 autosomes, fake phenotype), and then also scans a seeded
-polygenic trait simulated on those genotypes (h2 = 0.5 from 300 SNPs on the
-odd autosomes) with both kinships, for λ_GC on the null even autosomes (the
-fake phenotype has h ~ 0, so the two kinships barely differ on it); ``--quick`` a seeded synthetic
-BED (300 x 3000, 3 chromosomes).  Wall times include Python start-up and file
+98,740 SNPs on 19 autosomes, fake phenotype), and then also scans three
+seeded traits on those genotypes with both kinships (`_simulated_readme`):
+h2 = 0.5 from 300 SNPs on the odd autosomes (λ_GC on the null even
+autosomes), the same on every autosome (λ_GC over the non-causal SNPs:
+linked signal under LOCO), and an iid null phenotype (calibration).
+``--quick`` uses a seeded synthetic BED (300 x 3000, 3 chromosomes).  Wall times include Python start-up and file
 I/O.  BLAS threads: ``--threads N``, else the environment's (importing `sims`
 sets it to ``$SIMS_BLAS_THREADS``, default 1, and the pylmm runs inherit it).
 
@@ -103,11 +104,13 @@ SIM_H2 = 0.5
 SIM_CAUSAL = 300
 
 
-def _simulated_readme(workdir: str, seed: int = 0) -> tuple[str, np.ndarray]:
-    """A polygenic phenotype on the README genotypes; (pheno file, chromosome of each SNP).
+def _simulated_readme(workdir: str, seed: int = 0) -> tuple[str, np.ndarray, dict]:
+    """Seeded phenotypes on the README genotypes: (pheno file, chromosome per SNP, causal SNPs).
 
-    ``SIM_CAUSAL`` causal SNPs (per-SD effects, mean-imputed) on the odd
-    autosomes, ``h2 = SIM_H2``: the SNPs of the even autosomes are null.
+    Three columns: ``split``, ``SIM_CAUSAL`` causal SNPs (per-SD effects,
+    mean-imputed) on the odd autosomes, ``h2 = SIM_H2`` (the even autosomes
+    are null); ``all``, the same on every autosome (the realistic case);
+    ``iid``, N(0, 1) noise (the calibration check).
     """
     from pylmm.plink_io import PlinkReader
 
@@ -116,43 +119,64 @@ def _simulated_readme(workdir: str, seed: int = 0) -> tuple[str, np.ndarray]:
         ids = r.indivs
         rng = np.random.default_rng(seed)
         odd = np.flatnonzero(np.array([int(c) % 2 == 1 for c in chrom]))
-        causal = np.sort(rng.choice(odd, SIM_CAUSAL, replace=False))
+        causal = {
+            "split": np.sort(rng.choice(odd, SIM_CAUSAL, replace=False)),
+            "all": np.sort(rng.choice(len(chrom), SIM_CAUSAL, replace=False)),
+        }
+        want = np.union1d(causal["split"], causal["all"])
         cols, start = [], 0
         for G, _ in r.iter_blocks(4096):
-            sel = causal[(causal >= start) & (causal < start + G.shape[1])] - start
+            sel = want[(want >= start) & (want < start + G.shape[1])] - start
             cols.append(G[:, sel])
             start += G.shape[1]
     C = np.hstack(cols)
     C = np.where(np.isnan(C), np.nanmean(C, 0), C)
     C = (C - C.mean(0)) / C.std(0)
-    g = C @ rng.standard_normal(SIM_CAUSAL)
-    e = rng.standard_normal(len(g))
-    y = np.sqrt(SIM_H2) * (g - g.mean()) / g.std() + np.sqrt(1 - SIM_H2) * (e - e.mean()) / e.std()
+    n = C.shape[0]
+
+    def std(v: np.ndarray) -> np.ndarray:
+        return (v - v.mean()) / v.std()
+
+    ys = {}
+    for name in ("split", "all"):
+        g = C[:, np.searchsorted(want, causal[name])] @ rng.standard_normal(SIM_CAUSAL)
+        ys[name] = np.sqrt(SIM_H2) * std(g) + np.sqrt(1 - SIM_H2) * std(rng.standard_normal(n))
+    ys["iid"] = rng.standard_normal(n)
     fn = os.path.join(workdir, "simulated.phen")
     with open(fn, "w") as f:
-        for (fid, iid), v in zip(ids, y):
-            f.write("%s %s %r\n" % (fid, iid, float(v)))
-    return fn, chrom
+        f.write("FID IID split all iid\n")
+        for k, (fid, iid) in enumerate(ids):
+            f.write("%s %s %s\n" % (fid, iid, " ".join(repr(float(ys[c][k])) for c in ys)))
+    return fn, chrom, causal
 
 
 def run_simulated(threads: int | None, workdir: str, kin: str) -> dict:
-    """README genotypes, a simulated polygenic trait: lambda_GC on the null (even) autosomes."""
-    pheno, chrom = _simulated_readme(workdir)
+    """README genotypes, seeded traits (`_simulated_readme`): lambda_GC, standard vs LOCO.
+
+    ``split``: over the null even autosomes; ``all``: over every non-causal
+    SNP (linked to causal ones: under LOCO, signal); ``iid``: over all SNPs.
+    """
+    pheno, chrom, causal = _simulated_readme(workdir)
     even = np.array([int(c) % 2 == 0 for c in chrom])
-    out = {}
-    for name, flags in (("standard", ["--kinship", kin]), ("loco", ["--loco"])):
-        fn = os.path.join(workdir, "sim_%s.tsv" % name)
-        _, log = _pylmm(
-            ["gwas", "--bfile", BED_BASE, *flags, "--pheno", pheno, "-o", fn], workdir, threads
-        )
-        hs = [float(x) for x in re.findall(r"heritability=(\S+),", log)]
-        p = _read(fn)[1][:, 3]
-        out[name] = {
-            "h": (min(hs), max(hs)),
-            "lambda_even": _lambda(p[even]),
-            "t1e_0.05_even": float(np.mean(p[even][np.isfinite(p[even])] <= 0.05)),
-            "lambda_odd": _lambda(p[~even]),
-        }
+    noncausal = np.ones(len(chrom), dtype=bool)
+    noncausal[causal["all"]] = False
+    sets = {"split": even, "all": noncausal, "iid": np.ones(len(chrom), dtype=bool)}
+    out: dict = {}
+    for trait, sel in sets.items():
+        out[trait] = {}
+        for name, flags in (("standard", ["--kinship", kin]), ("loco", ["--loco"])):
+            fn = os.path.join(workdir, "sim_%s_%s.tsv" % (trait, name))
+            _, log = _pylmm(
+                ["gwas", "--bfile", BED_BASE, *flags, "--pheno", pheno, "--pheno-name", trait,
+                 "-o", fn], workdir, threads,
+            )  # fmt: skip
+            hs = [float(x) for x in re.findall(r"heritability=(\S+),", log)]
+            p = _read(fn)[1][:, 3][sel]
+            out[trait][name] = {
+                "h": (min(hs), max(hs)),
+                "lambda": _lambda(p),
+                "t1e_0.05": float(np.mean(p[np.isfinite(p)] <= 0.05)),
+            }
     return out
 
 
@@ -237,14 +261,17 @@ def print_report(r: dict, threads: int | None) -> None:
         print("| %d | %s | %.3g | %s | %.3g |" % (k, a, pa, b, pb))
     sim = r.get("simulated")
     if sim:
-        print("\n### A simulated polygenic trait on the same genotypes\n")
-        print("h2 = %.1f from %d causal SNPs (per-SD effects) on the odd autosomes, seed 0; the "
-              "even autosomes are null.\n" % (SIM_H2, SIM_CAUSAL))  # fmt: skip
-        print("| | null h | lambda_GC, even (null) | type-I 0.05, even | lambda_GC, odd |")
+        print("\n### Seeded traits on the same genotypes (seed 0, one replicate each)\n")
+        print("split / all: h2 = %.1f from %d causal SNPs (per-SD effects) on the odd autosomes "
+              "/ on every autosome; iid: N(0, 1).  lambda_GC over: split, the even (null) "
+              "autosomes; all, every non-causal SNP (under LOCO partly linked signal, not "
+              "miscalibration); iid, every SNP.\n" % (SIM_H2, SIM_CAUSAL))  # fmt: skip
+        print("| trait | kinship | null h | lambda_GC | type-I 0.05 |")
         print("|---|---|---|---|---|")
-        for k, v in sim.items():
-            print("| %s | %.3f-%.3f | %.3f | %.4f | %.3f |" % (
-                k, v["h"][0], v["h"][1], v["lambda_even"], v["t1e_0.05_even"], v["lambda_odd"]))  # fmt: skip
+        for trait, by in sim.items():
+            for k, v in by.items():
+                print("| %s | %s | %.3f-%.3f | %.3f | %.4f |" % (
+                    trait, k, v["h"][0], v["h"][1], v["lambda"], v["t1e_0.05"]))  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> None:
