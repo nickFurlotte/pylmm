@@ -769,7 +769,10 @@ class PlinkReader:
         A BED file is decoded a block at a time (one vectorised pass over the
         block's bytes), which is several times faster than `iter_snps` when
         the genotypes are not standardised; TPED and EMMA blocks are
-        stacked from the per-SNP reader.  The iteration is independent of
+        stacked from the per-SNP reader.  A block is standardised at once,
+        with the values `pylmm.genotypes.normalize_genotype` gives each SNP;
+        blocks do not call the `normalize_genotype` method, so a subclass
+        that overrides it changes `iter_snps` only.  The iteration is independent of
         `iter_snps` (it opens its own file handle, closed when the iteration
         ends or the iterator is discarded).  A block holds
         ``8 * len(indivs) * block_size`` bytes, and the decoding about as
@@ -921,19 +924,22 @@ class PlinkReader:
                     cols.append(g)
                     names.append(name)
                 if cols:
+                    k = len(cols)
                     v = (
                         Variants.from_names(names)
                         if variants is None
-                        else variants[start : start + len(cols)]
+                        else variants[start : start + k]
                     )
                     if norm:
                         R = np.vstack(cols)  # (b, n), one SNP per row
+                        cols.clear()  # at most two copies of the block alive
                         _normalize_rows(R)  # each row as normalize_genotype(row)
                         G = np.ascontiguousarray(R.T)  # the layout of np.column_stack(cols)
+                        del R
                     else:
                         G = np.column_stack(cols)
                     yield G, v
-                    start += len(cols)
+                    start += k
         finally:
             reader.close()
 
