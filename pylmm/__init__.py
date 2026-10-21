@@ -26,6 +26,10 @@ Module map
     :func:`~pylmm.lmm.gwas`.
 ``pylmm.plink_io``
     Readers for PLINK and EMMA files (:class:`~pylmm.plink_io.PlinkReader`).
+``pylmm.genotypes``
+    Variant metadata (:class:`~pylmm.genotypes.Variants`), the
+    :class:`~pylmm.genotypes.GenotypeSource` interface (blocks of SNPs) and
+    :class:`~pylmm.genotypes.ArraySource` for a genotype matrix in memory.
 ``pylmm.samples``
     Sample IDs ``(FID, IID)`` and the alignment of genotype, phenotype,
     covariate and kinship data by ID (:func:`~pylmm.samples.align_samples`).

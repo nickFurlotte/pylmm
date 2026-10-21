@@ -29,6 +29,7 @@ uv run --group sims python -m sims list                # list studies
 | `plots` | `qq`, `lines`, `scatter`. Each writes one PNG. |
 | `runner` | Grid × replicates. Each task gets its own deterministic seed. Results are appended to JSONL, runs can resume, and tasks can run in parallel. |
 | `report` | `load_results`, `summarize`, `write_summary`, `markdown_table`. |
+| `bench/` | Phase 6 speed benchmarks, one module each, run as `python -m sims.bench.<name> [--quick]` (seeded; each prints a markdown table and checks that the fast path gives the same numbers). `bed_blocks`: `PlinkReader.iter_snps` vs `iter_blocks`. |
 
 ## Writing a study
 

@@ -14,8 +14,11 @@ The building blocks (details in [docs/guide.md](../../docs/guide.md)):
 * `gwas(Y, X, K, kva, kve, X0=X0)` → lists of t and p (handles missing calls; batched by default,
   `batch=False` for one SNP at a time).
 * `X0` is used as given: **always include `np.ones(n)`**.
-* Genotypes from `PlinkReader` are standardised (`norm_genotype=True`); the `.bim` columns come from
-  `plink_tools.read_bim` (same order as the SNP iterator).
+* Genotypes from `PlinkReader` are standardised (`norm_genotype=True`); the `.bim` columns are
+  `reader.variants` (`chrom`, `snp`, `cm`, `bp`, `a1`, `a2` arrays, same order as the SNPs).
+* `reader.iter_blocks(block_size)` yields `(G, variants)` blocks: `G` is `(n, b)`, bit for bit the
+  per-SNP vectors, decoded a block at a time (faster for BED). `pylmm.genotypes.ArraySource(G, ...)`
+  gives an in-memory matrix the same interface.
 
 The blocks below run in CI in order. They use a simulated cohort written as a PLINK file set: 400
 individuals in 80 families, 3 chromosomes of 500 SNPs, a trait with one causal SNP on chromosome 2.
@@ -45,8 +48,8 @@ u = kve0 @ (np.sqrt(np.clip(kva0, 0, None)) * rng.standard_normal(n)) * np.sqrt(
 Y = 1 + 0.5 * sex + 0.35 * Gs[:, 700] + u + rng.normal(scale=np.sqrt(0.5), size=n)
 
 with PlinkReader("cohort") as r:                                    # standardised genotypes
-    W = np.column_stack([g for g, _ in r.iter_snps()])
-bim = plink_tools.read_bim("cohort")
+    W = np.hstack([G_block for G_block, _ in r.iter_blocks()])
+    bim = r.variants                                                # chrom, snp, cm, bp, a1, a2
 X0 = np.column_stack([np.ones(n), sex])
 ```
 
@@ -62,7 +65,7 @@ for name, y in phenos.items():
     results[name] = np.asarray(ps)
     print(name, "h2=%.2f" % LMM(y, K, kva, kve, X0=X0).fit()[0], "min p=%.1e" % np.nanmin(ps))
 lead = int(np.nanargmin(results["trait"]))
-print("lead SNP", bim["snp"][lead], "chr", bim["chrom"][lead])
+print("lead SNP", bim.snp[lead], "chr", bim.chrom[lead])
 ```
 
 `kva, kve` are ignored (recomputed) for a phenotype with missing values, since K is subset; for many
@@ -89,7 +92,7 @@ Add the lead SNP to the covariates and rescan; a second signal that survives is 
 ```python
 X0_cond = np.column_stack([X0, W[:, lead]])
 ts_c, ps_c = gwas(Y, W, K, kva, kve, X0=X0_cond)
-print("conditional on %s: min p=%.1e (lead itself: %s)" % (bim["snp"][lead], np.nanmin(ps_c), ps_c[lead]))
+print("conditional on %s: min p=%.1e (lead itself: %s)" % (bim.snp[lead], np.nanmin(ps_c), ps_c[lead]))
 assert np.isnan(ps_c[lead])                # collinear with X0: untestable, as it should be
 ```
 
@@ -100,11 +103,11 @@ chromosome c with a K built from the other chromosomes. Build the per-chromosome
 `K_loco(c) = (Z Z' - Z_c Z_c') / (m - m_c)` with `Z` the standardised SNPs (here pylmm's `W`):
 
 ```python
-ZZ = {c: W[:, chrom == c] @ W[:, chrom == c].T for c in np.unique(bim["chrom"])}
+ZZ = {c: W[:, chrom == c] @ W[:, chrom == c].T for c in np.unique(bim.chrom)}
 total, m_all = sum(ZZ.values()), W.shape[1]
 p_loco = np.full(m_all, np.nan)
 for c in ZZ:
-    on_c = bim["chrom"] == c
+    on_c = bim.chrom == c
     K_c = (total - ZZ[c]) / (m_all - on_c.sum())
     _, ps_c_loco = gwas(Y, W[:, on_c], K_c, X0=X0)
     p_loco[on_c] = ps_c_loco
@@ -113,9 +116,21 @@ print("lead SNP: p=%.1e with K from all SNPs, %.1e with LOCO" % (results["trait"
 
 With missing calls, this `K_loco` is not exactly `calculate_kinship` of the other chromosomes' SNPs (the two
 normalise missing calls differently, a known, not yet fixed issue; max entry difference 0.16 with 10% missing calls in a
-check); with complete genotypes they agree. For a file too large for memory, accumulate `ZZ[c]` while streaming SNP blocks with
-`itertools.islice(reader.iter_snps(), block)`; alternatively split the BED per chromosome
-(`plink_tools.subset_bed(prefix, out, bim["chrom"] != c)`), run `pylmm kinship` on each complement and
+check); with complete genotypes they agree. For a file too large for memory, accumulate `ZZ[c]` while
+streaming SNP blocks; each block carries its SNPs' chromosomes:
+
+```python
+ZZ_stream = {}
+with PlinkReader("cohort") as r:
+    for G_block, v in r.iter_blocks(256):
+        for c in np.unique(v.chrom):
+            Z = G_block[:, v.chrom == c]
+            ZZ_stream[c] = ZZ_stream.get(c, 0) + Z @ Z.T
+assert all(np.allclose(ZZ_stream[c], ZZ[c]) for c in ZZ)   # same sums, another order
+```
+
+Alternatively split the BED per chromosome
+(`plink_tools.subset_bed(prefix, out, bim.chrom != c)`), run `pylmm kinship` on each complement and
 `pylmm gwas` on each chromosome. Each LOCO K needs its own eigendecomposition and gives its own null
 `h` (slightly lower than with all SNPs). The CLI has no LOCO option yet (planned).
 

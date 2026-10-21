@@ -11,12 +11,13 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | path | what |
 |---|---|
 | `pylmm/lmm.py` | the model: `calculate_kinship`, `LMM` (`fit`, `association`, `association_batch`), `gwas`, input checks |
-| `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes; phenotype, covariate, kinship files |
+| `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes (per SNP or in blocks, with `.bim` metadata); phenotype, covariate, kinship files |
+| `pylmm/genotypes.py` | `Variants` (`.bim` columns), `GenotypeSource` protocol (`iter_blocks`), `ArraySource` (in-memory matrix), `normalize_genotype` |
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
 | `pylmm/misc.py` | `fit_two`, two-kinship variance components |
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
 | `tests/` | pytest suite; `tests/golden/` = reference outputs of the original Python 2 code; `tests/helpers.py` = all tolerances |
-| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies); `sims/bench/`: speed benchmarks (`just bench gwas_batch --quick`) |
+| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies); `sims/bench/`: Phase 6 speed benchmarks (`just bench <name> [--quick]`, e.g. `gwas_batch`, `bed_blocks`) |
 | `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, reports on the Python 2 baseline, the port and the simulation studies, `migration/` maps |
 | `skills/` | agent skills (below); `.claude/skills` links here |
 | `data/` | example data (~215 MB): 1219 mice BED (fake phenotypes), 94-strain HMDP EMMA text; provenance, marker map and checksums in [data/README.md](data/README.md) |
