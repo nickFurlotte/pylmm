@@ -440,11 +440,20 @@ def _check_eigen_args(kva: ArrayLike | None, kve: ArrayLike | None) -> None:
 
 
 def _orthonormal_columns(X: FloatArray) -> FloatArray:
-    """An orthonormal basis (numpy's reduced QR) of the columns of ``X``, of full column rank."""
+    """An orthonormal basis (numpy's reduced QR) of the columns of ``X``.
+
+    Raises `numpy.linalg.LinAlgError` (scipy's is the same class) if a column
+    of ``X`` is, to rounding, a combination of the earlier ones (|R_jj| at most
+    1e-12 of the column's norm): the design is rank-deficient.
+    """
     if not X.shape[1]:
         return X
-    q: FloatArray = np.linalg.qr(X)[0]
-    return q
+    q, r = np.linalg.qr(X)
+    norms = np.sqrt((X * X).sum(axis=0))
+    if (np.abs(np.diag(r)) <= 1e-12 * norms).any():
+        raise np.linalg.LinAlgError("the design matrix (covariates and SNP) is rank-deficient")
+    out: FloatArray = q
+    return out
 
 
 def _snp_column(X: ArrayLike, n: int) -> FloatArray:
@@ -1434,15 +1443,25 @@ class LMM:
         True
         """
 
-        in_basis = False  # the covariates' orthonormal basis stands in for x0t
+        basis: FloatArray | None = None  # the default mode's orthonormal basis of X
         if X is None:
-            in_basis = not self.legacy_fit and self.q > 0
-            X = self._x0t_ortho if in_basis else self.x0t
+            X = self.x0t
+            if not self.legacy_fit:
+                basis = self._x0t_ortho
         elif stack:
             self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
             X = self.x0t_stack
         else:
             X = np.asarray(X, dtype=np.float64)
+        given = X  # the design in the caller's terms
+        if not self.legacy_fit and X.shape[1]:
+            if basis is None:
+                xtx = _matrix_mult(X.T, X)
+                if np.abs(xtx - np.eye(X.shape[1])).max() <= 1e-10:
+                    basis = X  # already orthonormal (fit passes one)
+                else:
+                    basis = _orthonormal_columns(X)
+            X = basis
 
         n = float(self.N)
         q = float(X.shape[1])
@@ -1473,8 +1492,8 @@ class LMM:
                 )
             ll = ll + 0.5 * ll_reml_part
 
-        if in_basis:  # report beta and (X'SX)^-1 for the covariates as given
-            beta, sigma, _, xx_inv, _ = self.ml_solution(h, self.x0t)
+        if X is not given:  # report beta and (X'SX)^-1 for the design as given
+            beta, sigma, _, xx_inv, _ = self.ml_solution(h, given)
         return LogLikResult(float(ll), beta, sigma, xx_inv)
 
     def _get_best(self, H: FloatArray, X: FloatArray | None = None, reml: bool = True) -> Any:
@@ -1536,19 +1555,27 @@ class LMM:
         return np.float64(min(c[1] for c in cands if c[0] >= best))
 
     def _warn_boundary(self, h: float, p: int) -> None:
-        """Warn when ``h`` is at 1 and ``K`` is rank-deficient beyond the design.
+        """Warn when the residual variance is negligible and ``K`` is rank-deficient beyond the design.
 
         With no residual variance the data lie in the span of ``K``: only
         about ``rank(K) - p`` directions carry information, but ``sigma2`` and
         the Wald test use ``N - p`` degrees of freedom, so the test is
         anti-conservative (a known model boundary, not a search error).
+        "Negligible" is scale-free: the residual variance ``(1 - h)`` is at
+        most 1e-3 of the genetic variance along a typical direction of ``K``,
+        ``h * median(non-null eigenvalues)`` (for a K of the usual scale,
+        h >= 0.999).
         """
-        if h >= 0.999 and int((self.kva <= 1e-6).sum()) > p:
+        null = self.kva <= 1e-6
+        if int(null.sum()) <= p or null.all():
+            return
+        typical = float(np.median(self.kva[~null]))
+        if (1.0 - h) <= 1e-3 * h * typical:
             warnings.warn(
-                "h is at its upper boundary (>= 0.999) and the kinship matrix is "
-                "rank-deficient: the residual variance is ~0, so sigma^2 and the Wald test's "
-                "N - p degrees of freedom overstate the information (p-values too small); "
-                "see the estimate-heritability and interpret-gwas-results skills",
+                "h is at its upper boundary (the residual variance is negligible) and the "
+                "kinship matrix is rank-deficient: sigma^2 and the Wald test's N - p degrees "
+                "of freedom overstate the information (p-values too small); see the "
+                "estimate-heritability and interpret-gwas-results skills",
                 stacklevel=3,
             )
 
@@ -1699,8 +1726,10 @@ class LMM:
             likelihood then grows without bound as ``h -> 1``, held back only
             by the 1e-6 eigenvalue floor, so the ML ``h`` (an interior local
             maximum or a spike at 1) is unreliable; use REML.
-            When ``h >= 0.999`` and ``K`` has more floored (null) eigenvalues
-            than the design has columns: with no residual variance the data
+            When the residual variance is negligible (``1 - h`` at most 1e-3
+            of ``h`` times the median non-null eigenvalue of ``K``: ``h >=
+            0.999`` for a K of the usual scale) and ``K`` has more floored
+            (null) eigenvalues than the design has columns: with no residual variance the data
             lie in the span of ``K``, and ``sigma2`` and the Wald test's
             ``N - p`` degrees of freedom overstate the information (e.g.
             strain means expanded to replicate animals).  Neither warning
@@ -1969,9 +1998,12 @@ class LMM:
         benchmarks (the largest relative differences are for values near 0)
         and a few 1e-12 of the largest value.  With badly scaled or nearly
         collinear covariates (e.g. a raw date ~2e7 or a year column next to
-        the intercept) both stay accurate (`association` solves the
-        weighted least squares by QR; about 3e-13 of the largest ``t`` off
-        an accurate reference for a date ~2e7).  With ``legacy_fit=True``
+        the intercept) both stay accurate, also at ``h = 1`` with a centred
+        ``K`` (weights up to 1e6): `association` solves the weighted least
+        squares by QR, and the residuals here are taken on an orthonormal
+        basis of the covariates (about 3e-13 of the largest ``t`` off an
+        accurate reference for a date ~2e7; batched vs per SNP <= 1.3e-15
+        of max ``|t|`` over 360 scans, 228 of them at ``h = 1``).  With ``legacy_fit=True``
         `association` inverts ``X'SX`` as pylmm 1.0.0 did, loses precision
         there, and the two can differ by up to a few 1e-6 relative; the
         batched values are then the more accurate ones (against a 40-digit
@@ -2012,14 +2044,18 @@ class LMM:
         xt = _matrix_mult(self.kve.T, G)  # (N, m): the one O(N^2 m) step
         yt = self.yt[:, 0]
         if self.q:
-            # GLS of yt and of every SNP on the covariates, with weights S
-            sx0 = self.x0t * S[:, None]
-            cho = linalg.cho_factor(_matrix_mult(self.x0t.T, sx0))
+            # GLS of yt and of every SNP on the covariates, with weights S.  The
+            # residuals depend only on span(X0), so the default mode uses its
+            # orthonormal basis: x0t'Sx0t of a badly scaled covariate is far too
+            # ill-conditioned at h near 1 (weights up to 1e6 on K's null space).
+            x0 = self.x0t if self.legacy_fit else self._x0t_ortho
+            sx0 = x0 * S[:, None]
+            cho = linalg.cho_factor(_matrix_mult(x0.T, sx0))
             r0 = yt - _matrix_mult(
-                self.x0t, linalg.cho_solve(cho, _matrix_mult(sx0.T, yt), check_finite=False)
+                x0, linalg.cho_solve(cho, _matrix_mult(sx0.T, yt), check_finite=False)
             )
             xr = xt - _matrix_mult(
-                self.x0t, linalg.cho_solve(cho, _matrix_mult(sx0.T, xt), check_finite=False)
+                x0, linalg.cho_solve(cho, _matrix_mult(sx0.T, xt), check_finite=False)
             )
         else:
             r0 = yt

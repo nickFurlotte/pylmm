@@ -170,6 +170,78 @@ def test_boundary_warning_with_rank_deficient_kinship():
         LMM(_simulate(K2, 1.0, rng2), K2).fit()  # null space = the intercept
 
 
+def _date_at_h1(seed):
+    """Review B2 data: a centred K, true h2 = 0.98 and an intercept + date
+    2e7 +- 1e3; for seeds 5, 17 and 42 the default fit is at h = 1."""
+    rng = np.random.default_rng(seed)
+    n = 100
+    W = rng.binomial(2, 0.3, size=(n, 500)).astype(float)
+    K = calculate_kinship(W)
+    y = rng.multivariate_normal(np.zeros(n), 0.98 * K + 0.02 * np.eye(n))
+    d = 1e3 * rng.normal(size=n)
+    return (
+        y,
+        K,
+        W[:, 1:301],
+        np.column_stack([np.ones(n), 2e7 + d]),
+        np.column_stack([np.ones(n), d]),
+    )
+
+
+@pytest.mark.parametrize("seed", [5, 17, 42])
+def test_batched_scan_at_h1_with_a_raw_date_covariate(seed):
+    """Review B2: at h = 1 the batched path residualised on the raw covariates
+    by the normal equations (condition ~1e20); its t was off by up to 0.51 of
+    max |t|.  Now batched == per-SNP within BATCH_RTOL, and both are invariant
+    to centring the covariate."""
+    y, K, G, x0_raw, x0_cen = _date_at_h1(seed)
+    assert float(LMM(y, K, X0=x0_raw).fit()[0]) == 1.0
+    t_raw = gwas(y, G, K, X0=x0_raw)[0]
+    t_raw_per_snp = gwas(y, G, K, X0=x0_raw, batch=False)[0]
+    t_centred = gwas(y, G, K, X0=x0_cen)[0]
+    h.assert_batch_close(t_raw, t_raw_per_snp, what="batched vs per SNP, raw date")
+    h.assert_batch_close(t_raw, t_centred, what="raw vs centred date, batched")
+    L = LMM(y, K, X0=x0_raw)
+    L.fit()
+    res = L.association_batch(G[:, :20])
+    ref = np.array([L.association(G[:, j], return_beta=True) for j in range(20)])
+    h.assert_batch_close(res.beta, ref[:, 2], what="beta")  # the caller's parametrisation
+    h.assert_batch_close(res.beta_var, ref[:, 3], what="beta_var")
+
+
+def test_log_likelihood_with_a_snp_is_invariant_to_covariate_centring():
+    """Review S5: log_likelihood(h, X=snp) (a stacked SNP) also works on an
+    orthonormal basis; beta is reported for the design as given."""
+    y, K, G, x0_raw, x0_cen = _date_at_h1(5)
+    raw, cen = LMM(y, K, X0=x0_raw), LMM(y, K, X0=x0_cen)
+    for hh in (0.5, 0.99, 1.0):
+        a, b = raw.log_likelihood(hh, G[:, 0]), cen.log_likelihood(hh, G[:, 0])
+        assert a.ll == pytest.approx(b.ll, abs=1e-8)
+        assert a.beta[-1, 0] == pytest.approx(b.beta[-1, 0], rel=1e-8)  # the SNP's effect
+        assert a.beta[0, 0] == pytest.approx(b.beta[0, 0] - 2e7 * b.beta[1, 0], rel=1e-6)
+
+
+def test_fit_with_a_collinear_snp_raises():
+    """fit(X=x) with x collinear with X0 raises, as its docstring says."""
+    K, rng = _grm()
+    L = LMM(rng.standard_normal(80), K)
+    with pytest.raises(np.linalg.LinAlgError, match="rank-deficient"):
+        L.fit(X=np.ones(80) * 3.0)
+
+
+def test_boundary_warning_is_scale_free(bed_null):
+    """K x 1e-3 at true h2 = 0.5 gives h near 0.999 but a residual variance far
+    from 0: no warning.  The README null fit (h = 0.004) is silent too."""
+    K, rng = _grm(n=80, m=30, seed=4)
+    y = _simulate(K, 0.5, rng)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        h_small = float(LMM(y, K * 1e-3).fit()[0])
+        Y, K2, kva, kve = bed_null
+        LMM(Y, K2, kva.copy(), kve).fit()
+    assert h_small > 0.99
+
+
 def test_boundary_warning_in_the_cli_log(tmp_path):
     """pylmm gwas logs the boundary warning once: 15 inbred strains x 4 animals,
     a phenotype that is the strain value (h2 = 1), 3 SNPs (EMMA input)."""
