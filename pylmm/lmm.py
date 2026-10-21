@@ -556,42 +556,77 @@ class SnpFitResult(NamedTuple):
     beta_var: FloatArray
 
 
-TESTS = ("wald", "lrt", "score")
-"""The association tests of `gwas`, `LMM.association_tests` and ``pylmm gwas --test``."""
+TESTS = ("wald", "lrt")
+"""The association tests of `gwas`, `LMM.association_tests` and ``pylmm gwas --test``.
+
+The score test (`LMM.score_batch`) is a library function only, for comparison
+with GEMMA's ``-lmm 3``: it is a monotone function of the null-fit Wald
+statistic, so a scan of it adds nothing to the default one."""
+
+# _reduced_ml_model: a singular value of the covariates' rows outside K's null
+# block below this is 0 (those columns are orthonormal, so the values are in [0, 1];
+# a covariate direction exactly inside the block, like the intercept of a centred K,
+# gives ~1e-15).
+_NULL_SPAN_TOL = 1e-8
 
 # Safeguarded Newton-Raphson of LMM.fit_snps: iteration cap (bisection alone needs ~34
 # halvings of a 0.01 grid interval to reach the tolerance) and the step/bracket
 # tolerance in h (Brent's xatol in fit is 1e-10).
 _NEWTON_MAXITER = 100
 _NEWTON_XTOL = 1e-12
+# LMM.fit_snps evaluates its per-SNP terms in chunks of this many columns (memory:
+# about 15 n _SNP_CHUNK floats at a time; see LMM._snp_terms_at).
+_SNP_CHUNK = 256
 
 
 def check_test(test: str, refit: bool = False, legacy_fit: bool = False) -> None:
     """Raise ValueError unless ``test`` is one of `TESTS` and fits the other options.
 
-    The score test uses the null model only (no ``refit``); with
-    ``legacy_fit`` (pylmm 1.0.0) only the Wald test exists.
+    With ``legacy_fit`` (pylmm 1.0.0) only the Wald test exists.  ``refit`` is
+    accepted with the LRT, which always fits each SNP's model (by ML).
 
     Examples
     --------
     >>> from pylmm.lmm import check_test
     >>> check_test("lrt")
-    >>> check_test("score", refit=True)
+    >>> check_test("score")
     Traceback (most recent call last):
     ...
-    ValueError: the score test uses the null model only; it cannot be combined with refit
+    ValueError: test must be one of wald, lrt, got 'score' (the score test is LMM.score_batch)
     """
     if test not in TESTS:
-        raise ValueError("test must be one of %s, got %r" % (", ".join(TESTS), test))
-    if test == "score" and refit:
         raise ValueError(
-            "the score test uses the null model only; it cannot be combined with refit"
+            "test must be one of %s, got %r%s"
+            % (
+                ", ".join(TESTS),
+                test,
+                " (the score test is LMM.score_batch)" if test == "score" else "",
+            )
         )
     if test != "wald" and legacy_fit:
         raise ValueError(
             "legacy_fit reproduces pylmm 1.0.0, which had only the Wald test; test=%r needs "
             "the default fit" % test
         )
+
+
+def _lrt_result(
+    ll1: FloatArray, ll0: float, beta: FloatArray, beta_var: FloatArray
+) -> AssociationResult:
+    """The LRT of alternative log-likelihoods ``ll1`` against ``ll0``: ``(t, p, beta, beta_var)``.
+
+    ``stat = max(2 (ll1 - ll0), 0)`` (negative only by rounding), ``t =
+    sign(beta) sqrt(stat)``, ``p`` from ``chi2(1)``; nan where ``ll1`` or
+    ``beta`` is not finite.
+    """
+    with np.errstate(invalid="ignore"):
+        stat = np.maximum(2.0 * (np.asarray(ll1, dtype=np.float64) - ll0), 0.0)
+        t = np.sign(beta) * np.sqrt(stat)
+        bad = ~np.isfinite(ll1) | ~np.isfinite(beta)
+        t[bad] = np.nan
+        stat[bad] = np.nan
+    pv = stats.chi2.sf(stat, 1)
+    return AssociationResult(t, np.asarray(pv, dtype=np.float64), beta, beta_var)
 
 
 def _log_beta_tail(t: FloatArray, df: FloatArray) -> FloatArray:
@@ -737,7 +772,7 @@ def gwas(
     legacy_fit: bool = False,
     test: str = "wald",
 ) -> tuple[list[float], list[float]]:
-    """Scan SNPs with the mixed model (a Wald, likelihood-ratio or score test per SNP).
+    """Scan SNPs with the mixed model (a Wald or likelihood-ratio test per SNP).
 
     For each column of ``X`` the model ``y = X0 b + x a + u + e`` (see the
     module docstring) is tested for ``a = 0``.  By default the variance
@@ -745,8 +780,8 @@ def gwas(
     and reused for every SNP (the EMMA/"P3D" approximation); with
     ``refit=True`` they are refitted for each SNP (exactly, see
     `LMM.fit_snps`).  ``test`` chooses the test (`LMM.association_tests`):
-    the Wald test (default), the likelihood-ratio test (ML fits with and
-    without each SNP) or the score test (the null fit only).  Individuals with a missing
+    the Wald test (default) or the likelihood-ratio test (ML fits with and
+    without each SNP, `LMM.lrt_batch`).  Individuals with a missing
     phenotype are dropped; for a SNP with missing genotypes, a model on the
     called individuals only is built (the eigendecomposition of that subset of
     ``K`` is recomputed).
@@ -774,12 +809,13 @@ def gwas(
         without one (the test statistics can change a lot).  Add the
         intercept yourself: ``X0 = np.column_stack([np.ones(n), cov])``.
     reml : bool, default True
-        REML for the null fit, every refit and the Wald and score tests;
-        False uses ML throughout (``sigma2 = Q / n`` in the test).  The
-        likelihood-ratio test is always ML.
+        REML for the null fit, every refit and the Wald test; False uses
+        ML throughout (``sigma2 = Q / n`` in the test).  Ignored by the
+        likelihood-ratio test, which is always ML.
     refit : bool, default False
         Refit ``h`` and ``sigma2`` with each SNP in the model, for the Wald
-        test.  With ``batch=True`` (the default) the exact per-SNP fit of
+        test (the likelihood-ratio test always does; ``refit`` changes
+        nothing there).  With ``batch=True`` (the default) the exact per-SNP fit of
         `LMM.fit_snps`, a block of SNPs at a time (Newton-Raphson on the
         analytic derivatives; the maximum ``fit(X=x)`` finds, 8-46
         times faster); with ``batch=False`` or ``legacy_fit=True``,
@@ -803,29 +839,32 @@ def gwas(
         calls are always tested one at a time.
     block_size : int, default `pylmm.genotypes.DEFAULT_BLOCK_SIZE` (1024)
         Number of SNPs per block with ``batch=True``.  A block takes about
-        6-8 arrays of ``n * block_size`` floats of memory.
+        6-8 arrays of ``n * block_size`` floats of memory, also with
+        ``refit=True`` and ``test="lrt"`` (`LMM.fit_snps` works on at most 256
+        SNPs' per-SNP terms at a time; measured 4.6 arrays at n = 2000).
     legacy_fit : bool, default False
         Fit ``h`` as pylmm 1.0.0 did (see `LMM`): every null fit and refit,
         and so every statistic, as in 1.0.0.  With ``batch=False`` the
         results are those of pylmm 1.0.0.  Only with ``test="wald"``.
-    test : {"wald", "lrt", "score"}, default "wald"
-        The test of each SNP: ``"wald"``, the Wald t test (pylmm's test,
-        GEMMA's ``-lmm 1``); ``"lrt"``, the likelihood-ratio test of ML fits
-        with and without the SNP, ``chi2(1)`` (`LMM.lrt_batch`, GEMMA's
-        ``-lmm 2``); ``"score"``, the score test at the null fit (`LMM.score_batch`,
-        GEMMA's ``-lmm 3``; not with ``refit``).
+    test : {"wald", "lrt"}, default "wald"
+        The test of each SNP: ``"wald"``, the Wald t test (pylmm's test;
+        with ``refit``, GEMMA's ``-lmm 1``); ``"lrt"``, the likelihood-ratio
+        test of ML fits with and without the SNP, ``chi2(1)``
+        (`LMM.lrt_batch`: with K's null directions that the covariates span
+        dropped, so that ML has a maximum).  The score test is
+        `LMM.score_batch` (library only).
 
     Returns
     -------
     t_stats : list of length m
         The test statistic of each SNP (numpy float64 items): the Wald t
-        statistic (``t = beta / se``), or for the LRT and score test the
-        signed square root of the statistic (the sign of ``beta``).  ``nan``
+        statistic (``t = beta / se``), or for the LRT the signed square
+        root of the statistic (the sign of ``beta``).  ``nan``
         for a SNP that cannot be tested: all missing, constant, collinear with
         ``X0``, or with too few called individuals.
     p_values : list of length m
-        Two-sided p-value of each SNP: from ``t(n_s - q - 1)`` (Wald and
-        score; ``n_s`` is the number of individuals used for that SNP) or
+        Two-sided p-value of each SNP: from ``t(n_s - q - 1)`` (Wald;
+        ``n_s`` is the number of individuals used for that SNP) or
         ``chi2(1)`` (LRT); ``nan`` where ``t_stats`` is.  If no individual has
         a phenotype, both lists are all ``nan``.
 
@@ -841,8 +880,8 @@ def gwas(
     Raises
     ------
     ValueError
-        For an unknown ``test``, ``test="score"`` with ``refit``, ``test`` other
-        than ``"wald"`` with ``legacy_fit``; an infinite or constant phenotype, ``X`` or ``X0`` with the wrong
+        For an unknown ``test`` or ``test="lrt"`` with ``legacy_fit``; an
+        infinite or constant phenotype, ``X`` or ``X0`` with the wrong
         number of rows, nan/inf or rank-deficient ``X0``, ``n <= q + 1``
         observations, mismatching ``ids``/``kinship_ids``, a ``block_size``
         that is not a positive integer, and everything `LMM` raises for ``K`` (wrong shape, nan/inf, bad
@@ -1022,9 +1061,9 @@ def _gwas_one_snp(
 
 
 def _fit_null(L: LMM, test: str, reml: bool, refit: bool) -> None:
-    """The null fit a scan with ``test`` needs: ML for the LRT, none for the refitted Wald test."""
+    """The null fit a scan with ``test`` needs: the LRT's (reduced) ML fit, none for the refit."""
     if test == "lrt":
-        L.fit(reml=False)
+        L.lrt_null_fit()
     elif not refit:
         L.fit(reml=reml)
 
@@ -1253,8 +1292,10 @@ class LMM:
         _check_eigen_args(kva, kve)
         self.legacy_fit = bool(legacy_fit)
         self._ml_ill_posed: bool | None = None  # computed by the first ML fit
-        self._null_ml_ll: float | None = None  # set by fit(reml=False): the LRT's null
         self._snp_fallbacks = 0  # fit_snps: brackets that fell back to the scalar search
+        self._lrt_cache: LMM | None = None  # _lrt_model
+        self._lrt_null: tuple[float, float] | None = None  # lrt_null_fit
+        self._dropped = 0  # directions _reduced_ml_model dropped (on the reduced model)
         if X0 is None:
             n_y = len(np.asarray(Y))
             X0 = np.ones(n_y).reshape(n_y, 1)
@@ -1446,7 +1487,14 @@ class LMM:
 
         S = 1.0 / (h * self.kva + (1.0 - h))
         p = X.shape[1]
-        if self.legacy_fit or not p:
+        if not p and not self.legacy_fit:
+            # no covariates (e.g. the LRT's reduced model of an intercept-only fit):
+            # nothing to solve (scipy < 1.14 cannot invert a 0 x 0 matrix)
+            beta = np.zeros((0, 1))
+            xx_inv = np.zeros((0, 0))
+            xx = np.zeros((0, 0))
+            Q = float(np.dot(self.yt[:, 0] * S, self.yt[:, 0]))
+        elif self.legacy_fit or not p:
             # pylmm 1.0.0: the normal equations, inverted
             xt = X.T * S
             xx = _matrix_mult(xt, X)
@@ -1578,7 +1626,9 @@ class LMM:
             if not self.legacy_fit:
                 basis = self._x0t_ortho
         elif stack:
-            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
+            self.x0t_stack[:, (self.q)] = _matrix_mult(
+                self.kve.T, _snp_column(X, self.kve.shape[0])
+            )[:, 0]
             X = self.x0t_stack
         else:
             X = np.asarray(X, dtype=np.float64)
@@ -1902,7 +1952,9 @@ class LMM:
         if X is None:
             design = self.x0t
         else:
-            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
+            self.x0t_stack[:, (self.q)] = _matrix_mult(
+                self.kve.T, _snp_column(X, self.kve.shape[0])
+            )[:, 0]
             design = self.x0t_stack
 
         if self.legacy_fit:
@@ -1938,8 +1990,6 @@ class LMM:
                     stacklevel=2,
                 )
 
-        if X is None and not reml:
-            self._null_ml_ll = float(L)
         self.h_grid = H
         self.opt_h = hmax.sum()
         self.opt_ll = L
@@ -2057,7 +2107,9 @@ class LMM:
         True
         """
         if stack:
-            self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
+            self.x0t_stack[:, (self.q)] = _matrix_mult(
+                self.kve.T, _snp_column(X, self.kve.shape[0])
+            )[:, 0]
             design = self.x0t_stack
         else:
             design = np.asarray(X, dtype=np.float64)
@@ -2085,10 +2137,11 @@ class LMM:
         G = np.asarray(X, dtype=np.float64)
         if G.ndim == 1:
             G = G.reshape(-1, 1)
-        if G.ndim != 2 or G.shape[0] != self.N:
+        n = self.kve.shape[0]  # = N, except on the LRT's reduced model
+        if G.ndim != 2 or G.shape[0] != n:
             raise ValueError(
                 "X must have shape (%d, m) or (%d,) (one row per individual with a "
-                "phenotype), got %s" % (self.N, self.N, np.shape(X))
+                "phenotype), got %s" % (n, n, np.shape(X))
             )
         return G
 
@@ -2235,7 +2288,14 @@ class LMM:
     def score_batch(
         self, X: ArrayLike, h: float | None = None, reml: bool = True
     ) -> AssociationResult:
-        """Score tests of many SNPs, from the null model alone (GEMMA's ``-lmm 3``).
+        """Score tests of many SNPs at the null fit, for comparison with GEMMA's ``-lmm 3``.
+
+        A library function only, not a test of `gwas` or ``pylmm gwas --test``:
+        the score statistic is a monotone function of the null-fit Wald
+        statistic of `association_batch` (Notes), so it ranks the SNPs as the
+        default scan does, adds no information to it and costs as much, and
+        its p-values have a floor at small ``N`` (Notes).  Use it to reproduce
+        a GEMMA ``-lmm 3`` analysis (``reml=False``).
 
         For each column ``x`` of ``X`` the score statistic of ``a = 0`` in
         ``y = X0 b + x a + u + e`` is evaluated at the null model's ``h`` and
@@ -2278,7 +2338,16 @@ class LMM:
         default Wald scan does; its p-values are larger than the Wald test's
         where ``|t_score| > 1`` (much larger for strong signals: ``t_score^2 <=
         N - q``) and slightly smaller below.  The cost is that of
-        `association_batch`.
+        `association_batch`.  (ML: ``t_score^2 = N u``, ``t_wald^2 = N u / (1 -
+        u)``.)
+
+        Since ``u < 1``, ``t_score^2 < N - q`` (``N`` under ML): the p-value
+        cannot fall below ``2 P(T > sqrt(N - q))``, ``T ~ t(N - q - 1)``.  With
+        an intercept alone that floor is about 9.7e-6 at ``N = 30``, 4.4e-8 at
+        45, 7.4e-9 at 50 and 1.3e-15 at 94: below ``N`` ~ 45 (e.g. strain means
+        of a small inbred panel) no SNP can reach 5e-8.  In S9
+        (``sims/studies/s9_tests.md``) the test is conservative in the tail at
+        ``N = 100``.
 
         Examples
         --------
@@ -2495,6 +2564,12 @@ class LMM:
             d2logq = d2q / Q1 - dlogq * dlogq
             if reml:
                 tr_pd0 = a_s.sum(axis=0)
+                # tr(P0 D P0 D) = sum (aS)^2 - 2 tr(G^-1 F2) + tr((G^-1 F1)^2): at h
+                # near 1 a floored direction that the covariates span contributes
+                # ~1e12 to each term and cancels, leaving l'' with a relative error
+                # of ~1e-5 there (measured: tests/helpers.py DERIV_H1_RTOL).  Only
+                # Newton's step uses l''; l' and the log-likelihood, which pick the
+                # maximum, have no such term.
                 tr_pdpd0 = (a_s * a_s).sum(axis=0)
                 if q:
                     F1 = _weighted_grams(U, a_s * S)
@@ -2514,6 +2589,32 @@ class LMM:
                 out["d1"] = -0.5 * (a_s.sum(axis=0) + n * dlogq)
                 out["d2"] = -0.5 * (-(a_s * a_s).sum(axis=0) + n * d2logq)
         return out
+
+    def _snp_terms_at(
+        self,
+        h: FloatArray,
+        cols: NDArray[np.intp],
+        xp: FloatArray,
+        yp: FloatArray,
+        nrm2: FloatArray,
+        reml: bool,
+        derivatives: bool = False,
+    ) -> dict[str, FloatArray]:
+        """`_snp_terms` of the columns ``cols`` of ``xp`` at ``h``, `_SNP_CHUNK` at a time.
+
+        `_snp_terms` keeps about 15 ``(N, k)`` arrays alive at once; in chunks of
+        `_SNP_CHUNK` columns the peak stays near ``15 N _SNP_CHUNK`` floats
+        whatever the number of brackets or candidates (several per SNP).
+        """
+        parts = []
+        for a in range(0, len(cols), _SNP_CHUNK):
+            c = cols[a : a + _SNP_CHUNK]
+            parts.append(
+                self._snp_terms(h[a : a + _SNP_CHUNK], xp[:, c], yp, nrm2[c], reml, derivatives)
+            )
+        if not parts:
+            return self._snp_terms(h, xp[:, cols], yp, nrm2[cols], reml, derivatives)
+        return {k: np.concatenate([d[k] for d in parts]) for k in parts[0]}
 
     def _newton(
         self,
@@ -2546,7 +2647,7 @@ class LMM:
             act = np.where(~done)[0]
             if not len(act):
                 break
-            t = self._snp_terms(x[act], xp[:, cols[act]], yp, nrm2[cols[act]], reml, True)
+            t = self._snp_terms_at(x[act], cols[act], xp, yp, nrm2, reml, True)
             g, g2 = t["d1"], t["d2"]
             xa = x[act]
             la = np.where(g > 0, xa, lo[act])
@@ -2704,7 +2805,7 @@ class LMM:
         if len(bj):
             # l' at the bracket ends and at the peak: a (+, -) sub-interval holds the maximum
             def d1(hh: FloatArray, cols: NDArray[np.intp]) -> FloatArray:
-                return self._snp_terms(hh, xp[:, cols], yp, nrm2[cols], reml, True)["d1"]
+                return self._snp_terms_at(hh, cols, xp, yp, nrm2, reml, True)["d1"]
 
             g_lo, g_hi = d1(blo, bj), d1(bhi, bj)
             has_mid = np.isfinite(bmid)
@@ -2755,7 +2856,7 @@ class LMM:
 
         cj = np.concatenate(cand_j)
         ch = np.concatenate(cand_h)
-        r = self._snp_terms(ch, xp[:, cj], yp, nrm2[cj], reml)
+        r = self._snp_terms_at(ch, cj, xp, yp, nrm2, reml)
         cl = r["ll"]
         # the best candidate per column; ties go to the smallest h
         order = np.lexsort((ch, -np.where(np.isfinite(cl), cl, -np.inf), cj))
@@ -2776,24 +2877,156 @@ class LMM:
         self._warn_boundary(float(np.nanmax(h_out)), p)
         return SnpFitResult(h_out, ll_out, t, np.asarray(pv, dtype=np.float64), beta, beta_var)
 
+    def _lrt_model(self) -> LMM:
+        """The LRT's ML model: ``self`` without the null directions of K that the covariates span.
+
+        In the rotated basis the floored (null) coordinates of ``K`` all have
+        variance ``sigma2 * (1 - h + h * 1e-6)``: the covariance is a multiple
+        of the identity on that block, so any orthonormal change of basis
+        inside it keeps the covariance diagonal.  Let ``Z`` be the part of the
+        covariates' span that lies in that block (``Z = U null(U_R)``, ``U`` the
+        orthonormal rotated covariates, ``U_R`` its rows outside the block;
+        ``r = dim Z``).  The ML likelihood is unbounded as ``h -> 1`` exactly
+        when ``r > 0`` (bug 17): the covariates fit ``y`` along ``Z`` whatever
+        ``h`` is, so the residual there is 0 while its variance goes to 0.  The
+        reduced model drops ``Z``: it is the exact Gaussian likelihood of the
+        ``N - r`` contrasts ``Q'y`` with ``Q`` an orthonormal basis of the
+        complement of ``Z`` (a partial REML that removes only ``Z``), with the
+        ``q - r`` covariate directions that remain.  Because ``Z`` lies in the
+        span of the covariates, it is the same for the model with a SNP, so
+        the null and alternative ML fits stay nested and their LRT valid.
+        With no such direction (``r = 0``, e.g. a positive definite or
+        uncentred ``K``) this is ``self``.  Computed once and cached.
+        """
+        if self._lrt_cache is not None:
+            return self._lrt_cache
+        reduced = self._reduced_ml_model()
+        self._lrt_cache = self if reduced is None else reduced
+        return self._lrt_cache
+
+    def _reduced_ml_model(self) -> LMM | None:
+        """`_lrt_model`'s reduced model, or None if no direction is dropped."""
+        null = self.kva <= 1e-6
+        d = int(null.sum())
+        if not d or not self.q or self.legacy_fit:
+            return None
+        U = self._x0t_ortho
+        u_rest = U[~null]
+        if u_rest.shape[0]:
+            _, s, vt = np.linalg.svd(u_rest, full_matrices=True)
+            rank = int((s > _NULL_SPAN_TOL).sum())
+        else:  # every coordinate is null
+            vt, rank = np.eye(self.q), 0
+        C = vt[rank:].T  # (q, r): coefficient directions with no weight outside the block
+        r = C.shape[1]
+        if not r:
+            return None
+        zn = U[null] @ C  # (d, r), orthonormal: Z restricted to the null block
+        comp = np.linalg.qr(zn, mode="complete")[0][:, r:]  # (d, d - r)
+
+        def reduce(A: FloatArray) -> FloatArray:
+            """Rotated rows -> the N - r rows of the reduced model."""
+            out: FloatArray = np.concatenate([A[~null], comp.T @ A[null]], axis=0)
+            return out
+
+        R: LMM = object.__new__(LMM)
+        R.__dict__.update(self.__dict__)
+        R.N = self.N - r
+        R.kva = np.concatenate([self.kva[~null], np.full(d - r, 1e-6)])
+        R.kve = np.concatenate([self.kve[:, ~null], self.kve[:, null] @ comp], axis=1)
+        R.yt = reduce(self.yt)
+        # the covariate span left after dropping Z (q - r directions)
+        ub, sb, _ = np.linalg.svd(reduce(U), full_matrices=False)
+        R.x0t = ub[:, : self.q - r]
+        R._x0t_ortho = R.x0t
+        R.q = R.x0t.shape[1]
+        R.x0t_stack = np.hstack([R.x0t, np.ones((R.N, 1))])
+        R._ml_ill_posed = None
+        R._lrt_cache = R
+        R._lrt_null = None
+        R._dropped = r
+        return R
+
+    def lrt_null_fit(self, ngrids: int = 100) -> tuple[float, float]:
+        """The null model's ML fit for the LRT: ``(h, log_likelihood)`` of `_lrt_model`.
+
+        By maximum likelihood, on the model with ``K``'s covariate-spanned
+        null directions dropped (see `lrt_batch`), so it has an interior
+        maximum where the plain ML fit of `fit` sits at its ``h = 1`` spike.
+        Computed once and cached; does not change this model's ``opt_*``.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from pylmm.lmm import LMM, calculate_kinship
+        >>> rng = np.random.default_rng(1)
+        >>> W = rng.binomial(2, 0.3, size=(100, 1000)).astype(float)
+        >>> K = calculate_kinship(W)                  # centred: K 1 = 0
+        >>> y = rng.normal(size=100)                  # h2 = 0
+        >>> model = LMM(y, K)
+        >>> h_lrt, ll_lrt = model.lrt_null_fit()
+        >>> bool(h_lrt < 0.5)                         # the plain ML fit is at h = 1
+        True
+        """
+        if self._lrt_null is None:
+            M = self._lrt_model()
+            if M._lrt_null is None:
+                with warnings.catch_warnings():
+                    # the reduced model is never ill-posed; self may be, and is not used
+                    warnings.filterwarnings("ignore", message="the ML likelihood has no maximum")
+                    h, _, _, ll = M._fit_copy(None, False, ngrids)
+                M._lrt_null = (float(h), float(ll))
+            self._lrt_null = M._lrt_null
+        return self._lrt_null
+
+    def _fit_copy(
+        self, X: FloatArray | None, reml: bool, ngrids: int = 100
+    ) -> tuple[np.float64, FloatArray, float, float]:
+        """`fit` that leaves this model's ``opt_*``, ``ll_grid`` and ``h_grid`` as they were."""
+        keys = ("opt_h", "opt_ll", "opt_beta", "opt_sigma", "ll_grid", "h_grid")
+        saved = {k: self.__dict__[k] for k in keys if k in self.__dict__}
+        stack = self.x0t_stack[:, self.q].copy()
+        try:
+            return self.fit(X=X, ngrids=ngrids, reml=reml)
+        finally:
+            for k in keys:
+                self.__dict__.pop(k, None)
+            self.__dict__.update(saved)
+            self.x0t_stack[:, self.q] = stack
+
     def lrt_batch(
         self, X: ArrayLike, ll0: float | None = None, ngrids: int = 100
     ) -> AssociationResult:
-        """Likelihood-ratio tests of many SNPs, by maximum likelihood (GEMMA's ``-lmm 2``).
+        """Likelihood-ratio tests of many SNPs, by (reduced) maximum likelihood.
 
         ``stat = 2 (l1 - l0)``, with ``l1`` each SNP's ML fit (`fit_snps`,
-        ``reml=False``) and ``l0`` the null model's ML fit, is referred to
-        ``chi2(1)``.  The likelihoods are ML, not REML: REML likelihoods of
-        models with different fixed effects are not comparable (GEMMA's LRT
-        is ML too).
+        ``reml=False``) and ``l0`` the null model's (`lrt_null_fit`), is
+        referred to ``chi2(1)``.  The likelihoods are ML, not REML: REML
+        likelihoods of models with different fixed effects are not
+        comparable.
+
+        Both fits use the reduced model of `_lrt_model`: the null directions
+        of ``K`` that the covariates span are dropped.  With pylmm's centred
+        kinship (``K 1 = 0``) and an intercept that is one direction, along
+        which the plain ML likelihood grows without bound as ``h -> 1``
+        (bug 17): both plain fits would then sit at ``h = 1`` (in most
+        replicates at n <= ~300, whatever the true h2) and the LRT would
+        compare two models without residual variance, anti-conservatively.
+        Dropping it leaves the exact likelihood of the remaining ``N - r``
+        contrasts, the same for both models, so the comparison stays nested.
+        Where nothing is dropped (``K`` positive definite, or its null space
+        not in the covariates' span) this is the plain ML LRT, GEMMA's ``-lmm
+        2``; GEMMA centres every kinship and keeps the unbounded likelihood,
+        stopping at its bound ``lambda = 1e5``, so with a centred K the two
+        differ.
 
         Parameters
         ----------
         X : (N, m) array, or (N,) for one SNP
             SNPs, as for `fit_snps`.
         ll0 : float, optional
-            The null model's ML log-likelihood.  Default: that of the last
-            null ML fit, ``fit(reml=False)`` (a ValueError if there was none).
+            The null log-likelihood on the same (reduced) scale.  Default:
+            `lrt_null_fit`.
         ngrids : int, default 100
             As for `fit_snps`.
 
@@ -2803,16 +3036,16 @@ class LMM:
             ``(t, p, beta, beta_var)`` of ``(m,)`` arrays: ``t =
             sign(beta) * sqrt(stat)``, the ``chi2(1)`` p-value of ``stat``,
             and the SNP effect and its variance from the ML fit with the SNP
-            (the Wald quantities at that SNP's ML ``h``, ``sigma2 = Q / N``).
+            (the Wald quantities at that SNP's ML ``h``, ``sigma2 = Q / N``,
+            ``N`` the reduced sample size).
 
         Notes
         -----
         ``l1 >= l0`` in exact arithmetic (the null model is nested); a
-        negative ``stat`` from rounding is set to 0.  With a centred kinship
-        built from more SNPs than individuals and an intercept, the ML
-        likelihood has no maximum (see `fit`); both fits then share the
-        unbounded term, and ``sims/studies/s9_tests.py`` measures the
-        calibration that results.
+        negative ``stat`` from rounding is set to 0.  ``sims/studies/s9_tests.md``
+        measures the calibration: about that of the Wald test from n = 300,
+        mildly anti-conservative at n = 100 (chi2(1) has no small-sample
+        correction).
 
         Examples
         --------
@@ -2823,27 +3056,15 @@ class LMM:
         >>> K = calculate_kinship(W)
         >>> y = 1.0 * W[:, 0] + rng.normal(size=80)
         >>> model = LMM(y, K)
-        >>> _ = model.fit(reml=False)                      # the null model, by ML
         >>> res = model.lrt_batch(W[:, :20])
         >>> bool(res.p[0] < 1e-3), res.t.shape
         (True, (20,))
         """
+        M = self._lrt_model()
         if ll0 is None:
-            if self._null_ml_ll is None:
-                raise ValueError(
-                    "lrt_batch needs the null model's ML log-likelihood: call fit(reml=False) "
-                    "first, or pass ll0"
-                )
-            ll0 = self._null_ml_ll
-        f = self.fit_snps(X, reml=False, ngrids=ngrids)
-        with np.errstate(invalid="ignore"):
-            stat = np.maximum(2.0 * (f.ll - ll0), 0.0)
-            t = np.sign(f.beta) * np.sqrt(stat)
-            bad = ~np.isfinite(f.ll) | ~np.isfinite(f.beta)
-            t[bad] = np.nan
-            stat[bad] = np.nan
-        pv = stats.chi2.sf(stat, 1)
-        return AssociationResult(t, np.asarray(pv, dtype=np.float64), f.beta, f.beta_var)
+            ll0 = self.lrt_null_fit(ngrids)[1]
+        f = M.fit_snps(X, reml=False, ngrids=ngrids)
+        return _lrt_result(f.ll, ll0, f.beta, f.beta_var)
 
     def association_tests(
         self,
@@ -2853,52 +3074,52 @@ class LMM:
         refit: bool = False,
         batch: bool = True,
     ) -> AssociationResult:
-        """Test every column of ``X`` with the Wald, likelihood-ratio or score test.
+        """Test every column of ``X`` with the Wald or the likelihood-ratio test.
 
-        The dispatcher `gwas` and ``pylmm gwas`` use; the null model must be
-        fitted first, by ``fit(reml=reml)`` (``fit(reml=False)`` for
-        ``test="lrt"``), unless ``refit``.
+        The dispatcher `gwas` and ``pylmm gwas`` use.  For the Wald test
+        without ``refit`` the null model must be fitted first,
+        ``fit(reml=reml)``; the LRT fits its own null model (`lrt_null_fit`).
 
         ===========  =============  ================================================
         test         refit          what
         ===========  =============  ================================================
         ``"wald"``   False          `association_batch` at the null ``h`` (EMMAX/P3D)
         ``"wald"``   True           `fit_snps`: the Wald test at each SNP's own ``h``
-        ``"lrt"``    (always)       `lrt_batch`: ML fits with and without the SNP
-        ``"score"``  (never)        `score_batch` at the null ``h``
+        ``"lrt"``    (always)       `lrt_batch`: reduced-ML fits with and without the SNP
         ===========  =============  ================================================
 
         With ``batch=False`` (or ``legacy_fit=True``) the SNPs are tested one
         at a time instead: the Wald test with `association`, the refit and
         the LRT's per-SNP fit with ``fit(X=x)`` (the grid search of `fit`,
-        pylmm 1.0.0's with ``legacy_fit``).
+        pylmm 1.0.0's with ``legacy_fit``).  The model's null fit
+        (``opt_h``, ``opt_sigma``, ``opt_ll``, ...) is left as it was.  The
+        score test is `score_batch` (library only).
 
         Parameters
         ----------
         X : (N, m) array, or (N,) for one SNP
             SNPs with no missing values, estimable (`snp_estimable_columns`).
-        test : {"wald", "lrt", "score"}, default "wald"
+        test : {"wald", "lrt"}, default "wald"
             The test, see the table.
         reml : bool, default True
-            REML or ML for the Wald and score tests; the LRT is always ML.
+            REML or ML for the Wald test; the LRT is always ML (``reml`` is
+            ignored).
         refit : bool, default False
-            Refit ``h`` with each SNP (Wald test only).
+            Refit ``h`` with each SNP (the Wald test; the LRT always does).
         batch : bool, default True
             Test the block at once (see above).
 
         Returns
         -------
         AssociationResult
-            ``(t, p, beta, beta_var)`` of ``(m,)`` arrays; for the LRT and
-            score test ``t`` is the signed root of the statistic (see
-            `lrt_batch`, `score_batch`).
+            ``(t, p, beta, beta_var)`` of ``(m,)`` arrays; for the LRT ``t`` is
+            the signed root of the statistic (see `lrt_batch`).
 
         Raises
         ------
         ValueError
-            For an unknown ``test``, the score test with ``refit``, or a test
-            other than the Wald test with ``legacy_fit`` (pylmm 1.0.0 had only
-            the Wald test).
+            For an unknown ``test``, or the LRT with ``legacy_fit`` (pylmm
+            1.0.0 had only the Wald test).
 
         Examples
         --------
@@ -2911,19 +3132,15 @@ class LMM:
         >>> model = LMM(y, K)
         >>> _ = model.fit()
         >>> wald = model.association_tests(W[:, :10])
-        >>> score = model.association_tests(W[:, :10], test="score")
         >>> refit = model.association_tests(W[:, :10], refit=True)
-        >>> _ = model.fit(reml=False)
         >>> lrt = model.association_tests(W[:, :10], test="lrt")
-        >>> [bool(r.p[0] < 1e-3) for r in (wald, score, refit, lrt)]
-        [True, True, True, True]
+        >>> [bool(r.p[0] < 1e-3) for r in (wald, refit, lrt)]
+        [True, True, True]
         """
         check_test(test, refit, self.legacy_fit)
         G = self._snp_block(X)
         if self.legacy_fit or not batch:
             return self._association_tests_per_snp(G, test, reml, refit)
-        if test == "score":
-            return self.score_batch(G, reml=reml)
         if test == "lrt":
             return self.lrt_batch(G)
         if refit:
@@ -2934,31 +3151,35 @@ class LMM:
     def _association_tests_per_snp(
         self, G: FloatArray, test: str, reml: bool, refit: bool
     ) -> AssociationResult:
-        """`association_tests` one SNP at a time (``batch=False``, or ``legacy_fit``)."""
+        """`association_tests` one SNP at a time (``batch=False``, or ``legacy_fit``).
+
+        Each SNP's fit runs through `_fit_copy`, so the model's null fit is
+        unchanged afterwards.
+        """
         m = G.shape[1]
         out = [np.full(m, np.nan) for _ in range(4)]
-        if test == "score":
-            return self.score_batch(G, reml=reml)
-        ll0 = self._null_ml_ll if test == "lrt" else None
-        if test == "lrt" and ll0 is None:
-            raise ValueError("the LRT needs the null model's ML fit: call fit(reml=False) first")
+        if test == "lrt":
+            M = self._lrt_model()
+            ll0 = self.lrt_null_fit()[1]
+            for j in range(m):
+                x = G[:, [j]]
+                hj, _, _, ll1 = M._fit_copy(x, False)
+                saved = M.x0t_stack[:, M.q].copy()
+                _, _, beta, beta_var = M.association(x, float(hj), reml=False, return_beta=True)
+                M.x0t_stack[:, M.q] = saved
+                r = _lrt_result(np.array([ll1]), ll0, np.array([beta]), np.array([beta_var]))
+                for k in range(4):
+                    out[k][j] = r[k][0]
+            return AssociationResult(*out)
         h0 = getattr(self, "opt_h", None)
         for j in range(m):
             x = G[:, [j]]
-            if test == "lrt":
-                _, _, _, ll1 = self.fit(X=x, reml=False)
-                ts, _, beta, beta_var = self.association(x, reml=False, return_beta=True)
-                stat = max(2.0 * (ll1 - float(ll0)), 0.0)  # type: ignore[arg-type]
-                out[0][j] = np.sign(beta) * np.sqrt(stat)
-                out[1][j] = stats.chi2.sf(stat, 1)
+            if refit:
+                hj = self._fit_copy(x, reml)[0]
+                ts, ps, beta, beta_var = self.association(x, float(hj), reml=reml, return_beta=True)
             else:
-                if refit:
-                    self.fit(X=x, reml=reml)
-                    ts, ps, beta, beta_var = self.association(x, reml=reml, return_beta=True)
-                else:
-                    ts, ps, beta, beta_var = self.association(x, h0, reml=reml, return_beta=True)
-                out[0][j], out[1][j] = ts, ps
-            out[2][j], out[3][j] = beta, beta_var
+                ts, ps, beta, beta_var = self.association(x, h0, reml=reml, return_beta=True)
+            out[0][j], out[1][j], out[2][j], out[3][j] = ts, ps, beta, beta_var
         return AssociationResult(*out)
 
     def tstat(

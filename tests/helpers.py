@@ -183,6 +183,14 @@ REFIT_LL_ATOL = 1e-9
 # largest shortfall of the exact fit below the oracle 3.3e-10 (n = 100); 9.2e-12 at
 # n = 300.  ORACLE_LL_ATOL is ~30x the worst.
 ORACLE_LL_ATOL = 1e-8
+# The LRT's reduced ML (LMM._lrt_model, lrt_null_fit, lrt_batch) vs a dense
+# reference (tests/test_association_tests.py: Z = null directions of the floored K in
+# span(X0) found densely, the likelihood of Q'y with Q the complement of Z, a
+# 401-point grid and Brent).  Measured: 30 null fits (n = 80; centred GRM at h2 0,
+# 0.3, 0.8, 0.95 with 0-2 covariates, and a centred strain-expanded K; 6 seeds; 5 at
+# h = 1) max |d log-likelihood| 4.4e-13, max |dh| 1.0e-7; 120 LRT statistics max
+# |d stat| 7.6e-13.  REDUCED_ML_LL_ATOL is ~230x the worst.
+REDUCED_ML_LL_ATOL = 1e-10
 REFIT_RTOL = 1e-5
 REFIT_ATOL_SCALE = 1e-6
 # The analytic first and second derivatives of the log-likelihood in h
@@ -194,6 +202,14 @@ REFIT_ATOL_SCALE = 1e-6
 # ML profile curves sharply: it measures the difference formula, not the
 # derivative.)
 DERIV_RTOL = 1e-7
+# The REML second derivative at exactly h = 1 with a centred K: the floored direction
+# the intercept spans gives ~1e12-sized terms in tr(P0 D P0 D) that cancel (see
+# LMM._snp_terms), so l'' is off by ~1e-5 relative there (the PR #31 review: 1.5e-5
+# against a 60-digit reference).  Measured against a second-order backward difference
+# (steps 1e-4 to 1e-6, 4 seeds, 0 and 2 covariates): l' 9.1e-8, l'' 9.0e-6 of (max
+# |derivative| + 1).  DERIV_H1_RTOL is ~11x the worst l''.  Harmless: only Newton's
+# step uses l''.
+DERIV_H1_RTOL = 1e-4
 # pylmm's statistics vs GEMMA's formulas (Zhou & Stephens 2012) computed on the
 # dense n x n matrices in tests/test_association_tests.py, where each likelihood is
 # maximised by its own bounded Brent search (xatol 1e-12, but Brent's rule stops at

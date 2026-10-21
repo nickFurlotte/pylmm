@@ -96,7 +96,7 @@ from pylmm.kinship import (
     finish_kinship,
     snp_columns,
 )
-from pylmm.lmm import LMM, _check_phenotype, gwas
+from pylmm.lmm import LMM, _check_phenotype, check_test, gwas
 
 __all__ = ["LocoKinship", "LocoResult", "gwas_loco", "loco_memory_bytes", "normalize_chrom"]
 
@@ -470,6 +470,7 @@ def gwas_loco(
     block_size: int = DEFAULT_BLOCK_SIZE,
     kind: KinshipKind = "standardized",
     legacy_fit: bool = False,
+    test: str = "wald",
 ) -> LocoResult:
     """Scan SNPs with leave-one-chromosome-out kinships.
 
@@ -505,12 +506,16 @@ def gwas_loco(
         The kinship built from ``X`` (ignored with ``kinships``).
     legacy_fit : bool, default False
         pylmm 1.0.0's variance-component fit, as for `pylmm.lmm.gwas`.
+    test : {"wald", "lrt"}, default "wald"
+        The test, as for `pylmm.lmm.gwas` (each chromosome's LRT has its own
+        ML null fit on ``K_{-c}``).
 
     Returns
     -------
     LocoResult
         ``(t_stats, p_values, h)``: lists of length ``m`` in the column order
-        of ``X``, and the null ``h`` of each chromosome.
+        of ``X``, and the null ``h`` of each chromosome (with ``test="lrt"``,
+        that of the LRT's ML null fit, `pylmm.lmm.LMM.lrt_null_fit`).
 
     Raises
     ------
@@ -538,6 +543,7 @@ def gwas_loco(
     >>> bool(np.allclose(p[:100], p1, rtol=1e-9))
     True
     """
+    check_test(test, refit, legacy_fit)
     y_all = _check_phenotype(Y)
     n = len(y_all)
     A = np.asarray(X, dtype=np.float64)
@@ -582,8 +588,7 @@ def gwas_loco(
         if not all_kept:
             K = K[keep][:, keep]
         L = LMM(y_kept, K, X0=x0_kept, legacy_fit=legacy_fit)
-        L.fit(reml=reml)
-        h[c] = float(L.opt_h)
+        h[c] = L.lrt_null_fit()[0] if test == "lrt" else float(L.fit(reml=reml)[0])
         tc, pc = gwas(
             y_kept,
             g_kept[:, cols],
@@ -596,6 +601,7 @@ def gwas_loco(
             batch=batch,
             block_size=block_size,
             legacy_fit=legacy_fit,
+            test=test,
         )
         for k, j in enumerate(cols):
             t_stats[j], p_values[j] = tc[k], pc[k]

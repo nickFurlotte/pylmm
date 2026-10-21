@@ -1,4 +1,4 @@
-"""Phase 6.5: the exact per-SNP refit (`LMM.fit_snps`), the LRT and the score test.
+"""Phase 6.5: the exact per-SNP refit (`LMM.fit_snps`), the (reduced-ML) LRT and the score test.
 
 * `LMM._snp_terms`: the likelihood is the one `fit` maximises, and its analytic
   first and second derivatives in h match finite differences;
@@ -15,6 +15,7 @@
 """
 
 import os
+import warnings
 
 import helpers as h
 import numpy as np
@@ -92,6 +93,24 @@ def test_snp_terms_is_fits_likelihood_and_derivatives_match(reml, n_cov):
             fd = _difference(lambda v, key=key: f(v, key), hh, 1e-5)
             err = np.abs(t[dkey] - fd).max()
             assert err <= h.DERIV_RTOL * (np.abs(fd).max() + 1.0), (dkey, hh, err)
+
+
+@pytest.mark.parametrize("n_cov", [0, 2])
+def test_snp_terms_reml_derivatives_at_h1(n_cov):
+    """At exactly h = 1 (REML, centred K): l' as everywhere, l'' to DERIV_H1_RTOL."""
+    y, X, K, X0 = _data(n_cov=n_cov)
+    L = LMM(y, K, X0=X0)
+    xp, yp, nrm2 = L._snp_rotate(X[:, :6])
+    t = L._snp_terms(np.ones(6), xp, yp, nrm2, True, True)
+
+    def f(v, key):
+        return L._snp_terms(np.full(6, v), xp, yp, nrm2, True, True)[key]
+
+    e = 1e-5
+    for key, dkey, tol in (("ll", "d1", h.DERIV_RTOL), ("d1", "d2", h.DERIV_H1_RTOL)):
+        fd = (3 * f(1.0, key) - 4 * f(1.0 - e, key) + f(1.0 - 2 * e, key)) / (2 * e)
+        err = np.abs(t[dkey] - fd).max()
+        assert err <= tol * (np.abs(fd).max() + 1.0), (dkey, err)
 
 
 def _difference(f, x, e):
@@ -267,14 +286,15 @@ def _gemma_max(K, W, y, reml):
 
 
 def test_score_lrt_and_refit_wald_equal_gemmas_formulas():
-    """On a positive definite K (no eigenvalue floor, bounded ML), with an intercept
-    and a covariate: GEMMA's Wald (-lmm 1: REML refit), LRT (-lmm 2) and score
-    (-lmm 3: the null ML lambda, F with n in the numerator)."""
+    """On a positive definite K (no eigenvalue floor, bounded ML, nothing for the LRT to
+    drop), with an intercept and a covariate: GEMMA's Wald (-lmm 1: REML refit), LRT
+    (-lmm 2) and score (-lmm 3: the null ML lambda, F with n in the numerator)."""
     y, X, K, X0 = _data(n=100, kind="pd", h2=0.5, n_cov=1, seed=9, effect=0.6)
     X = X[:, :5]
     n, c = X0.shape
     df = n - c - 1
     L = LMM(y, K, X0=X0)
+    assert L._lrt_model() is L  # positive definite K: the plain ML LRT
     L.fit(reml=False)
     lam0, l0 = _gemma_max(K, X0, y, reml=False)
     assert 0.01 < lam0 < 50  # interior: bounded ML
@@ -319,21 +339,145 @@ def test_score_is_a_monotone_function_of_the_wald_test():
     assert strong.any() and np.all(s.p[strong] >= w.p[strong])
     assert np.all(s.p[~strong] <= w.p[~strong])
     h.assert_p_matches_t(s.t, s.p, L.N - L.q - 1, what="score p")
+    # the floor: t_score^2 <= N - q, so p >= P(|t(N - q - 1)| > sqrt(N - q))
+    assert np.all(s.t**2 <= nq * (1 + 1e-12))
 
 
-def test_lrt_needs_an_ml_null_fit():
+# ---------------------------------------------------------------------------
+# the LRT's reduced ML, against a dense reference
+# ---------------------------------------------------------------------------
+
+
+def _dense_reduced_ml(y, K, X, floor=1e-6):
+    """The reduced-ML maximum, densely: (h, ll, r).
+
+    Z = the vectors that are both null directions of the floored K and in span(X)
+    (computed as null((I - P_X) V_N), a different route from the code's);
+    the likelihood is that of Q'y, Q an orthonormal basis of the complement of Z,
+    with the covariance Q'(h K + (1 - h) I)Q and the design Q'X (rank q - r),
+    maximised over a fine grid of h with bounded Brent on every grid peak.
+    """
+    n = len(y)
+    kva, kve = linalg.eigh(K)
+    kva = np.where(kva < floor, floor, kva)
+    k_floor = (kve * kva) @ kve.T
+    v_null = kve[:, kva <= floor]
+    q_x = linalg.qr(X, mode="economic")[0]
+    resid = v_null - q_x @ (q_x.T @ v_null)
+    Z = np.zeros((n, 0))
+    if v_null.shape[1]:  # v_null is orthonormal: an absolute cutoff on resid's singular values
+        _, sv, vt = linalg.svd(resid, full_matrices=True)
+        sv = np.r_[sv, np.zeros(vt.shape[0] - len(sv))]
+        Z = v_null @ vt[sv < 1e-8].T
+    r = Z.shape[1]
+    Q = linalg.null_space(Z.T) if r else np.eye(n)
+    yr = Q.T @ y
+    # the design's span after dropping Z (absolute cutoff: X's columns can be dropped whole)
+    ux, sx, _ = linalg.svd(Q.T @ q_x, full_matrices=False)
+    x_red = ux[:, sx > 1e-8]
+    m = n - r
+
+    def ll(hh):
+        H = Q.T @ (hh * k_floor + (1 - hh) * np.eye(n)) @ Q
+        C = linalg.cho_factor(H)
+        hi_y = linalg.cho_solve(C, yr)
+        if x_red.shape[1]:
+            hi_x = linalg.cho_solve(C, x_red)
+            b = linalg.solve(x_red.T @ hi_x, x_red.T @ hi_y)
+            res = yr - x_red @ b
+        else:
+            res = yr
+        q_res = res @ linalg.cho_solve(C, res)
+        logdet = 2 * np.log(np.diag(C[0])).sum()
+        return -0.5 * (m * np.log(2 * np.pi * q_res / m) + logdet + m)
+
+    hs = np.linspace(0.0, 1.0, 401)
+    vals = np.array([ll(v) for v in hs])
+    cands = [(vals[0], 0.0), (vals[-1], 1.0)]
+    for i in range(1, len(hs) - 1):
+        if vals[i] >= vals[i - 1] and vals[i] >= vals[i + 1]:
+            res = optimize.minimize_scalar(
+                lambda v: -ll(v),
+                bounds=(hs[i - 1], hs[i + 1]),
+                method="bounded",
+                options={"xatol": 1e-12},
+            )
+            cands.append((-res.fun, res.x))
+    best = max(cands)
+    return best[1], best[0], r
+
+
+@pytest.mark.parametrize(
+    ("kind", "h2", "n_cov"),
+    [("grm", 0.0, 0), ("grm", 0.3, 1), ("grm", 0.8, 2), ("centred-strains", 0.5, 0)],
+)
+def test_lrt_reduced_ml_matches_a_dense_reference(kind, h2, n_cov):
+    """pylmm's centred kinship (K 1 = 0) with an intercept: the plain ML is unbounded
+    as h -> 1, the reduced ML drops that one direction; a centred strain-expanded K
+    (many null directions, one of them the intercept's) drops one and keeps the rest."""
+    y, X, K, X0 = _data(
+        n=80,
+        kind="strains" if kind == "centred-strains" else "grm",
+        h2=h2,
+        n_cov=n_cov,
+        seed=31 + n_cov,
+        effect=0.5,
+    )
+    n = len(y)
+    if kind == "centred-strains":
+        P = np.eye(n) - 1.0 / n
+        K = P @ K @ P
+    x0_dense = np.ones((n, 1)) if X0 is None else X0
+    L = LMM(y, K, X0=X0)
+    M = L._lrt_model()
+    n_reduced = M.N
+    assert M is not L and M._dropped == 1 and n_reduced == n - 1
+    h0, l0 = L.lrt_null_fit()
+    hd, ld, r = _dense_reduced_ml(y, K, x0_dense)
+    assert r == 1
+    assert abs(l0 - ld) <= h.REDUCED_ML_LL_ATOL and abs(h0 - hd) <= h.REFIT_H_ATOL
+    assert h0 < 1.0 or h2 >= 0.8  # an interior maximum where the plain ML sits at 1
+    res = L.lrt_batch(X[:, :4])
+    for j in range(4):
+        _, l1, r1 = _dense_reduced_ml(y, K, np.column_stack([x0_dense, X[:, j]]))
+        assert r1 == 1  # the same direction is dropped with the SNP: nested
+        stat = max(2 * (l1 - ld), 0.0)
+        assert abs(res.t[j] ** 2 - stat) <= h.REDUCED_ML_LL_ATOL * 4, (j, res.t[j] ** 2, stat)
+    if kind == "grm" and h2 < 0.8:  # the plain ML fit of the same data sits at the spike
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            assert LMM(y, K, X0=X0).fit(reml=False)[0] > 0.999
+
+
+def test_lrt_null_fit_leaves_the_model_alone():
     y, X, K, _ = _data()
     L = LMM(y, K)
-    with pytest.raises(ValueError, match="fit\\(reml=False\\)"):
-        L.lrt_batch(X)
-    L.fit()  # REML: still no ML null fit
-    with pytest.raises(ValueError, match="fit\\(reml=False\\)"):
-        L.lrt_batch(X)
-    _, _, _, ll0 = L.fit(reml=False)
+    h_reml = L.fit()[0]
+    before = (L.opt_h, L.opt_sigma, L.opt_ll, L.ll_grid.copy())
+    L.lrt_batch(X)
+    L.association_tests(X, "lrt", batch=False)
+    L.association_tests(X, "wald", refit=True, batch=False)
+    assert (L.opt_h, L.opt_sigma, L.opt_ll) == before[:3] and L.opt_h == h_reml
+    np.testing.assert_array_equal(L.ll_grid, before[3])
+
+
+def test_lrt_null_fit_and_ll0():
+    y, X, K, _ = _data()
+    L = LMM(y, K)
+    h0, ll0 = L.lrt_null_fit()
+    assert L.lrt_null_fit() == (h0, ll0)  # cached
     a = L.lrt_batch(X)
     b = LMM(y, K).lrt_batch(X, ll0=ll0)
     h.assert_close(a.p, b.p, what="ll0 given")
     assert np.all(a.p >= 0) and np.all(np.sign(a.t) == np.sign(a.beta))
+
+
+def test_lrt_has_no_ml_warning():
+    """The reduced ML has a maximum: no "the ML likelihood has no maximum" warning."""
+    y, X, K, _ = _data()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        gwas(y, X, K, test="lrt")
 
 
 # ---------------------------------------------------------------------------
@@ -341,9 +485,7 @@ def test_lrt_needs_an_ml_null_fit():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("test", "refit"), [("wald", True), ("lrt", False), ("score", False)], ids=str
-)
+@pytest.mark.parametrize(("test", "refit"), [("wald", True), ("lrt", False)], ids=str)
 def test_gwas_tests_batched_vs_per_snp_with_missing_values(test, refit):
     y, X, K, X0 = _data(n=100, m=25, n_cov=1)
     y = y.copy()
@@ -354,12 +496,8 @@ def test_gwas_tests_batched_vs_per_snp_with_missing_values(test, refit):
     a = gwas(y, X, K, X0=X0, test=test, refit=refit)
     b = gwas(y, X, K, X0=X0, test=test, refit=refit, batch=False)
     assert np.isnan(a[0][5]) and np.isnan(b[0][5])
-    if test == "score":
-        h.assert_batch_close(a[0], b[0], what="t")
-        h.assert_batch_close(a[1], b[1], what="p")
-    else:
-        h.assert_refit_close(a[0], b[0], what="t")
-        h.assert_refit_close(a[1], b[1], what="p")
+    h.assert_refit_close(a[0], b[0], what="t")
+    h.assert_refit_close(a[1], b[1], what="p")
 
 
 def test_gwas_default_test_is_the_wald_test_unchanged():
@@ -370,9 +508,8 @@ def test_gwas_default_test_is_the_wald_test_unchanged():
 def test_gwas_lrt_matches_lrt_batch():
     y, X, K, _ = _data(effect=1.0)
     t, p = gwas(y, X, K, test="lrt")
-    L = LMM(y, K)
-    L.fit(reml=False)
-    r = L.lrt_batch(X)
+    assert gwas(y, X, K, test="lrt", refit=True, reml=False) == (t, p)  # neither applies
+    r = LMM(y, K).lrt_batch(X)
     h.assert_close(t, r.t, what="t")
     h.assert_close(p, r.p, what="p")
     assert p[0] < 1e-3  # the causal SNP
@@ -382,7 +519,7 @@ def test_gwas_lrt_matches_lrt_batch():
     ("kw", "match"),
     [
         ({"test": "f"}, "test must be one of"),
-        ({"test": "score", "refit": True}, "score test uses the null model only"),
+        ({"test": "score"}, "the score test is LMM.score_batch"),
         ({"test": "lrt", "legacy_fit": True}, "only the Wald test"),
     ],
 )
@@ -396,18 +533,14 @@ def test_association_tests_per_snp_path():
     y, X, K, _ = _data(m=8)
     L = LMM(y, K)
     L.fit()
-    for test, refit in (("wald", False), ("wald", True), ("score", False)):
-        a = L.association_tests(X, test, refit=refit)
-        L.fit()
-        b = L.association_tests(X, test, refit=refit, batch=False)
-        L.fit()
-        h.assert_refit_close(a.t, b.t, what="%s %s" % (test, refit))
-    L.fit(reml=False)
+    for refit in (False, True):
+        a = L.association_tests(X, "wald", refit=refit)
+        b = L.association_tests(X, "wald", refit=refit, batch=False)
+        h.assert_refit_close(a.t, b.t, what="wald %s" % refit)
     a = L.association_tests(X, "lrt")
     b = L.association_tests(X, "lrt", batch=False)
     h.assert_refit_close(a.t, b.t, what="lrt")
-    with pytest.raises(ValueError, match="fit\\(reml=False\\)"):
-        LMM(y, K).association_tests(X, "lrt", batch=False)
+    h.assert_refit_close(a.beta, b.beta, what="lrt beta")
 
 
 # ---------------------------------------------------------------------------
@@ -428,22 +561,19 @@ def _emma(tmp_path, nsnps=40):
     ]
 
 
-@pytest.mark.parametrize("test", ["lrt", "score"])
-def test_cli_test_option_matches_the_library(tmp_path, test):
-    out = str(tmp_path / ("out_" + test))
-    h.run_cli([*_emma(tmp_path), "--test", test, "-o", out], cwd=tmp_path)
+def test_cli_lrt_matches_the_library(tmp_path):
+    out = str(tmp_path / "out_lrt")
+    log = h.run_cli([*_emma(tmp_path), "-v", "--test", "lrt", "-o", out], cwd=tmp_path)
+    assert "--test lrt" in log and "ML" in log
     ids, got = h.load_gwas_out(out)
     Y = np.genfromtxt(h.HMDP_Y)
     K = np.loadtxt(h.HMDP_K_TXT)
     X = h.load_hmdp_snps(40)
-    t, p = gwas(Y, X, K, test=test)
+    t, p = gwas(Y, X, K, test="lrt")
     # the CLI imputes missing calls by the mean (the reader); compare complete SNPs
     full = ~np.isnan(X).any(axis=0)
     h.assert_close(got[full, 2], np.asarray(t)[full], rtol=1e-6, atol=1e-9, what="F_STAT")
     h.assert_close(got[full, 3], np.asarray(p)[full], rtol=1e-6, atol=0, what="P_VALUE")
-    if test == "score":  # F_STAT = BETA / BETA_SD
-        ok = ~np.isnan(got[:, 2])
-        h.assert_close(got[ok, 0] / got[ok, 1], got[ok, 2], rtol=1e-12, atol=0, what="t")
 
 
 def test_cli_refit_batched_vs_no_batch(tmp_path):
@@ -460,7 +590,7 @@ def test_cli_refit_batched_vs_no_batch(tmp_path):
 @pytest.mark.parametrize(
     ("flags", "match"),
     [
-        (["--test", "score", "--refit"], "--test score uses the null model only"),
+        (["--test", "score"], "invalid choice"),
         (["--test", "lrt", "--legacy-fit"], "only the Wald test"),
         (["--test", "anova"], "invalid choice"),
     ],
