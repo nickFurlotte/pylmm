@@ -182,9 +182,10 @@ def test_cli_kinship_bim_the_block_reader_rejects(tmp_path):
 
 
 @pytest.mark.parametrize("block_size", ["1", "7", "1000"])
-def test_cli_kinship_block_size_does_not_change_k(tmp_path, block_size):
-    """Missing calls, an all-missing and a constant SNP; K is summed over blocks of kept SNPs,
-    whatever the read blocks, and equals calculate_kinship's for these SNPs (to rounding)."""
+def test_cli_kinship_is_w_wt_over_m_at_any_block_size(tmp_path, block_size):
+    """Missing calls, an all-missing and a constant SNP: at each block size, K is W W' / m over
+    the kept SNPs (m counting all SNPs), to rounding.  (Byte identity with the previous code
+    at the same block size was checked against it, outside the suite: see PR #25.)"""
     base = h.write_bed_subset(tmp_path, 40)
     with open(base + ".fam") as f:
         n = sum(1 for _ in f)

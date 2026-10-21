@@ -879,6 +879,7 @@ class PlinkReader:
                     for j in range(b):
                         R[j] = normalize_genotype(R[j])
                 yield R.T, variants[start : start + b]
+                del R  # before the next block is decoded
 
     @classmethod
     def _decode_bed_block(cls, buf: bytes, b: int, n: int) -> NDArray[np.float64]:

@@ -182,6 +182,9 @@ def iter_snp_vectors(reader: plink_io.PlinkReader, block_size: int) -> Iterator[
     returns.  If the SNP metadata `iter_blocks` needs cannot be parsed (e.g. a
     ``.bim`` line with fewer than 6 fields, which `iter_snps` reads), the
     SNPs are read one at a time instead, with a warning.
+
+    Each vector is a copy, and a block is released before the next one is
+    read, so about one block (and its decoding) is held at a time.
     """
     try:
         blocks = reader.iter_blocks(block_size)
@@ -190,9 +193,15 @@ def iter_snp_vectors(reader: plink_io.PlinkReader, block_size: int) -> Iterator[
         for snp, _ in reader.iter_snps():
             yield snp
         return
-    for G, _ in blocks:
+    while True:
+        item = next(blocks, None)
+        if item is None:
+            return
+        G = item[0]
+        del item
         for j in range(G.shape[1]):
-            yield np.ascontiguousarray(G[:, j])
+            yield G[:, j].copy()
+        del G  # before the next block is decoded
 
 
 def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray:
