@@ -203,9 +203,12 @@ def test_gwas_missing_phenotype_batched():
     h.assert_batch_close(p_new, p_old, what="p")
 
 
-def test_gwas_refit_ignores_batch():
+def test_gwas_legacy_refit_ignores_batch():
+    """pylmm 1.0.0's refit (legacy_fit) is one SNP at a time; the default refit is
+    batched (LMM.fit_snps, tests/test_association_tests.py)."""
     y, X, K, kva, kve, _ = _data(n=60, m=4)
-    assert gwas(y, X, K, kva, kve, refit=True) == gwas(y, X, K, kva, kve, refit=True, batch=False)
+    a = gwas(y, X, K, kva, kve, refit=True, legacy_fit=True)
+    assert a == gwas(y, X, K, kva, kve, refit=True, batch=False, legacy_fit=True)
 
 
 def test_gwas_falls_back_to_per_snp_on_a_nan_batch_result(monkeypatch):
@@ -346,9 +349,12 @@ def test_cli_batch_matches_no_batch(tmp_path, flags, cov):
 def test_cli_block_size_one_and_refit(tmp_path):
     ref = _emma_run(tmp_path, "ref", ["--no-batch"], nsnps=h.HMDP_GZ_NSNPS)
     _check_same(_emma_run(tmp_path, "b1", ["--block-size", "1"], nsnps=h.HMDP_GZ_NSNPS), ref, "bs1")
-    # --refit is always one SNP at a time: the flags change nothing
-    refit = _emma_run(tmp_path, "refit", ["--refit"], nsnps=20)
-    refit_old = _emma_run(tmp_path, "refit_old", ["--refit", "--no-batch"], nsnps=20)
+    # --refit --legacy-fit (1.0.0's refit) is always one SNP at a time: --no-batch changes
+    # nothing.  The default --refit is batched (tests/test_association_tests.py).
+    refit = _emma_run(tmp_path, "refit", ["--refit", "--legacy-fit"], nsnps=20)
+    refit_old = _emma_run(
+        tmp_path, "refit_old", ["--refit", "--legacy-fit", "--no-batch"], nsnps=20
+    )
     assert refit[0] == refit_old[0]
     np.testing.assert_array_equal(refit[1], refit_old[1])
 

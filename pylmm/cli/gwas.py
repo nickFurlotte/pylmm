@@ -45,8 +45,10 @@ from pylmm.cli._common import (
 from pylmm.genotypes import DEFAULT_BLOCK_SIZE, Variants, check_block_size
 from pylmm.lmm import (
     LMM,
+    TESTS,
     AssociationResult,
     check_covariates,
+    check_test,
     snp_estimable,
     snp_estimable_columns,
     subset_testable,
@@ -95,6 +97,10 @@ examples:
       --block-size 200 -o results.tsv
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
       --no-batch -o results.tsv
+
+  # the Wald test at each SNP's own h, or a likelihood-ratio test (GEMMA's -lmm 1, 2)
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --refit -o refit.tsv
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --test lrt -o lrt.tsv
 
   # the exact output of pylmm 1.0.0 (its h search and its one-SNP-at-a-time path)
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
@@ -255,8 +261,19 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     model.add_argument(
         "--refit",
         action="store_true",
-        help="refit the variance components at each SNP (default: fit them once, under the "
-        "null model)",
+        help="refit the variance components at each SNP, exactly (Newton-Raphson on the "
+        "likelihood's derivatives, a block of SNPs at a time; with --no-batch or --legacy-fit, "
+        "the grid search of the null fit per SNP).  Default: fit them once, under the null model",
+    )
+    model.add_argument(
+        "--test",
+        choices=TESTS,
+        default="wald",
+        help="the test of each SNP: wald (the Wald t test, the default), lrt (likelihood ratio "
+        "of ML fits with and without the SNP, chi2(1); always ML) or score (at the null fit; "
+        "not with --refit), as GEMMA's -lmm 1, 2 and 3.  For lrt and score, F_STAT is the "
+        "signed square root of the statistic; BETA and BETA_SD are the ML fit's (lrt) or the "
+        "null model's one-step estimate (score)",
     )
     model.add_argument(
         "--legacy-fit",
@@ -334,6 +351,12 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         check_block_size(args.block_size)
     except ValueError as e:
         parser.error("--block-size: %s" % e)
+    try:
+        check_test(args.test, args.refit, args.legacy_fit)
+    except ValueError:
+        if args.legacy_fit:
+            parser.error("--test %s: --legacy-fit (pylmm 1.0.0) has only the Wald test" % args.test)
+        parser.error("--test score uses the null model only; it cannot be combined with --refit")
     check_log_file(parser, args)
 
 
@@ -950,7 +973,7 @@ def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
     With ``--refit`` the variance components are fitted per SNP instead,
     so the null model is not fitted here.  REML by default, ML with
     ``--ml``, here and in every per-SNP fit (before 1.0.0 the null fit was
-    always REML).
+    always REML); ML with ``--test lrt``.
 
     Raises
     ------
@@ -970,9 +993,9 @@ def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
         verbose=verbose,
         legacy_fit=args.legacy_fit,
     )
-    if not args.refit:
+    if args.test == "lrt" or not args.refit:
         log.info("Computing fit for null model")
-        L.fit(reml=args.reml)
+        L.fit(reml=args.reml and args.test != "lrt")
         log.info("null model: heritability=%0.3f, sigma=%0.3f", L.opt_h, L.opt_sigma)
     return L
 
@@ -996,6 +1019,8 @@ def _test_snp(
     counts: dict[str, int],
 ) -> tuple[Any, Any, Any, Any] | None:
     """Test one SNP; ``(beta, beta_sd, t, p)``, or None if it is not estimable."""
+    # pylmm 1.0.0's code: the Wald test, without refit or with the per-SNP grid refit
+    old = args.test == "wald" and (not args.refit or args.no_batch or args.legacy_fit)
     n = inputs.K.shape[0]
     x = snp[inputs.keep].reshape((n, 1))
     missing = np.isnan(x).reshape((-1,))
@@ -1013,6 +1038,10 @@ def _test_snp(
             xs = (xs - xs.mean()) / np.sqrt(xs.var())
         ks = inputs.K[called, :][:, called]
         ls = LMM(ys, ks, X0=x0s, verbose=L.verbose, validate=False, legacy_fit=L.legacy_fit)
+        if not old:
+            if args.test == "lrt" or not args.refit:
+                ls.fit(reml=args.reml and args.test != "lrt")
+            return _first(_tests(ls, xs, args))
         if args.refit:
             ls.fit(X=xs, reml=args.reml)
         else:
@@ -1021,10 +1050,24 @@ def _test_snp(
     else:
         if not snp_estimable(x, inputs.X0, Q=Q0):
             return None
+        if not old:
+            return _first(_tests(L, x, args))
         if args.refit:
             L.fit(X=x, reml=args.reml)
         ts, ps, beta, beta_var = L.association(x, reml=args.reml, return_beta=True)
     return beta, np.sqrt(beta_var), ts, ps
+
+
+def _tests(L: LMM, X: FloatArray, args: argparse.Namespace) -> AssociationResult:
+    """The ``--test`` of the SNP columns of ``X`` (`pylmm.lmm.LMM.association_tests`)."""
+    if args.test == "wald" and not args.refit:
+        return L.association_batch(X, reml=args.reml)
+    return L.association_tests(X, args.test, args.reml, args.refit, batch=not args.no_batch)
+
+
+def _first(r: AssociationResult) -> SnpResult:
+    """The ``(beta, beta_sd, t, p)`` of the first SNP of ``r``."""
+    return r.beta[0], np.sqrt(r.beta_var[0]), r.t[0], r.p[0]
 
 
 def iter_block_results(
@@ -1056,14 +1099,16 @@ def iter_block_results(
 
     Notes
     -----
-    Unless ``--no-batch`` or ``--refit``, the complete SNPs of the block
-    (no missing call) that are estimable (`pylmm.lmm.snp_estimable_columns`)
-    are tested together with `LMM.association_batch`, the first time one of
-    them is reached; every other SNP is tested on its own (`_test_snp`) when
-    it is reached.  Nothing is computed twice.  If testing a SNP raises,
+    Unless ``--no-batch`` (or ``--refit --legacy-fit``), the complete SNPs
+    of the block (no missing call) that are estimable
+    (`pylmm.lmm.snp_estimable_columns`) are tested together with
+    `LMM.association_batch` (or, for ``--refit`` and ``--test lrt|score``,
+    `LMM.association_tests`), the first time one of them is reached; every
+    other SNP is tested on its own (`_test_snp`) when it is reached.
+    Nothing is computed twice.  If testing a SNP raises,
     every SNP before it has been yielded and no later one is.
     """
-    use_batch = not (args.no_batch or args.refit)
+    use_batch = not (args.no_batch or (args.refit and args.legacy_fit))
     X = G[inputs.keep, :]
     complete: NDArray[np.bool_] = np.zeros(X.shape[1], dtype=bool)
     if use_batch:
@@ -1078,7 +1123,7 @@ def iter_block_results(
             cols = np.where(complete)[0]
             cols = cols[snp_estimable_columns(X[:, cols], inputs.X0, Q0)]
             batched = {int(c): k for k, c in enumerate(cols)}
-            result = L.association_batch(X[:, cols], reml=args.reml)
+            result = _tests(L, X[:, cols], args)
         k = batched.get(j)
         if k is None:  # constant or collinear with the covariates
             yield None
