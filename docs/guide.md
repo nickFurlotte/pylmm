@@ -360,7 +360,7 @@ assert 0.4 < h < 0.8
   studies), and `fit` warns.
 * `h` is searched on the closed interval [0, 1]: every local maximum of the grid, the ends included, is
   refined and the best is kept. 0 and 1 are boundary estimates ("no K variance detected", "no residual
-  variance detected"), not precise values. At h >= 0.999 with a rank-deficient K (replicate animals of
+  variance detected"), not precise values. At h ≈ 1 (residual variance negligible next to K's) with a rank-deficient K (replicate animals of
   inbred strains) `fit` warns: the Wald test then overstates the information. ĥ does not depend on how
   the covariates are scaled or centred (the fit works on an orthonormal basis of them).
 * `LMM(..., legacy_fit=True)` (and `gwas(..., legacy_fit=True)`, `pylmm gwas --legacy-fit`) fits as

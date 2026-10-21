@@ -188,7 +188,8 @@ This changes numbers, also of the default CLI output. `legacy_fit=True` / `--leg
 - The fit evaluates the likelihood on an orthonormal basis of the (rotated) covariates, so ĥ does not
   depend on how a covariate is scaled or centred (a raw date ~2e7 vs centred: |Δh| <= 1.5e-7 over 150
   datasets; the normal equations gave up to 0.14 near h = 1 with a centred K).
-- `fit` warns when h >= 0.999 and K is rank-deficient beyond the covariates (e.g. strain means expanded
+- `fit` warns when the residual variance is negligible (1 - h <= 1e-3 h times the median non-null
+  eigenvalue of K; h >= 0.999 on the usual scale) and K is rank-deficient beyond the covariates (e.g. strain means expanded
   to replicate animals): the residual variance is ~0 and the Wald test's n - p degrees of freedom
   overstate the information (λ_GC 3.6 in S7 at true h² = 1 on 300 mice of ~100 strains, with either
   search). No number changes.
@@ -209,8 +210,10 @@ This changes numbers, also of the default CLI output. `legacy_fit=True` / `--leg
   with many or large covariates); `LMM.ml_solution` and `association` solve the weighted least squares by
   QR of `sqrt(S) X` instead of inverting `X'SX`: with a badly scaled covariate (a raw date ~2e7) the
   per-SNP t is 3e-13 instead of 6e-10 off an accurate reference, and `--no-batch` now agrees with the
-  batched default to rounding there too. The fit itself evaluates the likelihood with the normal
-  equations and a Cholesky factor on the orthonormal basis above (fast and accurate).
+  batched default to rounding there too. The fit, `log_likelihood` (any design) and the batched tests
+  work on an orthonormal basis of the covariates (the fit's likelihood by the normal equations and a
+  Cholesky factor: fast and accurate), so they also stay accurate at h = 1 with a centred K (weights up
+  to 1e6) and a raw covariate: batched vs per-SNP t <= 1.3e-15 of max |t| over 360 such scans.
 - Fit time: the default search refines more brackets (an end, every peak) and one more grid point; in S7
   the median null fit took 3.8-8.9 ms against 2.3-5.7 ms for 1.0.0's (n = 60-300, six parallel jobs).
 
