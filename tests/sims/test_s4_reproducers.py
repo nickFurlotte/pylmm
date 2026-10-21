@@ -11,7 +11,9 @@ Two styles:
   be removed.  That is the intended flip.
 * ``test_bugN_current_...`` tests assert the current (buggy or conventional)
   behaviour, so the bug stays documented and visible.  A fix makes them fail;
-  delete or invert them in the same change.
+  delete or invert them in the same change.  A fix that keeps the old
+  behaviour behind ``legacy_fit=True`` (Phase 6.3: bugs 2, 3, 9 and 17) turns
+  them into ``test_bugN_legacy_...`` tests of that switch.
 
 Everything is small (n <= 120) and in-process; the whole file runs in a few
 seconds.  pylmm is never modified here.
@@ -27,7 +29,6 @@ import pytest
 from scipy import linalg
 
 from pylmm import cli, misc, plink_io
-from pylmm import lmm as pylmm_lmm
 from pylmm.cli import gwas as cli_gwas
 from pylmm.lmm import LMM, LogLikResult, calculate_kinship, gwas
 from sims import oracle
@@ -135,8 +136,8 @@ def read_out(fn):
     return np.array([[float(x) for x in r[1:]] for r in rows])
 
 
-def fake_lmm(ll):
-    """An LMM whose likelihood is the given function of h (for _get_max logic)."""
+def fake_lmm(ll, legacy_fit=False):
+    """An LMM whose likelihood is the given function of h (for the h search logic)."""
     G, K, y, _ = toy(n=20, m=10)
 
     class Fake(LMM):
@@ -144,7 +145,7 @@ def fake_lmm(ll):
             return LogLikResult(float(ll(h)), np.zeros((1, 1)), 1.0, np.eye(1))
 
     with quiet():
-        return Fake(y, K)
+        return Fake(y, K, legacy_fit=legacy_fit)
 
 
 # ---------------------------------------------------------------------------
@@ -276,44 +277,80 @@ def test_bug1_gwas_ml_equals_textbook_ml_wald():
 # ---------------------------------------------------------------------------
 
 
-def test_bug2_current_getmax_skips_grid_index_98():
-    L = fake_lmm(lambda h: -((h - 0.981) ** 2))  # single peak, nearest grid point 0.98
+def test_bug2_legacy_fit_skips_grid_index_98():
+    L = fake_lmm(lambda h: -((h - 0.981) ** 2), legacy_fit=True)  # nearest grid point 0.98
     h = L.fit()[0]
     assert h == 0.99  # endpoint fallback
 
 
-@pytest.mark.xfail(strict=True, reason="bug 2: range(1, n-2) never tests grid index n-2 (h = 0.98)")
 def test_bug2_getmax_finds_peak_at_098():
+    """Fixed in Phase 6.3: every grid peak is refined, 0.98 included."""
     L = fake_lmm(lambda h: -((h - 0.981) ** 2))
     assert abs(L.fit()[0] - 0.981) < 1e-4
 
 
-def test_bug3_current_h_grid_stops_at_099():
-    L = fake_lmm(lambda h: h)  # increasing: maximum at h = 1
+def test_bug3_legacy_fit_h_grid_stops_at_099():
+    L = fake_lmm(lambda h: h, legacy_fit=True)  # increasing: maximum at h = 1
     assert L.fit()[0] == 0.99
     assert L.h_grid.max() == 0.99
 
 
-@pytest.mark.xfail(strict=True, reason="bug 3: the h grid excludes 1.0")
 def test_bug3_h_search_reaches_one():
+    """Fixed in Phase 6.3: the grid is 0, 0.01, ..., 1."""
     L = fake_lmm(lambda h: h)
     assert L.fit()[0] == 1.0
+    assert L.h_grid.max() == 1.0
 
 
-@pytest.mark.xfail(strict=True, reason="bug 3: misc.fit_two's w grid excludes 1.0 (K1 alone)")
-def test_bug3_fittwo_can_select_k1_alone():
+def test_bug3_peak_between_099_and_one_is_refined():
+    L = fake_lmm(lambda h: -((h - 0.996) ** 2))
+    assert abs(L.fit()[0] - 0.996) < 1e-6
+
+
+def test_best_not_first_grid_optimum():
+    """Fixed in Phase 6.3: of two grid peaks the higher is kept (1.0.0 kept the first)."""
+
+    def two_bumps(h):
+        return max(1.0 - 200 * (h - 0.2) ** 2, 2.0 - 200 * (h - 0.7) ** 2)
+
+    assert abs(fake_lmm(two_bumps).fit()[0] - 0.7) < 1e-6
+    assert abs(fake_lmm(two_bumps, legacy_fit=True).fit()[0] - 0.2) < 1e-6
+
+
+def test_flat_profile_gives_zero():
+    """An unidentifiable h (flat profile, e.g. K = I) is reported as 0, not a random grid point."""
+    L = fake_lmm(lambda h: 3.0 + 1e-15 * np.sin(1e3 * h))  # flat up to rounding
+    assert L.fit()[0] == 0.0
+
+
+def test_bug3_fittwo_legacy_w_grid_stops_below_one():
     rng = np.random.default_rng(5)
     n = 50
-    G1 = rng.binomial(2, 0.4, size=(n, 200)).astype(float)
-    G2 = rng.binomial(2, 0.4, size=(n, 200)).astype(float)
-    K1, K2 = calculate_kinship(G1), calculate_kinship(G2)
-    d, V = linalg.eigh(K1)
-    y = V @ (np.sqrt(np.clip(d, 0, None)) * rng.standard_normal(n)) * 3 + 0.1 * rng.standard_normal(
-        n
-    )
+    K1 = calculate_kinship(rng.binomial(2, 0.4, size=(n, 200)).astype(float))
+    K2 = calculate_kinship(rng.binomial(2, 0.4, size=(n, 200)).astype(float))
+    y = rng.standard_normal(n)
     with quiet():
-        h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(y, K1, K2, ngrids=20)
-    assert h2 == 0.0
+        h1, h2, e, *_ = misc.fit_two(y, K1, K2, ngrids=4, legacy_fit=True)
+    h = h1 + h2
+    assert h == 0 or h1 / h in (0.0, 0.25, 0.5, 0.75)  # never w = 1
+
+
+def test_bug3_fittwo_can_select_k1_alone():
+    """Fixed in Phase 6.3: misc.fit_two's w grid is 0, 1/ngrids, ..., 1.  The
+    1.0.0 test case here (h2 = 0.97 from K1) turned out to prefer w = 0.9 once
+    w = 1 was reachable (the noise is better explained by a little K2 at h = 1),
+    so this is a y from K1 at h2 = 0.5 that selects K1 alone."""
+    rng = np.random.default_rng(0)
+    n = 120
+    K1 = calculate_kinship(rng.binomial(2, 0.4, size=(n, 400)).astype(float))
+    K2 = calculate_kinship(rng.binomial(2, 0.4, size=(n, 400)).astype(float))
+    d, V = linalg.eigh(K1)
+    y = V @ (np.sqrt(np.clip(d, 0, None)) * rng.standard_normal(n)) + rng.standard_normal(n)
+    with quiet():
+        h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(y, K1, K2, ngrids=4)
+        h1_old, h2_old, *_ = misc.fit_two(y, K1, K2, ngrids=4, legacy_fit=True)
+    assert h2 == 0.0 and h1 > 0
+    assert h2_old > 0  # 1.0.0: at best w = 0.75
 
 
 def test_bug4_ll_is_nan_above_one_but_ll_brent_guards_both_ends():
@@ -418,23 +455,8 @@ def test_bug4_high_h2_case_matches_oracle():
 # ---------------------------------------------------------------------------
 
 
-def test_bug5_current_log_p_is_off_by_2_minus_log2_and_unreachable():
-    G, K, y, _ = toy()
-    with quiet():
-        L = LMM(y, K)
-    L.fit()
-    beta, var, sigma = np.array([[0.3]]), np.array([[0.01]]), np.array([[1.0]])
-    _, p = L.tstat(beta, var, sigma, 2)
-    _, logp = L.tstat(beta, var, sigma, 2, log=True)
-    assert logp - np.log(p) == pytest.approx(2.0 - np.log(2.0), abs=1e-12)
-    # unreachable: nothing in the package calls tstat(..., log=True)
-    for mod in (pylmm_lmm, cli_gwas, misc):
-        src = inspect.getsource(mod)
-        assert "log=True" not in src.replace("def tstat(self,beta,var,sigma,q,log=False)", "")
-
-
-@pytest.mark.xfail(strict=True, reason="bug 5: tstat(log=True) adds 2.0 instead of log(2)")
 def test_bug5_log_p():
+    """Fixed in Phase 6.3 (it returned 2 + logsf); no caller in the package used it."""
     G, K, y, _ = toy()
     with quiet():
         L = LMM(y, K)
@@ -443,6 +465,10 @@ def test_bug5_log_p():
     _, p = L.tstat(beta, var, sigma, 2)
     _, logp = L.tstat(beta, var, sigma, 2, log=True)
     assert logp == pytest.approx(np.log(p), abs=1e-12)
+    # where p underflows to 0, log p is still finite
+    _, p0 = L.tstat(np.array([[1e8]]), var, sigma, 2)
+    _, logp0 = L.tstat(np.array([[1e8]]), var, sigma, 2, log=True)
+    assert p0 == 0.0 and np.isfinite(logp0) and logp0 < np.log(1e-300)
 
 
 # ---------------------------------------------------------------------------
@@ -595,8 +621,8 @@ def test_bug8_two_kinships_agree_with_missing_data(tmp_path):
 
 def test_bug9_ml_wald_uses_q_over_n():
     """Phase 5.2: association(reml=False) uses the ML sigma^2 = Q/n (it used
-    Q/(n-q) in both modes); REML keeps Q/(n-q).  fit()'s reported sigma is
-    unchanged (Phase 6.3)."""
+    Q/(n-q) in both modes); REML keeps Q/(n-q).  fit()'s reported sigma: see
+    test_bug9_ml_fit_reports_q_over_n."""
     g_test, K, y = _ml_bounded_case()
     with quiet():
         L = LMM(y, K)
@@ -608,6 +634,24 @@ def test_bug9_ml_wald_uses_q_over_n():
     assert t_ml == pytest.approx(wtb.t, rel=1e-5)
     n, p = len(y), 2
     assert t_ml / t_r == pytest.approx(np.sqrt(n / (n - p)), rel=1e-10)
+
+
+def test_bug9_ml_fit_reports_q_over_n():
+    """Fixed in Phase 6.3: fit(reml=False) reports the ML sigma^2 = Q/n, the
+    oracle's; legacy_fit keeps 1.0.0's Q/(n-p)."""
+    g_test, K, y = _ml_bounded_case()
+    with quiet():
+        L = LMM(y, K)
+        old = LMM(y, K, legacy_fit=True)
+    h, _, sigma, _ = L.fit(reml=False)
+    _, _, sigma_old, _ = old.fit(reml=False)
+    f = oracle.fit(y, K, reml=False, eig_clamp=1e-6)
+    assert float(h) == pytest.approx(f.h, abs=1e-6)
+    assert sigma == pytest.approx(f.sigma2_ml, rel=1e-6)
+    n, p = len(y), 1
+    assert sigma_old / sigma == pytest.approx(n / (n - p), rel=1e-6)
+    # REML: Q/(n-p) in both modes
+    assert L.fit()[2] == pytest.approx(old.fit()[2], rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +954,8 @@ def test_bug15_fit_and_association_return_scalars():
     h, beta, sigma, ll = L.fit()
     assert type(sigma) is float and type(ll) is float and np.shape(beta) == (1, 1)
     _, s2, Q, _, _ = L.ml_solution(h, L.x0t)
-    assert type(s2) is float and type(Q) is float and s2 == sigma
+    # the default ml_solution solves by QR, the likelihood by Cholesky: equal to rounding
+    assert type(s2) is float and type(Q) is float and s2 == pytest.approx(sigma, rel=1e-12)
     res = L.log_likelihood(h)
     assert type(res.ll) is float and type(res.sigma) is float and res.ll == ll
     _, _, b, bvar = L.association(G[:, :1], return_beta=True)
@@ -972,6 +1017,39 @@ def test_bug17_ml_profile_unbounded_with_centred_grm_m_gt_n():
     # a larger null space (m < n - 1): bounded
     G2, K2, y2, _ = toy(n=40, m=15, seed=7)
     assert not oracle.fit(y2, K2, reml=False, n_grid=51).ml_unbounded
+
+
+def test_bug17_ml_fit_warns_when_ill_posed():
+    """Phase 6.3: an ML fit warns when the ML likelihood has no maximum (the null
+    space of K inside the span of the covariates); REML, a bounded ML profile and
+    legacy_fit do not."""
+    G, K, y, _ = toy(n=40, m=200, seed=7)
+    with quiet():
+        L = LMM(y, K)
+    with pytest.warns(UserWarning, match="ML likelihood has no maximum"):
+        h = float(L.fit(reml=False)[0])
+    assert h > 0.99  # the clamp-set spike: the MLE does not exist
+    with pytest.warns(UserWarning, match="ML likelihood has no maximum"):
+        L.fit(X=G[:, :1], reml=False)  # a per-SNP refit too
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        L.fit(reml=True)
+        with quiet():
+            LMM(y, K, legacy_fit=True).fit(reml=False)
+        G2, K2, y2, _ = toy(n=40, m=15, seed=7)
+        with quiet():
+            LMM(y2, K2).fit(reml=False)
+        # an intercept-free model: the null direction 1 is not absorbed
+        with quiet():
+            LMM(y, K, X0=G[:, :1] - G[:, :1].mean()).fit(reml=False)
+    # the exact condition (review N1): a covariate that is not the intercept
+    # but has a component along the null direction 1 also absorbs it
+    x0 = G[:, :1] + 0.5
+    assert oracle.fit(y, K, x0, reml=False, n_grid=51).ml_unbounded
+    with quiet(), pytest.warns(UserWarning, match="ML likelihood has no maximum"):
+        LMM(y, K, X0=x0).fit(reml=False)
 
 
 # ---------------------------------------------------------------------------

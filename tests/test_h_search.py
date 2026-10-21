@@ -1,5 +1,6 @@
-"""The local h refinement in LMM._get_max (bug 4, fixed in Phase 5.1): a
-bounded search inside the bracketing grid interval, never outside [0, 1]."""
+"""The local h refinement (bug 4, fixed in Phase 5.1): a bounded search inside
+the bracketing grid interval, never outside [0, 1] -- in the default search
+(LMM._get_best, Phase 6.3) and in 1.0.0's (LMM._get_max, legacy_fit=True)."""
 
 import contextlib
 import io
@@ -19,11 +20,11 @@ class SpyLMM(LMM):
         return LMM._neg_log_likelihood(self, h, X, reml)
 
 
-def make(y, K):
+def make(y, K, legacy_fit=False):
     L = SpyLMM.__new__(SpyLMM)
     L.evals = []
     with contextlib.redirect_stderr(io.StringIO()):
-        SpyLMM.__init__(L, y, K)
+        SpyLMM.__init__(L, y, K, legacy_fit=legacy_fit)
     return L
 
 
@@ -39,32 +40,44 @@ def problem(seed, h2, n=60, m=30):
 
 
 def check_evals_inside_bracket(L):
-    H = L.h_grid
+    H, ll = L.h_grid, L.ll_grid
     assert L.evals, "the search never ran"
     assert min(L.evals) >= 0.0 and max(L.evals) <= 1.0
-    peaks = [
-        i
-        for i in range(1, len(H) - 2)
-        if L.ll_grid[i - 1] < L.ll_grid[i] and L.ll_grid[i] > L.ll_grid[i + 1]
-    ]
+    if L.legacy_fit:
+        brackets = [
+            (H[i - 1], H[i + 1])
+            for i in range(1, len(H) - 2)
+            if ll[i - 1] < ll[i] and ll[i] > ll[i + 1]
+        ]
+    else:
+        brackets = [
+            (H[i - 1], H[i + 1])
+            for i in range(1, len(H) - 1)
+            if ll[i] >= ll[i - 1] and ll[i] >= ll[i + 1]
+        ]
+        if ll[0] > ll[1]:
+            brackets.append((H[0], H[1]))
+        if ll[-1] > ll[-2]:
+            brackets.append((H[-2], H[-1]))
     for h in L.evals:
-        assert any(H[i - 1] <= h <= H[i + 1] for i in peaks), h
+        assert any(lo <= h <= hi for lo, hi in brackets), h
 
 
+@pytest.mark.parametrize("legacy_fit", [False, True], ids=["default", "legacy"])
 @pytest.mark.parametrize("h2", [0.05, 0.5, 0.9, 0.97])
 @pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
-def test_bounded_search_never_leaves_its_bracket(h2, reml):
-    """Null fit and per-SNP refit, over seeds whose grid has an interior peak."""
+def test_bounded_search_never_leaves_its_bracket(h2, reml, legacy_fit):
+    """Null fit and per-SNP refit, over seeds whose grid has a peak."""
     ran = 0
     for seed in range(12):
         y, K, x = problem(seed, h2)
         for X in (None, x):
-            L = make(y, K)
+            L = make(y, K, legacy_fit=legacy_fit)
             with np.errstate(
                 divide="raise", invalid="raise", over="raise"
             ):  # no nan / log of a negative
                 h = float(np.sum(L.fit(X=X, reml=reml)[0]))
-            assert 0.0 <= h <= 0.99
+            assert 0.0 <= h <= (0.99 if legacy_fit else 1.0)
             if L.evals:
                 check_evals_inside_bracket(L)
                 ran += 1
@@ -78,12 +91,13 @@ def test_s5_seed1177_small_n_null_fit_does_not_crash():
     W = rng.binomial(2, rng.uniform(0.05, 0.5, 100), (10, 100)).astype(float)
     K = calculate_kinship(W)
     y = rng.standard_normal(10)
-    L = make(y, K)
-    with np.errstate(divide="raise", invalid="raise", over="raise"):
-        hmax, beta, sigma, ll = L.fit()
-    h = float(np.sum(hmax))
-    assert 0.95 <= h <= 0.99 and np.isfinite(np.sum(ll))
-    check_evals_inside_bracket(L)
+    for legacy_fit in (True, False):
+        L = make(y, K, legacy_fit=legacy_fit)
+        with np.errstate(divide="raise", invalid="raise", over="raise"):
+            hmax, beta, sigma, ll = L.fit()
+        h = float(np.sum(hmax))
+        assert 0.95 <= h <= (0.99 if legacy_fit else 1.0) and np.isfinite(np.sum(ll))
+        check_evals_inside_bracket(L)
 
 
 def test_ll_brent_guards_outside_unit_interval():

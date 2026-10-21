@@ -94,7 +94,11 @@ examples:
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
       --block-size 200 -o results.tsv
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
-      --no-batch -o results.tsv"""
+      --no-batch -o results.tsv
+
+  # the exact output of pylmm 1.0.0 (its h search and its one-SNP-at-a-time path)
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
+      --legacy-fit --no-batch -o results.tsv"""
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +259,13 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "null model)",
     )
     model.add_argument(
+        "--legacy-fit",
+        action="store_true",
+        help="fit the variance components as pylmm 1.0.0 did: h searched on 0..0.99 only "
+        "(never 1; a peak at 0.98 missed), the first local maximum kept, and sigma^2 = "
+        "Q/(n-p) under --ml.  With --no-batch the output is that of pylmm 1.0.0",
+    )
+    model.add_argument(
         "--remove-missing-genotypes",
         action="store_true",
         help="test each SNP on the individuals with a called genotype (refitting the model on "
@@ -277,11 +288,10 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--no-batch",
         action="store_true",
         help="test one SNP at a time (LMM.association), the code path of pylmm 1.0.0: slower.  "
-        "With well-conditioned covariates the numbers are the same up to rounding (within "
-        "about 1e-9 relative); with badly scaled ones (e.g. a raw date or year column) they "
-        "can differ by up to a few 1e-6 relative, the batched default being the more accurate: "
-        "centre or scale such covariates.  --refit and SNPs with missing calls always take "
-        "this path",
+        "The numbers are the same up to rounding (within about 1e-9 relative); with "
+        "--legacy-fit and a badly scaled covariate (e.g. a raw date or year column) they can "
+        "differ by a few 1e-6 relative, the batched default being the more accurate: centre "
+        "or scale such covariates.  --refit and SNPs with missing calls always take this path",
     )
 
     output = p.add_argument_group("output")
@@ -950,7 +960,16 @@ def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
     # LMM(verbose=True) prints its own diagnostic lines (eigendecomposition
     # timing, clamped eigenvalues) straight to stderr; show them with --debug.
     verbose: bool = args.debug
-    L: LMM = _usage(LMM, inputs.Y, inputs.K, inputs.kva, inputs.kve, inputs.X0, verbose=verbose)
+    L: LMM = _usage(
+        LMM,
+        inputs.Y,
+        inputs.K,
+        inputs.kva,
+        inputs.kve,
+        inputs.X0,
+        verbose=verbose,
+        legacy_fit=args.legacy_fit,
+    )
     if not args.refit:
         log.info("Computing fit for null model")
         L.fit(reml=args.reml)
@@ -993,7 +1012,7 @@ def _test_snp(
         if args.remove_missing_genotypes:
             xs = (xs - xs.mean()) / np.sqrt(xs.var())
         ks = inputs.K[called, :][:, called]
-        ls = LMM(ys, ks, X0=x0s, verbose=L.verbose, validate=False)
+        ls = LMM(ys, ks, X0=x0s, verbose=L.verbose, validate=False, legacy_fit=L.legacy_fit)
         if args.refit:
             ls.fit(X=xs, reml=args.reml)
         else:
