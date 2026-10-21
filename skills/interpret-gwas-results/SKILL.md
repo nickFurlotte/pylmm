@@ -160,7 +160,10 @@ assert 0.8 < lam_gc < 1.25
 
 * **h at a boundary**: `null model: heritability=1.000` or `0.000` (with `--legacy-fit`, as in pylmm 1.0.0,
   the upper end is a cap at `0.990`). At 0 the LMM reduces to OLS (K plays no role); near 1 small errors
-  in h move p-values (up to 0.8 in −log10 p at h² = 0.99 in the simulation studies).
+  in h move p-values (up to 0.8 in −log10 p at h² = 0.99 in the simulation studies). A log warning "h is
+  at its upper boundary" (h ≥ 0.999 with a rank-deficient K, e.g. replicate animals of inbred strains)
+  means the test is anti-conservative: λ_GC was 3.6 in a simulation with true h² = 1 on 300 mice of about
+  100 strains. Test strain means instead.
 * **Near-singular K**: few distinct genotypes (inbred strains, replicates) give a K of low rank; pylmm
   floors eigenvalues at 1e-6. Fine for the LMM, but the effective sample size for a SNP is the number of
   distinct genotypes. Check `np.linalg.matrix_rank(K)` and the number of strains carrying the minor allele;

@@ -188,7 +188,11 @@ bounded search; the best is kept:
 
 * `h == 0`: no detectable genetic variance (common for small n or weak K).
 * `h == 1`: no detectable residual variance (a trait almost entirely explained by K, e.g. strain means
-  of an inbred panel); report it as "h² close to 1", with the profile interval below.
+  of an inbred panel); report it as "h² close to 1", with the profile interval below. If K is also
+  rank-deficient (replicate animals, fewer strains than animals), pylmm warns "h is at its upper
+  boundary": the data then lie in the span of K, and σ² and the Wald test's n − p degrees of freedom
+  overstate the information (p-values too small). Analyse strain means instead (section 7) or treat
+  the scan with suspicion.
 * pylmm 1.0.0 (and `LMM(..., legacy_fit=True)`, `pylmm gwas --legacy-fit`) searched 0, ..., 0.99 only:
   there `h == 0.99` means "0.98 or more", capped.
 
