@@ -157,7 +157,7 @@ def test_probe_rejects_a_different_summation(monkeypatch):
             warnings.simplefilter("ignore")
             m = np.nanmean(X, axis=1, keepdims=True)
             s = np.nanstd(X, axis=1, keepdims=True)
-        X[...] = np.where(np.isnan(X), 0.0, (X - m) / np.where(s == 0, 1.0, s))
+            X[...] = np.where(np.isnan(X), 0.0, (X - m) / np.where(s == 0, 1.0, s))
 
     monkeypatch.setattr(genotypes, "_normalize_c_rows", naive)
     monkeypatch.setattr(genotypes, "_ROWS_MATCH", {})
