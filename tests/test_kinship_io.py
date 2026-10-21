@@ -50,7 +50,7 @@ def test_plink2_grm_layout():
     ref, ids_ref = read_rel(os.path.join(P2, "geno_iid.rel.bin"))  # float64 triangle
     assert ids_ref == [("0", "I%d" % i) for i in range(1, N_P2 + 1)]  # '#IID' header: FID 0
     np.testing.assert_array_equal(K, K.T)
-    np.testing.assert_allclose(K, ref, rtol=2.0**-24, atol=0)
+    np.testing.assert_allclose(K, ref, rtol=h.FLOAT32_ROUND_RTOL, atol=0)
     assert np.abs(K - ref).max() > 0  # float32: not exact
     # The row-major lower triangle, not the column-major one (= the upper triangle).
     tri = np.fromfile(os.path.join(P2, "geno.grm.bin"), dtype="<f4")
@@ -66,7 +66,7 @@ def test_plink2_rel_shapes_agree():
     sq4, ids4 = read_rel(os.path.join(P2, "geno_sq4.rel.bin"))
     ref, _ = read_rel(os.path.join(P2, "geno_iid.rel.bin"))
     assert ids == ids4 == [("F%d" % i, "I%d" % i) for i in range(1, N_P2 + 1)]
-    np.testing.assert_allclose(tri_text, ref, rtol=1e-5, atol=1e-6)  # 6 significant digits
+    np.testing.assert_allclose(tri_text, ref, rtol=h.REL_TEXT_K_RTOL, atol=0)  # %g: 6 digits
     np.testing.assert_array_equal(sq4, read_grm(os.path.join(P2, "geno"))[0])  # both float32
 
 
@@ -105,7 +105,7 @@ def test_grm_round_trip_is_float32_rounding(tmp_path):
     assert ids2 == ids
     np.testing.assert_array_equal(K2, kinship_io.round_like_grm(K))
     rel = np.abs(K2 - K) / np.abs(K)
-    assert 0 < rel.max() <= 2.0**-24
+    assert 0 < rel.max() <= h.FLOAT32_ROUND_RTOL
     np.testing.assert_array_equal(read_grm_counts(prefix), np.full((40, 40), 120.0))
     assert os.path.getsize(prefix + ".grm.bin") == 40 * 41 // 2 * 4
 
@@ -150,6 +150,49 @@ def test_write_grm_argument_errors(tmp_path):
     with pytest.raises(ValueError, match="n_snps has shape"):
         write_grm(prefix, K, ids, np.ones(4))
     assert not os.listdir(tmp_path)
+
+
+def test_write_grm_float32_overflow_and_n_snps(tmp_path):
+    ids = [("F", "a"), ("F", "b")]
+    prefix = str(tmp_path / "k")
+    with pytest.raises(ValueError, match="beyond the float32 range"):
+        write_grm(prefix, np.array([[1e39, 0.0], [0.0, 1.0]]), ids, 1)
+    for bad in (-1, np.nan, np.inf):
+        with pytest.raises(ValueError, match="n_snps must be finite and >= 0"):
+            write_grm(prefix, np.eye(2), ids, bad)
+    with pytest.raises(ValueError, match="beyond the float32 range"):
+        write_grm(prefix, np.eye(2), ids, 1e39)
+    assert not os.listdir(tmp_path)
+
+
+def test_text_eigen_with_two_disagreeing_id_files(tmp_path):
+    P = str(tmp_path / "P")
+    np.savetxt(P + ".kva", [1.0, 2.0])
+    np.savetxt(P + ".kve", np.eye(2))
+    samples.write_id_file(P + ".id", [("F", "a"), ("F", "b")])
+    samples.write_id_file(P + ".grm.id", [("F", "a"), ("F", "b")])
+    assert kinship_io.read_eigen(P).ids == [("F", "a"), ("F", "b")]  # agree: fine
+    samples.write_id_file(P + ".grm.id", [("F", "b"), ("F", "a")])
+    with pytest.raises(InputError, match="list different samples; remove the stale one"):
+        kinship_io.read_eigen(P)
+
+
+def test_read_kinship_id_file_is_not_the_sidecar_reader(tmp_path):
+    """kinship_io.read_kinship_id_file reads the ID file given (a plink2 header is parsed);
+    samples.read_kinship_ids takes a kinship path and reads its sidecar K + '.id'."""
+    fn = str(tmp_path / "x.rel.id")
+    with open(fn, "w") as f:
+        f.write("#FID\tIID\tSID\nA\ta\ts1\n")
+    assert kinship_io.read_kinship_id_file(fn) == [("A", "a")]
+    assert samples.read_kinship_ids(os.path.join(P2, "geno.grm.bin")) is None  # no .grm.bin.id
+    assert kinship_io.read_kinship_id_file(os.path.join(P2, "geno.grm.id"))[0] == ("F1", "I1")
+
+
+def test_plink_reader_fastlmm_flag_with_a_grm_is_an_error():
+    with pytest.raises(ValueError, match="fastlmm_kinship=True applies to text kinships"):
+        PlinkReader(
+            os.path.join(P2, "geno"), k_file=os.path.join(P2, "geno.grm.bin"), fastlmm_kinship=True
+        )
 
 
 def test_rel_errors(tmp_path):
@@ -264,15 +307,19 @@ def test_cli_gwas_grm_reordered_and_suffix(study):
     (_, a), _ = _gwas(study, ["--grm", study["base"]], "a.out")
     (_, b), err = _gwas(study, ["--grm", perm + ".grm.bin"], "b.out")
     assert "warning" not in err
-    np.testing.assert_allclose(b, a, rtol=1e-9, atol=1e-12)
+    np.testing.assert_array_equal(b, a)  # realigned to the same K bit for bit
 
 
 def test_cli_gwas_kinship_reads_plink2_rel(tmp_path):
-    """--kinship FILE.rel.bin / FILE.rel and --grm on plink2's files."""
+    """--kinship FILE.rel.bin / FILE.rel and --grm on plink2's files, against its float64 one."""
     for f in os.listdir(P2):
         shutil.copy(os.path.join(P2, f), str(tmp_path / f))
     base = str(tmp_path / "geno")
-    y = np.random.default_rng(3).standard_normal(N_P2)
+    with PlinkReader(base) as r:  # a heritable phenotype, so that K matters (h > 0)
+        Z = np.column_stack([g for g, _ in r.iter_snps()])
+    rng = np.random.default_rng(3)
+    y = Z @ (rng.standard_normal(Z.shape[1]) * np.sqrt(0.6 / Z.shape[1]))
+    y += rng.standard_normal(N_P2) * np.sqrt(0.4)
     with open(base + ".phenos", "w") as f:
         for i in range(N_P2):
             f.write("F%d I%d %.10f\n" % (i + 1, i + 1, y[i]))
@@ -281,21 +328,50 @@ def test_cli_gwas_kinship_reads_plink2_rel(tmp_path):
         ("grm", ["--grm", base]),
         ("sq4", ["--kinship", base + "_sq4.rel.bin"]),
         ("tri", ["--kinship", base + "_tri.rel"]),
+        ("f64", ["--kinship", base + "_iid.rel.bin", "--id-match", "iid"]),  # '#IID' only
     ]:
         out = str(tmp_path / (name + ".out"))
-        err = _err(["gwas", "--bfile", base, *kin, "-o", out])
+        err = _err(["gwas", "-v", "--bfile", base, *kin, "-o", out])
         # plink2's missingness-corrected GRM is not PSD here (one eigenvalue -0.02): that
         # warning is expected; no ID warning is.
         assert err.count("warning") == err.count("not positive semi-definite") == 1, err
+        h_null = float(err.split("null model: heritability=")[1].split(",")[0])
+        assert h_null > 0.1, err
         outs[name] = _out(out)[1]
     np.testing.assert_array_equal(outs["sq4"], outs["grm"])  # the same float32 values
-    np.testing.assert_allclose(outs["tri"][:, 3], outs["grm"][:, 3], rtol=1e-3)  # 6 digits
+    ref = outs["f64"]
+    np.testing.assert_allclose(outs["grm"][:, 2], ref[:, 2], rtol=0, atol=h.GRM_FLOAT32_ATOL_T)
+    np.testing.assert_allclose(outs["grm"][:, 3], ref[:, 3], rtol=h.GRM_FLOAT32_RTOL_P, atol=0)
+    np.testing.assert_allclose(outs["tri"][:, 2], ref[:, 2], rtol=0, atol=h.REL_TEXT_ATOL_T)
+    np.testing.assert_allclose(outs["tri"][:, 3], ref[:, 3], rtol=h.REL_TEXT_RTOL_P, atol=0)
+
+
+def test_cli_iid_only_rel_suggests_id_match_iid(tmp_path):
+    for f in os.listdir(P2):
+        shutil.copy(os.path.join(P2, f), str(tmp_path / f))
+    base = str(tmp_path / "geno")
+    with open(base + ".phenos", "w") as f:
+        for i in range(N_P2):
+            f.write("F%d I%d %d\n" % (i + 1, i + 1, i % 7))
+    err = _err(
+        ["gwas", "--bfile", base, "--kinship", base + "_iid.rel.bin", "-o", base + ".out"], rc=2
+    )
+    assert "Every kinship FID is 0" in err and "try --id-match iid" in err
+    with pytest.raises(InputError, match='try id_match="iid"'):
+        PlinkReader(base, k_file=base + "_iid.rel.bin")
 
 
 def test_cli_grm_errors(study, tmp_path):
     _, err = _gwas(study, ["--grm", str(tmp_path / "nope")], "x.out", rc=2)
     nope = str(tmp_path / "nope")
     assert "pylmm: error: --grm %s: no such file %s.grm.bin" % (nope, nope) in err
+    rel = str(tmp_path / "x.rel")
+    np.savetxt(rel, np.eye(study["n"]))
+    _, err = _gwas(study, ["--kinship", rel], "x.out", rc=2)
+    assert (
+        "pylmm: error: --kinship %s: no such file %s.id (the IDs of a plink2 .rel)" % (rel, rel)
+        in err
+    )
     _, err = _gwas(study, ["--grm", study["base"], "--kinship", study["base"] + ".kin"], "x", rc=2)
     assert "not allowed with argument" in err
     emma = h.write_emma_subset(tmp_path)
@@ -331,7 +407,7 @@ def test_eigen_used_after_the_kinship_is_reordered(study):
         study, ["--kinship", perm, "--eigen", str(study["dir"] / "perm.npz"), "-v"], "a.out"
     )
     assert "ignored" not in err and "Reordering the --eigen eigenvectors" in err
-    np.testing.assert_allclose(a, ref, rtol=1e-8, atol=1e-10)
+    np.testing.assert_allclose(a, ref, rtol=h.EIGEN_REUSE_RTOL, atol=h.EIGEN_REUSE_ATOL)
 
 
 def test_eigen_ids_of_other_samples_rejected(study):
@@ -372,7 +448,7 @@ def test_old_eigen_without_ids_still_reads_with_a_warning(study):
     (_, ref), _ = _gwas(study, ["--kinship", study["base"] + ".kin"], "ref.out")
     (_, a), err = _gwas(study, ["--kinship", study["base"] + ".kin", "--eigen", old], "a.out")
     assert err.count("--eigen %s has no sample IDs; assuming" % old) == 1
-    np.testing.assert_allclose(a, ref, rtol=1e-8, atol=1e-10)
+    np.testing.assert_allclose(a, ref, rtol=h.EIGEN_REUSE_RTOL, atol=h.EIGEN_REUSE_ATOL)
 
 
 def test_eigen_text_takes_ids_from_the_kinship_id_file(study):
@@ -395,4 +471,4 @@ def test_grm_eigen_is_that_of_the_float32_k(study):
     (_, a), _ = _gwas(study, ["--grm", base], "a.out")
     (_, b), err = _gwas(study, ["--grm", base, "--eigen", npz], "b.out")
     assert "warning" not in err
-    np.testing.assert_allclose(b, a, rtol=1e-8, atol=1e-10)
+    np.testing.assert_allclose(b, a, rtol=h.EIGEN_REUSE_RTOL, atol=h.EIGEN_REUSE_ATOL)
