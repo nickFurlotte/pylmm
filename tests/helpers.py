@@ -146,6 +146,22 @@ BATCH_ATOL_SCALE = 2e-11
 BATCH_REF_RTOL = 1e-8
 BATCH_REF_ATOL_SCALE = 1e-10
 
+# A scan on a GCTA GRM (float32, `pylmm kinship --out-format grm` + `pylmm gwas
+# --grm`) vs the same scan on the float64 text kinship (-o FILE + --kinship
+# FILE): K differs by the float32 rounding of each entry (relative <= 2**-24,
+# about 6e-8), which moves h and every statistic a little.  Measurement
+# (Phase 6.2c, macOS arm64, numpy 2.x / Accelerate; synthetic BEDs with 2%
+# missing calls, n/m/h2 = 100/500/0.5, 200/1000/0.8, 300/2000/0.3,
+# 400/1500/0.95, 150/800/0.05; script in the PR):
+#   max |dt| 1.3e-7, max |p_grm - p_text| / p_text 3.2e-7,
+#   max |d log10 p| 1.4e-7 (BETA and t relative errors reach 2.8e-4 only for
+#   t ~ 1e-4, so t is compared absolutely).
+# GRM_FLOAT32_ATOL_T is ~80x and GRM_FLOAT32_RTOL_P ~30x the worst; a real
+# change of the model or of the GRM layout (a transposed triangle) moves t by
+# far more (tests/test_kinship_io.py).
+GRM_FLOAT32_ATOL_T = 1e-5
+GRM_FLOAT32_RTOL_P = 1e-5
+
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|
 PSD_RTOL = 1e-10  # min eigenvalue >= -PSD_RTOL * max eigenvalue

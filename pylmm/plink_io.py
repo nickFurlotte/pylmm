@@ -160,7 +160,7 @@ from typing import IO, TYPE_CHECKING, Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from pylmm import samples
+from pylmm import kinship_io, samples
 from pylmm.genotypes import (
     DEFAULT_BLOCK_SIZE,
     GenotypeSource,
@@ -1266,6 +1266,9 @@ class PlinkReader:
         (``fastlmm_kinship=True``): the first line is a tab-separated header
         whose first field is ignored and whose others are ``FID IID`` labels,
         and each following line starts with a label field that is ignored.
+        A GCTA binary GRM (``k_file`` ending in ``.grm.bin``) or a plink2
+        ``.rel`` / ``.rel.gz`` / ``.rel.bin`` file is read with its own IDs
+        (`pylmm.kinship_io.read_grm`, `pylmm.kinship_io.read_rel`).
 
         With IDs (a sidecar or FaSTLMM labels) the matrix is reordered to
         `indivs`, and individuals absent from it are dropped from the reader
@@ -1301,6 +1304,16 @@ class PlinkReader:
 
         kin_ids: list[SampleID] | None = None
         rows: list[list[float]] = []
+        if kinship_io.kinship_format(k_file) != "text":
+            K, kin_ids = kinship_io.read_kinship_with_ids(k_file)
+            if self.type == "emma":  # as for an ID sidecar: K is in genotype order
+                warnings.warn(
+                    "the sample IDs of %s are ignored: EMMA genotypes have no IDs, so K is in "
+                    "genotype order" % k_file,
+                    stacklevel=2,
+                )
+                kin_ids = None
+            return self._set_kinship(K, kin_ids, k_file)
         with open(k_file) as f, _number_errors("kinship file %s" % k_file):
             if self.fastlmm_kinship:
                 header = f.readline().strip().split("\t")[1:]
@@ -1328,7 +1341,13 @@ class PlinkReader:
                 )
             else:
                 kin_ids = samples.read_kinship_ids(k_file)
+        return self._set_kinship(K, kin_ids, k_file)
 
+    def _set_kinship(
+        self, K: NDArray[np.float64], kin_ids: list[SampleID] | None, k_file: str
+    ) -> NDArray[np.float64]:
+        """Store K, aligned to `indivs` by ``kin_ids`` (or in genotype order without IDs)."""
+        assert self.indivs is not None
         if kin_ids is None:
             n = len(self.indivs)
             if K.shape != (n, n):
@@ -1359,7 +1378,7 @@ class PlinkReader:
             {"genotype file": self.indivs, "kinship": kin_ids}, match=self.id_match
         )
         for line in al.report():
-            warnings.warn(line, stacklevel=2)
+            warnings.warn(line, stacklevel=3)
         self.K = None  # replaced below; do not subset the previous matrix
         self._restrict(al.rows["genotype file"])
         self.K = al.take_square("kinship", K)

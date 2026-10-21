@@ -32,7 +32,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
 
-from pylmm import plink_io, samples
+from pylmm import kinship_io, plink_io, samples
 from pylmm.cli._common import (
     UsageError,
     add_logging_options,
@@ -65,10 +65,11 @@ ID_MATCH_CHOICES = {"fid-iid": "fid_iid", "iid": "iid"}
 _DESCRIPTION = """\
 Test each SNP for association with a phenotype under a linear mixed model.
 
-The kinship (--kinship, computed with `pylmm kinship`) accounts for
-relatedness.  Phenotype, covariate and kinship rows are matched to the
-genotype file by sample ID (FID and IID, or IID alone with --id-match iid),
-never by position; the kinship IDs come from its `<kinship>.id` file.
+The kinship (--kinship, computed with `pylmm kinship`, or a GCTA GRM with
+--grm) accounts for relatedness.  Phenotype, covariate and kinship rows are
+matched to the genotype file by sample ID (FID and IID, or IID alone with
+--id-match iid), never by position; the kinship IDs come from its
+`<kinship>.id` file (`<prefix>.grm.id` for --grm).
 The output has one tab-separated line per SNP:
 SNP_ID, BETA, BETA_SD, F_STAT and P_VALUE."""
 
@@ -190,24 +191,36 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "has its own)",
     )
 
-    kin = p.add_argument_group("kinship")
-    kin.add_argument(
+    kin = p.add_argument_group("kinship (--kinship or --grm)")
+    kin_source = kin.add_mutually_exclusive_group(required=True)
+    kin_source.add_argument(
         "--kinship",
         metavar="FILE",
-        required=True,
-        help="(required) n x n kinship matrix, whitespace-separated text (or .gz), from "
+        help="n x n kinship matrix, whitespace-separated text (or .gz), from "
         "`pylmm kinship`.  "
         "With --bfile/--tfile its rows are matched to the genotypes by the IDs in FILE.id if "
         "that exists; otherwise they are assumed to be in genotype order (with a warning).  "
         "With --emma-geno, which has no IDs, the rows are always in genotype order: no "
-        "warning without FILE.id, and a FILE.id is ignored (with a warning)",
+        "warning without FILE.id, and a FILE.id is ignored (with a warning).  A plink2 "
+        "--make-rel file (FILE.rel, .rel.gz or .rel.bin; square or triangle) is read with "
+        "its IDs from PREFIX.rel.id",
+    )
+    kin_source.add_argument(
+        "--grm",
+        metavar="PREFIX",
+        help="a GCTA binary GRM instead of --kinship: PREFIX.grm.bin (float32) and "
+        "PREFIX.grm.id, as gcta --make-grm, plink2 --make-grm-bin and `pylmm kinship "
+        "--out-format grm` write it (the name of GCTA's --grm).  Its rows are matched to "
+        "the genotypes by ID",
     )
     kin.add_argument(
         "--eigen",
         metavar="PATH",
         help="precomputed eigendecomposition of the kinship: a .npz file (`pylmm kinship "
         "--eigen-npz`) or the PATH.kva/PATH.kve text files (`pylmm kinship --eigen-text`).  "
-        "Used only when no individual is dropped or reordered",
+        "Its sample IDs (in the .npz, or PATH.id / PATH.grm.id for text) must be the tested "
+        "individuals (an error otherwise); its rows are reordered to them.  Without IDs its "
+        "rows are assumed to be the kinship's.  Used only when no individual is dropped",
     )
     kin.add_argument(
         "--id-match",
@@ -302,6 +315,9 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
     if args.emma_geno and args.id_match != "fid-iid":
         parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    if args.grm is not None:
+        # The GRM is read as a kinship file named PREFIX.grm.bin (kinship_io.kinship_format).
+        args.kinship = kinship_io.grm_prefix(args.grm) + ".grm.bin"
     try:
         check_block_size(args.block_size)
     except ValueError as e:
@@ -433,24 +449,21 @@ def read_eigen_file(fn: str, K: FloatArray) -> tuple[FloatArray, FloatArray]:
         vector).  (Fixed in 1.0.0: this used to read files that
         the kinship program never wrote.)
     """
+    e = kinship_io.read_eigen(fn)
+    return check_eigen(fn, e.kva, e.kve, K)
+
+
+def check_eigen(
+    fn: str, kva: FloatArray, kve: FloatArray, K: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    """Check that ``kva``, ``kve`` (read from ``fn``) are the eigendecomposition of ``K``.
+
+    Raises
+    ------
+    ValueError
+        As `read_eigen_file`.
+    """
     n = K.shape[0]
-    try:
-        if fn.endswith(".npz"):
-            with np.load(fn) as z:
-                if "Kva" not in z or "Kve" not in z:
-                    raise ValueError(
-                        "eigen file %s must hold arrays Kva and Kve, has %s"
-                        % (fn, ", ".join(z.files))
-                    )
-                kva, kve = z["Kva"], z["Kve"]
-        else:
-            kva, kve = np.loadtxt(fn + ".kva", ndmin=1), np.loadtxt(fn + ".kve", ndmin=2)
-    except OSError as e:
-        raise ValueError(
-            "cannot read the --eigen decomposition %s: %s (expected a .npz file or %s.kva and %s.kve)"
-            % (fn, e, fn, fn)
-        ) from e
-    kva, kve = np.asarray(kva, dtype=np.float64), np.asarray(kve, dtype=np.float64)
     if kva.shape != (n,) or kve.shape != (n, n):
         raise ValueError(
             "--eigen %s: eigenvalues of shape %s and eigenvectors of shape %s, expected (%d,) and (%d, %d)"
@@ -477,7 +490,8 @@ def read_aligned_kinship(k_file: str, reader: plink_io.PlinkReader) -> tuple[Flo
     (indivs, phenotypes and SNP vectors) and K's extra individuals are
     ignored, each with a warning.  Without one, K's rows are assumed to be
     the genotype individuals in file order, with a warning (not for EMMA
-    input, which has no IDs).
+    input, which has no IDs).  A GCTA GRM (``k_file`` ending in ``.grm.bin``)
+    or a plink2 ``.rel`` file brings its own IDs (`pylmm.kinship_io`).
 
     Note: when K drops individuals, genotypes are imputed and standardised
     over the KEPT individuals, but individuals dropped for a missing
@@ -504,6 +518,21 @@ def read_aligned_kinship(k_file: str, reader: plink_io.PlinkReader) -> tuple[Flo
     ValueError
         If the kinship or its ID file is malformed or they disagree.
     """
+    if kinship_io.kinship_format(k_file) != "text":
+        K, file_ids = kinship_io.read_kinship_with_ids(k_file)
+        if reader.type == "emma":
+            if K.shape[0] != len(reader.indivs):
+                raise samples.InputError(
+                    "kinship %s has %d samples but the EMMA genotypes have %d individuals"
+                    % (k_file, K.shape[0], len(reader.indivs))
+                )
+            log.warning(
+                "the sample IDs of %s are ignored: EMMA genotypes have no IDs, so K is in "
+                "genotype order",
+                k_file,
+            )
+            return K, False
+        return _align_kinship(K, file_ids, reader)
     id_file = samples.kinship_id_path(k_file)
     if reader.type == "emma":
         if os.path.isfile(id_file):
@@ -526,6 +555,13 @@ def read_aligned_kinship(k_file: str, reader: plink_io.PlinkReader) -> tuple[Flo
         raise ValueError(
             "%s (its ID file %s lists %d individuals)" % (e, id_file, len(kin_ids))
         ) from e
+    return _align_kinship(K, kin_ids, reader)
+
+
+def _align_kinship(
+    K: FloatArray, kin_ids: list[samples.SampleID], reader: plink_io.PlinkReader
+) -> tuple[FloatArray, bool]:
+    """K (rows ``kin_ids``) and ``reader`` aligned by ID; see `read_aligned_kinship`."""
     al = samples.align_samples(
         {"genotype file": reader.indivs, "kinship": kin_ids}, match=reader.id_match
     )
@@ -612,7 +648,11 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
 
 def _check_input_files(args: argparse.Namespace, reader: plink_io.PlinkReader) -> None:
     """Fail early, before the kinship is read, if it or a phenotype or covariate file is missing."""
-    if not os.path.isfile(args.kinship):
+    if args.grm is not None:
+        for fn in (args.kinship, kinship_io.grm_prefix(args.kinship) + ".grm.id"):
+            if not os.path.isfile(fn):
+                raise UsageError("--grm %s: no such file %s" % (args.grm, fn))
+    elif not os.path.isfile(args.kinship):
         raise UsageError("--kinship %s: no such file" % args.kinship)
     # No phenotype file is a usage error (bug 14, fixed in 1.0.0: this
     # used to be os.path.isfile(None), a TypeError).
@@ -770,20 +810,37 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
     )
     _usage(check_covariates, X0, what=name)
 
-    kva, kve = _eigen(args, K, int((~keep).sum()), kinship_aligned)
+    kva, kve = _eigen(args, K, reader, keep, kinship_aligned)
     return GwasInputs(reader=reader, Y=Y, X0=X0, K=K, keep=keep, kva=kva, kve=kve)
 
 
 def _eigen(
-    args: argparse.Namespace, K: FloatArray, n_dropped: int, kinship_aligned: bool
+    args: argparse.Namespace,
+    K: FloatArray,
+    reader: plink_io.PlinkReader,
+    keep: NDArray[np.bool_],
+    kinship_aligned: bool,
 ) -> tuple[FloatArray | None, FloatArray | None]:
     """The ``--eigen`` decomposition, if given and still valid for K; else (None, None).
 
-    It is valid only if no individual was dropped or reordered; otherwise it
-    is ignored, with a warning, and recomputed.
+    With sample IDs (PLINK genotypes), its IDs must include every tested
+    individual (``reader.indivs[keep]``, K's rows), else it is an error; if
+    they are exactly the tested individuals, its rows are reordered to them,
+    and if it has more (individuals dropped since) it is ignored, with a
+    warning, and recomputed.  Without IDs it is valid only if no individual
+    was dropped or reordered, as before.  Either way it must then be the
+    eigendecomposition of K (`check_eigen`).
     """
     if not args.eigen:
         return None, None
+    e = _usage(kinship_io.read_eigen, args.eigen)
+    if e.ids is not None and reader.type != "emma":
+        return _eigen_by_id(args.eigen, e, K, reader, keep)
+    if e.ids is not None:
+        log.warning(
+            "the sample IDs of --eigen %s are ignored: EMMA genotypes have no IDs", args.eigen
+        )
+    n_dropped = int((~keep).sum())
     if n_dropped:
         log.warning(
             "--eigen is ignored: %d individuals were dropped, so the decomposition is recomputed",
@@ -796,8 +853,63 @@ def _eigen(
             "its IDs, so the decomposition is recomputed"
         )
         return None, None
+    if reader.type != "emma":
+        log.warning(
+            "--eigen %s has no sample IDs; assuming its rows are the kinship's, in genotype "
+            "order (pylmm kinship --eigen-npz writes the IDs)",
+            args.eigen,
+        )
     log.info("Loading pre-computed eigendecomposition...")
-    kva, kve = _usage(read_eigen_file, args.eigen, K)
+    kva, kve = _usage(check_eigen, args.eigen, e.kva, e.kve, K)
+    return kva, kve
+
+
+def _eigen_by_id(
+    fn: str,
+    e: kinship_io.Eigen,
+    K: FloatArray,
+    reader: plink_io.PlinkReader,
+    keep: NDArray[np.bool_],
+) -> tuple[FloatArray | None, FloatArray | None]:
+    """`_eigen` for a decomposition with sample IDs: match them to the tested individuals."""
+    assert e.ids is not None
+    tested = [reader.indivs[i] for i in np.flatnonzero(keep)]
+    rows = _usage(
+        samples.match_index,
+        tested,
+        e.ids,
+        match=reader.id_match,
+        target_name="the tested individuals",
+        source_name="--eigen %s" % fn,
+    )
+    missing = np.flatnonzero(rows < 0)
+    if len(missing):
+        raise UsageError(
+            "--eigen %s is not the eigendecomposition of this kinship: %d of the %d tested "
+            "individuals are not among its %d sample IDs, e.g. %s"
+            % (
+                fn,
+                len(missing),
+                len(tested),
+                len(e.ids),
+                ", ".join(samples.format_id(tested[i]) for i in missing[:3]),
+            )
+        )
+    if len(e.ids) != len(tested):
+        log.warning(
+            "--eigen is ignored: %d of its %d individuals are not tested (not in the genotypes "
+            "or the kinship, or missing a phenotype or covariate), so the decomposition is "
+            "recomputed",
+            len(e.ids) - len(tested),
+            len(e.ids),
+        )
+        return None, None
+    kve = e.kve
+    if not np.array_equal(rows, np.arange(len(rows))):
+        log.info("Reordering the --eigen eigenvectors to the tested individuals by sample ID")
+        kve = kve[rows]
+    log.info("Loading pre-computed eigendecomposition...")
+    kva, kve = _usage(check_eigen, fn, e.kva, kve, K)
     return kva, kve
 
 

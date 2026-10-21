@@ -115,7 +115,7 @@ def test_help_has_examples(command):
         ([], "required: COMMAND"),
         (["frobnicate"], "invalid choice"),
         (["gwas", "--kinship", "k", "-o", "o"], "one of the arguments --bfile --tfile --emma-geno"),
-        (["gwas", "--bfile", "b", "-o", "o"], "required: --kinship"),
+        (["gwas", "--bfile", "b", "-o", "o"], "one of the arguments --kinship --grm is required"),
         (["gwas", "--bfile", "b", "--kinship", "k"], "required: -o/--out"),
         (["gwas", "--bfile", "b", "--tfile", "t", "--kinship", "k", "-o", "o"], "not allowed"),
         (["gwas", "--bfile", "b", "--kinship", "k", "-o", "o", "--reml", "--ml"], "not allowed"),
