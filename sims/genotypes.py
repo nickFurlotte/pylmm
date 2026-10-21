@@ -8,6 +8,7 @@ scale invariant):
 =================  ==========================================================
 ``bed``            pylmm's BED decoding: 0, 0.5, 1 (allele dosage / 2), nan
 ``hmdp``           0 / 1 (inbred strains), nan for NA
+``inbred_panel``   0 / 1 (synthetic inbred strains), nan for missing
 synthetic          0, 1, 2 copies of the alternative allele (no missing)
 =================  ==========================================================
 
@@ -341,12 +342,58 @@ def family(
     )
 
 
+def inbred_panel(
+    n: int,
+    m: int,
+    n_founders: int = 8,
+    n_chrom: int = 10,
+    breakpoints: float = 2.0,
+    founder_maf: Any = ("uniform", 0.05, 0.5),
+    missing: float = 0.0,
+    seed: int = 0,
+) -> Genotypes:
+    """Synthetic inbred strains, homozygous mosaics of a few founders (an RI-like panel).
+
+    ``n_founders`` inbred founders carry allele 1 at SNP j with probability
+    p_j (drawn from ``founder_maf``).  Each of the ``n`` strains is, on each of
+    ``n_chrom`` chromosomes (``m`` SNPs split evenly, in order), a mosaic of
+    founder segments: Poisson(``breakpoints``) breakpoints per chromosome at
+    uniform SNP positions, a random founder per segment.  So SNPs are linked
+    within a chromosome and unlinked across chromosomes, and the strains are
+    related through their shared founders, as in recombinant inbred and HMDP
+    panels.  Genotypes are 0 / 1 (EMMA's coding of inbred strains); each call
+    is missing with probability ``missing``.  ``meta['chrom']`` holds the
+    chromosome (1-based) of each SNP.
+    """
+    rng = np.random.default_rng(seed)
+    p = sample_maf(founder_maf, m, rng)
+    F = (rng.random((n_founders, m)) < p).astype(np.float64)
+    chrom = np.repeat(np.arange(1, n_chrom + 1), int(np.ceil(m / n_chrom)))[:m]
+    G = np.empty((n, m))
+    for c in range(1, n_chrom + 1):
+        cols = np.where(chrom == c)[0]
+        for i in range(n):
+            k = rng.poisson(breakpoints)
+            cuts = np.sort(rng.integers(1, len(cols), size=k)) if len(cols) > 1 else []
+            src = rng.integers(0, n_founders, size=len(cuts) + 1)
+            seg = np.searchsorted(cuts, np.arange(len(cols)), side="right")
+            G[i, cols] = F[src[seg], cols]
+    G = with_missing(G, missing, rng)
+    return Genotypes(
+        G,
+        ["snp_%d" % j for j in range(m)],
+        ["strain_%d" % i for i in range(n)],
+        meta={"source": "inbred_panel", "chrom": chrom, "founders": F},
+    )
+
+
 SOURCES = {
     "bed": bed,
     "hmdp": hmdp,
     "unrelated": unrelated,
     "balding_nichols": balding_nichols,
     "family": family,
+    "inbred_panel": inbred_panel,
 }
 
 

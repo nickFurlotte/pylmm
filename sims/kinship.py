@@ -1,11 +1,11 @@
 """Kinship matrices the way pylmm builds them, plus cached eigendecompositions.
 
-``kinship(G)`` is ``pylmm.lmm.calculate_kinship`` on a *copy* of G (the pylmm
-function mean-imputes and standardises its argument in place).  Note its
-known quirks, which simulations inherit on purpose because they are what
-pylmm users get (docs/phase1-baseline.md, bug 8): monomorphic SNPs are
-dropped but still counted in the 1/m scale factor, and missing calls are
-mean-imputed before the variance is taken.
+``kinship(G)`` is ``pylmm.kinship.calculate_kinship`` (the standardized
+kinship, what pylmm users get by default): each SNP is standardised with the
+mean and SD of its called genotypes, missing calls are set to the mean, and
+monomorphic and all-missing SNPs are not counted in m.  Before Phase 6.6 they
+were counted (bug 8), which shrank K by the share of such SNPs, and missing
+calls were imputed before the variance was taken (``legacy=True`` keeps that).
 
 ``get(geno_spec, snps=...)`` caches (K, kva, kve) per process, keyed by the
 genotype spec and the SNP subset, so replicates reuse one O(n^3) eigh.
@@ -49,7 +49,7 @@ class Kinship:
 
 
 def kinship(G: np.ndarray, center: bool = False) -> np.ndarray:
-    """``pylmm.lmm.calculate_kinship`` on a copy of G (G is left untouched)."""
+    """``pylmm.kinship.calculate_kinship`` of G (G is left untouched)."""
     from pylmm.lmm import calculate_kinship
 
     return calculate_kinship(np.array(G, dtype=np.float64), center=center)

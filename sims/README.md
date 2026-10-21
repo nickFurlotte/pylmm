@@ -20,7 +20,7 @@ uv run --group sims python -m sims list                # list studies
 
 | module | what it gives you |
 |---|---|
-| `genotypes` | `get(spec)` returns a cached, read-only `Genotypes(G, snp_ids, indiv_ids, pops, meta)`. Sources: `bed` (1219 mice, 98,740 SNPs, read with `pylmm.plink_io.PlinkReader`), `hmdp` (94 strains, about 132k SNPs, text), and seeded synthetic sources `unrelated`, `balding_nichols` (k populations with F_st, optional Dirichlet admixture) and `family` (nuclear sibships). `with_missing(G, rate, rng)` adds missing calls. |
+| `genotypes` | `get(spec)` returns a cached, read-only `Genotypes(G, snp_ids, indiv_ids, pops, meta)`. Sources: `bed` (1219 mice, 98,740 SNPs, read with `pylmm.plink_io.PlinkReader`), `hmdp` (94 strains, about 132k SNPs, text), and seeded synthetic sources `unrelated`, `balding_nichols` (k populations with F_st, optional Dirichlet admixture), `family` (nuclear sibships) and `inbred_panel` (0/1 inbred strains, mosaics of a few founders over linked chromosomes, RI-like). `with_missing(G, rate, rng)` adds missing calls. |
 | `kinship` | `get(geno_spec, snps=...)` returns a cached `Kinship(K, kva, kve)`. K is built by pylmm's own `calculate_kinship`, optionally on a separate SNP set. `split_snps(...)` splits SNPs into kinship and test sets. `from_matrix(K)` wraps any K. |
 | `phenotypes` | `simulate(kin, h2, rng, G=, causal_idx=, causal_var=, X0=/n_covariates=, missing_rate=)` simulates y = X0·α + Σβ_j g_j + u + e. `choose_causal(...)` picks causal SNPs. |
 | `methods` | Thin pylmm wrappers: `pylmm_null`, `pylmm_gwas` (that is, `lmm.gwas`), `pylmm_association`. Also `ols_gwas`, an OLS baseline. |

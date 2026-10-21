@@ -15,8 +15,9 @@ Variance bookkeeping (``var_total`` defaults to 1):
 So ``h2`` is the variance-component parameter an LMM estimates when the
 causal SNPs are fitted as fixed effects; when they are not, they inflate the
 apparent h2.  The scale of sigma_g^2 is relative to K as given: with pylmm's
-``calculate_kinship`` the mean diagonal is ~1 for outbred synthetic data but
-can differ for inbred data or when monomorphic SNPs shrink the scale.
+``calculate_kinship`` the mean diagonal is ~1 for outbred synthetic data, a
+little less with missing calls (about 1 - the missing rate), and other
+kinships (``kind="ibs"``) have other scales (``pylmm.kinship.kinship_scale``).
 Covariate effects come on top of var_total.
 
 u is drawn through the eigendecomposition K = V diag(d) V':
