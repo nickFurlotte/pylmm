@@ -330,41 +330,15 @@ class KinshipAccumulator:
                 "expected a genotype vector of length %d, got shape %s" % (self.n, x.shape)
             )
         self.n_snps += 1
-        if self.kind == "ibs":
-            _check_ibs_coding(x)
-            pair = _emma_split(x)
-            if pair is None:
+        cols = snp_columns(x, self.kind, self.scale)
+        if cols is None:
+            if np.isnan(x).all():
                 self.n_all_missing += 1
-                return False
-            self._rowsum += pair[:, 0] + pair[:, 1]
-            self._push(pair[:, 0])
-            self._push(pair[:, 1])
-            self.n_used += 1
-            return True
-        if self.kind == "standardized":
-            z = normalize_genotype(x)
-            # As pylmm kinship 1.0.0: all-missing -> nan, constant -> zeros.
-            if not np.isfinite(z).all() or z.var() == 0:
-                if np.isnan(x).all():
-                    self.n_all_missing += 1
-                return False
-            self._push(z)
-            self.n_used += 1
-            return True
-        # centered
-        called = ~np.isnan(x)
-        if not called.any():
-            self.n_all_missing += 1
             return False
-        obs = x[called]
-        mu = obs.mean()
-        if np.ptp(obs) <= 1e-12 * max(1.0, abs(mu)):  # constant, as normalize_genotype
-            return False
-        if self.scale == 1.0:
-            self._push(np.where(called, x - mu, 0.0))
-        else:
-            # scale * (x - mu): the same bits as centring scale * x (2 is exact)
-            self._push(np.where(called, self.scale * (x - mu), 0.0))
+        if self.kind == "ibs":
+            self._rowsum += cols[0] + cols[1]
+        for col in cols:
+            self._push(col)
         self.n_used += 1
         return True
 
@@ -394,23 +368,112 @@ class KinshipAccumulator:
         self._W = np.empty((self.n, 0))
         if self.legacy:
             S /= float(self.n_snps)
-        elif self.kind != "ibs":
-            S /= float(self.n_used)
         else:
-            # EMMA: mean over the 0/1 codings of x_i x_j + (1 - x_i)(1 - x_j)
-            #     = 1 - x_i - x_j + 2 x_i x_j, with a diagonal of 1.
-            # (m - a_i - a_j + 2 S_ij) / m, in place, rows in chunks.
-            m = 2.0 * self.n_used
-            a = self._rowsum
-            S *= 2.0
-            for i0 in range(0, self.n, 256):
-                i1 = min(i0 + 256, self.n)
-                S[i0:i1] += (m - a[i0:i1, None]) - a[None, :]
-            S /= m
-            np.fill_diagonal(S, 1.0)
+            finish_kinship(S, self.kind, self.n_used, self._rowsum)
         self._S = None
         self._K = S
         return S
+
+
+def snp_columns(x: FloatArray, kind: str, scale: float = 1.0) -> tuple[FloatArray, ...] | None:
+    """The columns one SNP adds to the kinship's ``W`` (``K ~ W W'``), or None if it is not used.
+
+    The per-SNP step of `KinshipAccumulator`: ``"standardized"``, the
+    standardised SNP; ``"centered"``, the centred SNP times ``scale``;
+    ``"ibs"``, EMMA's two mean-imputed 0/1 codings.  None for a SNP with no
+    called genotype and, except for ``"ibs"``, a constant one.  Each column
+    depends on this SNP alone, so the kinship of any set of SNPs is
+    `finish_kinship` of the sum of their columns' products (what
+    `pylmm.loco.LocoKinship` uses).
+
+    Parameters
+    ----------
+    x : (n,) float64 array
+        Raw genotypes, nan for a missing call (``"ibs"``: 0 / 0.5 / 1).
+    kind : {"standardized", "centered", "ibs"}
+        The kinship.
+    scale : float, default 1.0
+        ``"centered"`` only, as for `KinshipAccumulator`.
+
+    Returns
+    -------
+    tuple of (n,) arrays, or None
+        One column (two for ``"ibs"``), or None if the SNP is not used.
+
+    Raises
+    ------
+    ValueError
+        ``"ibs"``: a genotype other than 0, 0.5, 1 or nan.
+    """
+    if kind == "ibs":
+        _check_ibs_coding(x)
+        pair = _emma_split(x)
+        if pair is None:
+            return None
+        return pair[:, 0], pair[:, 1]
+    if kind == "standardized":
+        z = normalize_genotype(x)
+        # As pylmm kinship 1.0.0: all-missing -> nan, constant -> zeros.
+        if not np.isfinite(z).all() or z.var() == 0:
+            return None
+        return (z,)
+    # centered
+    called = ~np.isnan(x)
+    if not called.any():
+        return None
+    obs = x[called]
+    mu = obs.mean()
+    if np.ptp(obs) <= 1e-12 * max(1.0, abs(mu)):  # constant, as normalize_genotype
+        return None
+    if scale == 1.0:
+        return (np.where(called, x - mu, 0.0),)
+    # scale * (x - mu): the same bits as centring scale * x (2 is exact)
+    return (np.where(called, scale * (x - mu), 0.0),)
+
+
+def finish_kinship(
+    S: FloatArray, kind: str, n_used: int, rowsum: FloatArray | None = None
+) -> FloatArray:
+    """Turn ``S``, the sum of ``W W'`` over the used SNPs' `snp_columns`, into K, in place.
+
+    ``"standardized"`` and ``"centered"``: ``S / m``.  ``"ibs"``: EMMA's
+    ``(m - a_i - a_j + 2 S_ij) / m`` with ``m = 2 * n_used`` and ``a`` =
+    ``rowsum`` (the sum of the SNPs' columns), with a diagonal of 1.
+
+    Parameters
+    ----------
+    S : (n, n) float64 array
+        Overwritten with K.
+    kind : {"standardized", "centered", "ibs"}
+        The kinship.
+    n_used : int
+        The number of SNPs summed into ``S`` (``m``), at least 1.
+    rowsum : (n,) array, optional
+        ``"ibs"`` only (required there): the sum of the SNPs' columns.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``S``, now K.
+    """
+    if kind != "ibs":
+        S /= float(n_used)
+        return S
+    # EMMA: mean over the 0/1 codings of x_i x_j + (1 - x_i)(1 - x_j)
+    #     = 1 - x_i - x_j + 2 x_i x_j, with a diagonal of 1.
+    # (m - a_i - a_j + 2 S_ij) / m, in place, rows in chunks.
+    if rowsum is None:
+        raise ValueError("finish_kinship: kind='ibs' needs rowsum")
+    n = S.shape[0]
+    m = 2.0 * n_used
+    a = rowsum
+    S *= 2.0
+    for i0 in range(0, n, 256):
+        i1 = min(i0 + 256, n)
+        S[i0:i1] += (m - a[i0:i1, None]) - a[None, :]
+    S /= m
+    np.fill_diagonal(S, 1.0)
+    return S
 
 
 def _calculate_kinship_1_0(W: FloatArray) -> FloatArray:
