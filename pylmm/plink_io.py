@@ -36,6 +36,13 @@ Supported formats
     not parse as a number is missing.  SNPs are named ``SNP_1``, ``SNP_2``, ...
     and individuals are identified by position only.
 
+``type="pgen"``: PLINK 2 binary (PGEN/PVAR/PSAM)
+    ``<fbase>.pgen``, ``<fbase>.pvar`` (or ``.pvar.zst``) and ``<fbase>.psam``,
+    read with the optional package pgenlib (``pip install 'pylmm[pgen]'``);
+    see :mod:`pylmm.pgen`.  The genotype is the fraction of copies of REF
+    (the A2 of the ``.bim`` plink2 writes for the file), dosages included
+    unless ``dosage=False``; multiallelic variants are an error.
+
 Phenotype and covariate files are PLINK-style text tables ``FID IID v1 [v2
 ...]`` with an optional ``FID IID name1 [name2 ...]`` header line (any case),
 whose names can select columns (``read_phenos(columns=["bmi"])``); EMMA ones
@@ -160,7 +167,7 @@ from typing import IO, TYPE_CHECKING, Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from pylmm import kinship_io, samples
+from pylmm import kinship_io, pgen, samples
 from pylmm.genotypes import (
     DEFAULT_BLOCK_SIZE,
     GenotypeSource,
@@ -174,7 +181,7 @@ from pylmm.samples import InputError, SampleID
 log = logging.getLogger(__name__)
 
 # The genotype formats PlinkReader reads (its ``type`` argument).
-GENOTYPE_TYPES = ("b", "t", "emma")
+GENOTYPE_TYPES = ("b", "t", "emma", "pgen")
 
 # The first three bytes of a SNP-major PLINK 1 BED file.
 _BED_MAGIC = b"\x6c\x1b"
@@ -217,9 +224,10 @@ class PlinkReader:
     pheno_file : str, optional
         PLINK-style phenotype file.  Defaults to ``fbase + ".phenos"``, which
         is silently skipped if it does not exist.
-    type : {"b", "t", "emma"}, default "b"
-        Genotype format: PLINK binary, PLINK transposed text, or EMMA.
-        Anything else raises ValueError.
+    type : {"b", "t", "emma", "pgen"}, default "b"
+        Genotype format: PLINK binary, PLINK transposed text, EMMA, or PLINK 2
+        PGEN (``fbase.pgen/.pvar/.psam``; needs the optional package pgenlib,
+        :mod:`pylmm.pgen`).  Anything else raises ValueError.
     norm_genotype : bool, default True
         If true, each SNP is standardised (mean-imputed, centred, unit
         variance; see `normalize_genotype`).  If false the raw values
@@ -234,6 +242,9 @@ class PlinkReader:
     id_match : {"fid_iid", "iid"}, default "fid_iid"
         Match phenotype, covariate and kinship rows to the genotype file on
         (FID, IID), or on the IID alone (PLINK input only).
+    dosage : bool, default True
+        ``type="pgen"`` only: read the dosages where the file has them (else
+        the hard calls).  False with another type raises ValueError.
 
     Attributes
     ----------
@@ -298,6 +309,10 @@ class PlinkReader:
     _geno_index: NDArray[np.intp] | None
     _exhausted: bool
     _variants: Variants | None
+    dosage: bool
+    # type="pgen": the (.pgen, .pvar, .psam) files, and the per-SNP iterator of iter_snps.
+    _pgen_files: tuple[str, str, str]
+    _pgen_snps: Iterator[tuple[NDArray[np.float64], str]] | None
 
     def __init__(
         self,
@@ -309,9 +324,11 @@ class PlinkReader:
         read_k_file: bool = False,
         fastlmm_kinship: bool = False,
         id_match: str = "fid_iid",
+        dosage: bool = True,
     ) -> None:
 
         self.fhandle = None
+        self._pgen_snps = None
         self.snp_file_handle = None
         self._exhausted = False
         self._variants = None
@@ -329,6 +346,9 @@ class PlinkReader:
             )
         if type == "emma" and id_match != "fid_iid":
             raise ValueError("id_match='iid' needs PLINK input; EMMA genotypes have no IDs")
+        if not dosage and type != "pgen":
+            raise ValueError("dosage=False applies to type='pgen' only")
+        self.dosage = dosage
         self.fbase = fbase
         self.type = type
         self.id_match = id_match
@@ -338,7 +358,13 @@ class PlinkReader:
         self.phenos = None
         self.pheno_names = None
         self.covariate_names = None
-        if type != "emma":
+        if type == "pgen":
+            self._pgen_files = pgen.pgen_paths(fbase)
+            self.indivs = pgen.read_psam(self._pgen_files[2])
+            self.N = len(self.indivs)
+            log.info("Read %d individuals from %s", self.N, self._pgen_files[2])
+            pgen.check_pgen(self._pgen_files[0], self.N)
+        elif type != "emma":
             self.indivs = self._read_fam(self.fbase, type)
         else:
             # Just read a line from the SNP file and see how many individuals we have
@@ -371,6 +397,12 @@ class PlinkReader:
 
     def close(self) -> None:
         """Close the genotype files opened by `iter_snps` (safe to call twice)."""
+        snps = getattr(self, "_pgen_snps", None)
+        if snps is not None:
+            self._pgen_snps = None
+            close = getattr(snps, "close", None)
+            if close is not None:
+                close()
         for attr in ("fhandle", "snp_file_handle"):
             fh = getattr(self, attr, None)
             if fh is not None:
@@ -435,6 +467,8 @@ class PlinkReader:
             return self._iter_snps_tped()
         elif self.type == "emma":
             return self._iter_snps_emma()
+        elif self.type == "pgen":
+            return self._iter_snps_pgen()
         else:
             raise ValueError("unknown genotype file type %r" % (self.type,))
 
@@ -476,6 +510,32 @@ class PlinkReader:
 
         return self
 
+    def _iter_snps_pgen(self) -> PlinkReader:
+        """Start reading a PGEN file one SNP at a time (`pylmm.pgen.iter_pgen_snps`)."""
+        variants = self.variants
+        self.num_snps = len(variants)
+        self.have_read = 0
+        self._pgen_snps = pgen.iter_pgen_snps(
+            self._pgen_files[0],
+            self.N,
+            variants,
+            None if self._geno_index is None else self._geno_index.copy(),
+            self.norm_genotype,
+            self.dosage,
+        )
+        return self
+
+    def _next_pgen(self) -> tuple[NDArray[np.float64], str]:
+        """`__next__` for ``type="pgen"``."""
+        if self._pgen_snps is None:
+            raise ValueError("no genotype file is open: call iter_snps() (or iterate) first")
+        try:
+            item = next(self._pgen_snps)
+        except StopIteration:
+            raise self._stop() from None
+        self.have_read += 1
+        return item
+
     def __iter__(self) -> PlinkReader:
         """Start (or restart) iteration over the SNPs; see `iter_snps`."""
         return self.iter_snps()
@@ -510,6 +570,8 @@ class PlinkReader:
         """
         if self._exhausted:
             raise StopIteration
+        if self.type == "pgen":
+            return self._next_pgen()
         fh = self.fhandle
         if fh is None:
             raise ValueError("no genotype file is open: call iter_snps() (or iterate) first")
@@ -699,7 +761,8 @@ class PlinkReader:
         """Metadata of every SNP of the file, in iteration order (read on first use).
 
         For a BED file, the six columns of the ``.bim`` file (``chrom``,
-        ``snp``, ``cm``, ``bp``, ``a1``, ``a2``).  For a TPED file, those of
+        ``snp``, ``cm``, ``bp``, ``a1``, ``a2``).  For a PGEN file, those of
+        the ``.pvar`` (`pylmm.pgen.read_pvar`: ``a1`` ALT, ``a2`` REF).  For a TPED file, those of
         the ``.bim`` file if it exists, otherwise the ``.map`` file's
         (``chrom``, ``snp``, ``cm``, ``bp``; no alleles, and no ``cm`` for a
         three-column ``.map``).  For EMMA input, the names ``SNP_1``,
@@ -749,6 +812,8 @@ class PlinkReader:
                 with open(self.fbase) as f:
                     m = sum(1 for line in f if line.strip())
                 self._variants = Variants.from_names(["SNP_%d" % (k + 1) for k in range(m)])
+            elif self.type == "pgen":
+                self._variants = pgen.read_pvar(self._pgen_files[1])
             elif self.type == "t" and not os.path.isfile(self.fbase + ".bim"):
                 self._variants = _read_variant_file(self.fbase + ".map")
             else:
@@ -839,6 +904,16 @@ class PlinkReader:
             index = None if self._geno_index is None else self._geno_index.copy()
             return self._iter_blocks_bed(
                 block_size, self.variants, self.N, index, self.norm_genotype
+            )
+        if self.type == "pgen":
+            return pgen.iter_pgen_blocks(
+                self._pgen_files[0],
+                self.N,
+                self.variants,
+                None if self._geno_index is None else self._geno_index.copy(),
+                self.norm_genotype,
+                self.dosage,
+                block_size,
             )
         reader = copy.copy(self)  # same individuals and options, its own file handles
         reader.fhandle = reader.snp_file_handle = None
