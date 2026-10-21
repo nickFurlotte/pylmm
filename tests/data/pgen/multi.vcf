@@ -1,0 +1,10 @@
+##fileformat=VCFv4.2
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DS,Number=A,Type=Float,Description="ALT dosage">
+##FORMAT=<ID=GP,Number=G,Type=Float,Description="Genotype probabilities">
+##contig=<ID=1>
+##contig=<ID=2>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	m1	m2	m3	m4	m5	m6	m7	m8	m9	m10
+1	100	m1	A	G	.	PASS	.	GT	0/1	0/0	1/1	1/1	0/0	0/0	0/0	0/0	0/1	0/0
+1	200	m2	A	C,T	.	PASS	.	GT	0/1	0/1	0/1	1/2	0/2	0/1	0/1	1/2	1/2	1/2
+1	300	m3	G	T	.	PASS	.	GT	0/0	0/1	0/1	0/0	0/1	0/1	0/1	1/1	0/0	0/1

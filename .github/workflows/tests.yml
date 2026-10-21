@@ -81,8 +81,11 @@ jobs:
       # --group sims adds pandas/matplotlib/statsmodels for the sims/ tests
       # (they skip the parts needing those packages when the group is absent,
       # as in the lowest-direct job below).
+      # --extra pgen installs the optional PGEN reader (pgenlib), so tests/test_pgen.py runs
+      # here on every Python; the lowest-direct job has no extras, and the PGEN genotype
+      # tests skip there (the "pgenlib not installed" lines of the -ra summary).
       - name: Run tests
-        run: uv run --locked --group sims pytest
+        run: uv run --locked --group sims --extra pgen pytest
 
       - name: Simulation framework smoke run
         run: uv run --locked --group sims python -m sims run example_null --quick --report

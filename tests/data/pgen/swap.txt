@@ -1,0 +1,8 @@
+snp1	A
+snp4	T
+snp5	AT
+snp9	G
+snp14	C
+snp22	T
+snp31	A
+snp40	T
