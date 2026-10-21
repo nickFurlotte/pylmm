@@ -28,6 +28,7 @@ def fit_two(
     K2: NDArray[np.float64],
     X0: ArrayLike | None = None,
     ngrids: int = 100,
+    legacy_fit: bool = False,
 ) -> tuple[float, float, float, NDArray[np.float64], float, float]:
     """Fit a mixed model with two variance components over a grid of weights.
 
@@ -37,12 +38,13 @@ def fit_two(
 
         K = w * K1 + (1 - w) * K2
 
-    ``w`` runs over the grid ``0, 1/ngrids, ..., (ngrids - 1)/ngrids``. For
-    each ``w`` the single-kinship model is fit with :meth:`pylmm.lmm.LMM.fit`
-    (REML; the heritability grid inside each fit is always the 100 points
-    0, 0.01, ..., 0.99, whatever ``ngrids`` is), and the ``w``
-    with the highest log-likelihood is kept. Ties go to the first (smallest)
-    ``w``, with a warning on stderr; progress is also written to stderr.
+    ``w`` runs over the grid ``0, 1/ngrids, ..., 1`` (both ends included, so
+    ``K1`` alone and ``K2`` alone are candidates). For each ``w`` the
+    single-kinship model is fit with :meth:`pylmm.lmm.LMM.fit` (REML; ``h``
+    searched on [0, 1] with its own grid of step 0.01, whatever ``ngrids``
+    is), and the ``w`` with the highest log-likelihood is kept. Ties go to
+    the first (smallest) ``w``, with a warning on stderr; progress is also
+    written to stderr.
 
     Parameters
     ----------
@@ -53,8 +55,12 @@ def fit_two(
     X0 : array_like, shape (n, q), optional
         Covariates. Default: an intercept only.
     ngrids : int, default 100
-        Number of grid points for ``w`` only.  The heritability grid inside
-        each fit is NOT affected: it is always 100 points covering 0 to 0.99.
+        Number of grid intervals for ``w`` only (``ngrids + 1`` points).  The
+        heritability grid inside each fit is NOT affected.
+    legacy_fit : bool, default False
+        As pylmm 1.0.0: ``w`` on ``0, 1/ngrids, ..., (ngrids - 1)/ngrids``
+        (``ngrids`` points, never 1) and every fit with
+        ``LMM(..., legacy_fit=True)`` (``h`` on 0 to 0.99).
 
     Returns
     -------
@@ -73,15 +79,10 @@ def fit_two(
     Notes
     -----
     Cost: one eigendecomposition of an ``n x n`` matrix per ``w`` grid point,
-    so ``ngrids`` of them (O(``ngrids`` * n**3)), plus about 100 likelihood
+    so ``ngrids + 1`` of them (O(``ngrids`` * n**3)), plus about 100 likelihood
     evaluations (the fixed inner heritability grid) and a bounded refinement
     for each. This is slow for large ``n``; lower ``ngrids`` for a coarse
     answer (it cuts the number of eigendecompositions, not the inner 100).
-
-    Known caveat (not yet fixed; see *Known caveats* in ``AGENTS.md``): the
-    ``w`` grid never includes 1.0 (nor does the heritability grid inside
-    each fit, which stops at 0.99), so a model that is purely ``K1`` cannot
-    be returned exactly; the best it can do is ``w = 1 - 1/ngrids``.
 
     Examples
     --------
@@ -101,8 +102,11 @@ def fit_two(
     (1, 1)
     """
 
-    # Create a uniform grid
-    W = np.array(range(ngrids)) / float(ngrids)
+    # A uniform grid of w; it stopped below 1 before (bug 3)
+    if legacy_fit:
+        W = np.array(range(ngrids)) / float(ngrids)
+    else:
+        W = np.arange(ngrids + 1) / float(ngrids)
     results = []
     ll_grid = []
 
@@ -110,7 +114,7 @@ def fit_two(
         # heritability will be estimated for linear combo of kinships
         K = w * K1 + (1.0 - w) * K2
         sys.stderr.write("Fitting weight %0.2f\n" % (w))
-        L = LMM(Y, K, X0=X0)
+        L = LMM(Y, K, X0=X0, legacy_fit=legacy_fit)
         R = L.fit()
         results.append(R)
         ll_grid.append(R[-1])

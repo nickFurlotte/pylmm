@@ -32,19 +32,22 @@ Conventions (see `LMM` and ``docs/conventions.md`` for details):
   (``reml=True``); ``reml=False`` uses ML.
 * Scalars are returned as floats (``sigma``, ``Q``, ``beta_var``, the
   log-likelihood), vectors and matrices as arrays.
-* ``sigma2`` is ``Q / (n - p)`` everywhere (``p`` is the number of columns of
-  the design), including `LMM.fit` with ``reml=False`` and `LMM.ml_solution`,
-  EXCEPT the ML Wald test of one SNP (``association(reml=False)`` and
-  ``gwas(reml=False)``), which rescales it to ``Q / n``.  ``Q`` is the
-  weighted residual sum of squares.
+* ``sigma2`` is ``Q / (n - p)`` under REML and ``Q / n`` under ML (``p`` is
+  the number of columns of the design, ``Q`` the weighted residual sum of
+  squares), in `LMM.fit` and in the Wald tests.  `LMM.ml_solution` and
+  `LMM.log_likelihood` always return ``Q / (n - p)``.  (With
+  ``legacy_fit=True``, `LMM.fit` reports ``Q / (n - p)`` under ML too, as
+  pylmm 1.0.0 did.)
 * ``X0`` is used exactly as given; the default (``X0=None``) is a single
   column of ones.  If you pass covariates (for example from
   ``PlinkReader.read_covariates``, which returns the covariate columns only,
   no intercept) you must add the intercept yourself, or the model has none:
   ``X0 = np.column_stack([np.ones(n), cov])``.
-* The h search runs on a grid (for the default ``ngrids=100``, 0, 0.01, ...,
-  0.99) followed by a bounded refinement, so ``h = 1`` is never returned
-  (known limitation, not yet fixed; see *Known caveats* in ``AGENTS.md``).
+* ``h`` is searched on the closed interval [0, 1]: a grid (for the default
+  ``ngrids=100``, 0, 0.01, ..., 1) whose every local maximum, the two ends
+  included, is refined by a bounded search; the best is kept (`LMM.fit`).
+  ``legacy_fit=True`` (`LMM`, `gwas`, ``pylmm gwas --legacy-fit``) restores
+  the search of pylmm 1.0.0: grid 0, ..., 0.99, the first local maximum.
 * Eigenvalues of ``K`` below 1e-6 are raised to 1e-6 (the caller's arrays are
   not modified).
 * Names that are a single capital letter (``Y``, ``X``, ``X0``, ``K``) are
@@ -73,7 +76,7 @@ from typing import Any, Literal, NamedTuple, TypeAlias, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy import linalg, optimize, stats
+from scipy import linalg, optimize, special, stats
 
 from pylmm.genotypes import DEFAULT_BLOCK_SIZE, check_block_size
 
@@ -569,6 +572,133 @@ class AssociationResult(NamedTuple):
     beta_var: FloatArray
 
 
+def _log_beta_tail(t: FloatArray, df: FloatArray) -> FloatArray:
+    """``log I_x(df/2, 1/2)`` with ``x = df / (df + t^2)``: the log two-sided t p-value.
+
+    The two-sided p-value of ``t`` with ``df`` degrees of freedom is the
+    regularised incomplete beta function ``I_x(a, b)``, ``a = df/2``,
+    ``b = 1/2``, and ``I_x(a, b) = x^a (1 - x)^b / (a B(a, b)) * F``,
+    where ``F`` is the continued fraction of Numerical Recipes (``betacf``,
+    modified Lentz), evaluated here in log space.  It converges quickly
+    for ``x < (a + 1) / (a + b + 2)``, i.e. ``t^2 > 3a / (a + 1)``, which
+    holds wherever it is used (``p < 1e-280``).  ``log x`` is formed
+    without squaring ``t``, so any finite ``t`` is fine.
+    """
+    a = df / 2.0
+    b = 0.5
+    log_ratio = np.log1p((df / t) / t)  # log((df + t^2) / t^2)
+    log_x = np.log(df) - 2.0 * np.log(t) - log_ratio  # log(df / (df + t^2))
+    log1m_x = -log_ratio  # log(t^2 / (df + t^2))
+    x = np.exp(log_x)
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c = np.ones_like(t)
+    d = 1.0 - qab * x / qap
+    d = 1.0 / np.where(np.abs(d) < tiny, tiny, d)
+    h = d.copy()
+    for m in range(1, 1001):
+        m2 = 2.0 * m
+        for aa in (
+            m * (b - m) * x / ((qam + m2) * (a + m2)),
+            -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2)),
+        ):
+            d = 1.0 + aa * d
+            d = 1.0 / np.where(np.abs(d) < tiny, tiny, d)
+            c = 1.0 + aa / c
+            c = np.where(np.abs(c) < tiny, tiny, c)
+            step = d * c
+            h = h * step
+        if np.all(np.abs(step - 1.0) < 1e-16):
+            break
+    out: FloatArray = a * log_x + b * log1m_x - np.log(a) - special.betaln(a, b) + np.log(h)
+    return out
+
+
+def log_pvalue(t: ArrayLike, df: ArrayLike) -> Any:
+    """Natural log of the two-sided p-value of a t statistic, without underflow.
+
+    ``log(2 * P(T > |t|))`` for ``T ~ t(df)``.  Where the p-value is
+    representable (above ~1e-280) this is ``log(2) + log(sf)``; further out,
+    where ``2 * stats.t.sf`` underflows to 0, it is computed from the
+    incomplete beta function in log space, so it stays finite and accurate
+    for any finite ``t``.
+
+    Parameters
+    ----------
+    t : float or array
+        t statistics (the sign is ignored; ``nan`` gives ``nan``, ``inf``
+        gives ``-inf``).
+    df : float or array
+        Degrees of freedom (``N - p``, see `LMM.association`), broadcast
+        against ``t``.
+
+    Returns
+    -------
+    float or array
+        ``log p`` (a numpy float64 for scalar inputs).
+
+    See Also
+    --------
+    neg_log10_pvalue : the same as ``-log10 p``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from scipy import stats
+    >>> from pylmm.lmm import log_pvalue
+    >>> bool(np.isclose(log_pvalue(2.5, 30), np.log(2 * stats.t.sf(2.5, 30))))
+    True
+    >>> float(2 * stats.t.sf(1e5, 100))             # underflows
+    0.0
+    >>> round(float(log_pvalue(1e5, 100)), 2)       # does not
+    -923.56
+    """
+    t_arr, df_arr = np.broadcast_arrays(
+        np.abs(np.asarray(t, dtype=np.float64)), np.asarray(df, dtype=np.float64)
+    )
+    out = np.full(t_arr.shape, np.nan)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        sf = stats.t.sf(t_arr, df_arr)
+        direct = sf > 1e-280
+        out[direct] = np.log(2.0) + np.log(sf[direct])
+        out[np.isinf(t_arr) & (df_arr > 0)] = -np.inf
+        tail = ~direct & np.isfinite(t_arr) & (t_arr > 0) & (df_arr > 0)
+        if tail.any():
+            out[tail] = _log_beta_tail(t_arr[tail], df_arr[tail])
+    if out.ndim == 0:
+        return np.float64(out)
+    return out
+
+
+def neg_log10_pvalue(t: ArrayLike, df: ArrayLike) -> Any:
+    """``-log10`` of the two-sided p-value of a t statistic, without underflow.
+
+    ``-log_pvalue(t, df) / log(10)``: finite for any finite ``t``, where
+    ``p`` itself underflows to 0 (``|t|`` above ~40 for ``df`` = 100).
+
+    Parameters
+    ----------
+    t : float or array
+        t statistics.
+    df : float or array
+        Degrees of freedom, broadcast against ``t``.
+
+    Returns
+    -------
+    float or array
+        ``-log10 p`` (a numpy float64 for scalar inputs).
+
+    Examples
+    --------
+    >>> from pylmm.lmm import neg_log10_pvalue
+    >>> round(float(neg_log10_pvalue(1.984, 100)), 3)   # p = 0.05
+    1.301
+    >>> round(float(neg_log10_pvalue(1e5, 100)), 1)
+    401.1
+    """
+    return -log_pvalue(t, df) / np.log(10.0)
+
+
 def gwas(
     Y: ArrayLike,
     X: ArrayLike,
@@ -582,6 +712,7 @@ def gwas(
     kinship_ids: Sequence[Any] | None = None,
     batch: bool = True,
     block_size: int = DEFAULT_BLOCK_SIZE,
+    legacy_fit: bool = False,
 ) -> tuple[list[float], list[float]]:
     """Scan SNPs with the mixed model (a Wald test per SNP, in blocks of SNPs).
 
@@ -630,15 +761,20 @@ def gwas(
         then closed-form per-SNP formulas.  Much faster.  For
         well-conditioned covariates the statistics equal those of the
         per-SNP path up to rounding (within about 1e-9 relative in the
-        tests); with badly scaled covariates (e.g. a raw date or year
-        column) the two can differ by up to a few 1e-6 relative, and the batched
-        values are the more accurate ones (see `LMM.association_batch`).
+        tests), also with badly scaled covariates (with ``legacy_fit=True``
+        the per-SNP path inverts ``X'SX`` as 1.0.0 did, and with a raw date
+        or year column the two can then differ by a few 1e-6 relative, the
+        batched values being the more accurate; see `LMM.association_batch`).
         False tests every SNP with `LMM.association`, the code path of
         pylmm 1.0.0.  Ignored with ``refit=True``; SNPs with missing calls
         always take the per-SNP path.
     block_size : int, default `pylmm.genotypes.DEFAULT_BLOCK_SIZE` (1024)
         Number of SNPs per block with ``batch=True``.  A block takes about
         6-8 arrays of ``n * block_size`` floats of memory.
+    legacy_fit : bool, default False
+        Fit ``h`` as pylmm 1.0.0 did (see `LMM`): every null fit and refit,
+        and so every statistic, as in 1.0.0.  With ``batch=False`` the
+        results are those of pylmm 1.0.0.
 
     Returns
     -------
@@ -680,8 +816,9 @@ def gwas(
 
     Notes
     -----
-    The null ``h`` is searched on [0, 0.99] (see `LMM.fit`).  The p-value is
-    exactly 0.0 when it underflows, for very large ``|t|``.
+    The null ``h`` is searched on [0, 1] (see `LMM.fit`).  The p-value is
+    exactly 0.0 when it underflows, for very large ``|t|``; `neg_log10_pvalue`
+    gives ``-log10 p`` from ``t`` without underflow.
 
     Examples
     --------
@@ -742,7 +879,7 @@ def gwas(
 
     X0 = check_covariates(X0, len(Y))
     _check_design_size(len(Y), X0.shape[1])
-    L = LMM(Y, K, kva, kve, X0)
+    L = LMM(Y, K, kva, kve, X0, legacy_fit=legacy_fit)
     if not refit:
         L.fit(reml=reml)
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
@@ -810,7 +947,7 @@ def _gwas_one_snp(
         if not subset_testable(xs, ys, x0s, counts):
             return None
         ks = K[keep, :][:, keep]
-        ls = LMM(ys, ks, X0=x0s, validate=False)
+        ls = LMM(ys, ks, X0=x0s, validate=False, legacy_fit=L.legacy_fit)
         if refit:
             ls.fit(X=xs, reml=reml)
         else:
@@ -900,6 +1037,15 @@ class LMM:
     validate : bool, default True
         Run the input checks below.  `gwas` passes False for its per-SNP
         subsets, which it has already checked.
+    legacy_fit : bool, default False
+        Fit as pylmm 1.0.0 did, to reproduce its results exactly: `fit`
+        searches the grid 0, 0.01, ..., 0.99 only and keeps the first local
+        maximum (so ``h`` never exceeds 0.99, and a peak at 0.98 is
+        missed), reports ``sigma2 = Q / (N - p)`` under ML too and does not
+        warn about an ill-posed ML fit; `log_likelihood` takes the REML
+        determinants with ``det`` instead of ``slogdet``.  The Wald tests
+        are the same in both modes; they differ only through the fitted
+        ``h``.
 
     Attributes
     ----------
@@ -929,8 +1075,9 @@ class LMM:
         `association` overwrite with the rotated SNP.  It is shared state:
         a design returned from one call is invalidated by the next call that
         stacks a SNP.
-    ll_grid, h_grid : (ngrids,) arrays
-        After `fit`: the log-likelihood on the grid and the grid of ``h``.
+    ll_grid, h_grid : (ngrids + 1,) arrays
+        After `fit`: the log-likelihood on the grid and the grid of ``h``
+        (``ngrids`` points, 0 to 0.99, with ``legacy_fit``).
     opt_h : float
         After `fit`: the estimated heritability ``h``.
     opt_ll : float
@@ -940,6 +1087,8 @@ class LMM:
         when `fit` was given a SNP).
     opt_sigma : float
         After `fit`: ``sigma2`` at ``opt_h``.
+    legacy_fit : bool
+        The ``legacy_fit`` argument.
 
     Raises
     ------
@@ -965,13 +1114,13 @@ class LMM:
       slightly indefinite ``K`` still gives a finite likelihood.
     * Every method that takes ``reml`` defaults to REML (``reml=True``):
       `fit`, `association` and `log_likelihood`.
-    * ``sigma2 = Q / (N - p)`` everywhere, including `fit` with
-      ``reml=False``, EXCEPT the ML Wald test of `association` (and
-      `gwas`), which uses ``Q / N``.
-    * `fit` searches ``h`` on [0, 0.99] (known, not yet fixed; see *Known
-      caveats* in ``AGENTS.md``):
-      a true ``h`` of 0.99 or more is reported as 0.99, and the grid point
-      0.98 is not refined.
+    * ``sigma2 = Q / (N - p)`` under REML and ``Q / N`` under ML, in `fit`
+      and in the Wald tests (`association`, `association_batch`, `gwas`).
+    * `fit` searches ``h`` on the closed interval [0, 1] and keeps the best
+      local maximum.  At ``h = 1`` the residual variance is zero and the
+      model rests on ``K`` alone; the eigenvalue floor (above) keeps the
+      likelihood finite there, and for a singular ``K`` it is then very
+      low unless the data lie in the span of ``K``.
 
     Examples
     --------
@@ -986,7 +1135,7 @@ class LMM:
     >>> model.N, model.q
     (100, 1)
     >>> h, beta, sigma, ll = model.fit()          # null model, REML
-    >>> bool(0.0 <= h < 1.0)
+    >>> bool(0.0 <= h <= 1.0)
     True
     >>> t, p = model.association(W[:, 0])          # Wald test of one SNP
     >>> bool(0.0 <= p <= 1.0)
@@ -1011,6 +1160,7 @@ class LMM:
     opt_ll: float
     opt_beta: FloatArray
     opt_sigma: float
+    legacy_fit: bool
 
     def __init__(
         self,
@@ -1023,6 +1173,7 @@ class LMM:
         ids: Sequence[Any] | None = None,
         kinship_ids: Sequence[Any] | None = None,
         validate: bool = True,
+        legacy_fit: bool = False,
     ) -> None:
         """Build the model: validate inputs, drop missing phenotypes,
         eigendecompose ``K`` if needed, and rotate ``Y`` and ``X0``.
@@ -1031,6 +1182,8 @@ class LMM:
         """
 
         _check_eigen_args(kva, kve)
+        self.legacy_fit = bool(legacy_fit)
+        self._ml_ill_posed: bool | None = None  # computed by the first ML fit
         if X0 is None:
             n_y = len(np.asarray(Y))
             X0 = np.ones(n_y).reshape(n_y, 1)
@@ -1181,7 +1334,11 @@ class LMM:
 
         With ``S = 1 / (h * kva + 1 - h)`` (the weights in the rotated basis)
         this solves ``beta = (X'SX)^-1 X'S yt`` and computes the weighted
-        residual sum of squares ``Q = r'Sr`` with ``r = yt - X beta``.
+        residual sum of squares ``Q = r'Sr`` with ``r = yt - X beta``.  The
+        solve is a QR factorisation of ``sqrt(S) X``, accurate also when the
+        weights span many orders of magnitude (``h`` near 1 with a singular
+        ``K``) or a covariate is badly scaled; with ``legacy_fit=True`` it
+        inverts ``X'SX``, as pylmm 1.0.0 did.
 
         Parameters
         ----------
@@ -1213,24 +1370,74 @@ class LMM:
         """
 
         S = 1.0 / (h * self.kva + (1.0 - h))
-        xt = X.T * S
-        xx = _matrix_mult(xt, X)
-        xx_inv = linalg.inv(xx)
-        beta = _matrix_mult(_matrix_mult(xx_inv, xt), self.yt)
-        yt = self.yt - _matrix_mult(X, beta)
-        Q = float(np.dot(yt.T * S, yt)[0, 0])
-        sigma = Q * 1.0 / (float(self.N) - float(X.shape[1]))
+        p = X.shape[1]
+        if self.legacy_fit or not p:
+            # pylmm 1.0.0: the normal equations, inverted
+            xt = X.T * S
+            xx = _matrix_mult(xt, X)
+            xx_inv = linalg.inv(xx)
+            beta = _matrix_mult(_matrix_mult(xx_inv, xt), self.yt)
+            yt = self.yt - _matrix_mult(X, beta)
+            Q = float(np.dot(yt.T * S, yt)[0, 0])
+        else:
+            # Weighted least squares by QR of sqrt(S) X: the normal equations
+            # square the condition number, which loses digits when the weights
+            # span many orders of magnitude (h near 1 with a singular K: up to 1e6).
+            sw = np.sqrt(S)[:, None]
+            xw = X * sw
+            yw = self.yt * sw
+            qx, R = np.linalg.qr(xw)  # numpy's: less call overhead than scipy's for small p
+            r_inv = np.linalg.inv(R)  # (p, p) upper triangular, well conditioned as R is
+            beta = _matrix_mult(r_inv, _matrix_mult(qx.T, yw))
+            resid = yw - _matrix_mult(xw, beta)
+            Q = float(np.dot(resid[:, 0], resid[:, 0]))
+            xx_inv = _matrix_mult(r_inv, r_inv.T)
+            xx = _matrix_mult(R.T, R)
+        sigma = Q * 1.0 / (float(self.N) - float(p))
         return beta, sigma, Q, xx_inv, xx
+
+    def _gls_normal(
+        self, h: float, X: FloatArray
+    ) -> tuple[FloatArray, float, float, FloatArray, float]:
+        """`ml_solution` by the normal equations and a Cholesky factor, for the likelihood.
+
+        Cheaper than `ml_solution`'s QR (the likelihood is evaluated ~130
+        times per fit) and accurate enough for it; returns ``log|X'SX|`` (from
+        the Cholesky factor) in place of ``X'SX``.  Not used with ``legacy_fit``.
+        """
+        S = 1.0 / (h * self.kva + (1.0 - h))
+        p = X.shape[1]
+        xt = X.T * S
+        if p:
+            xx = _matrix_mult(xt, X)
+            try:
+                chol = np.linalg.cholesky(xx)
+            except np.linalg.LinAlgError:
+                # not positive definite: only for h outside [0, 1], where the
+                # likelihood is nan anyway (or for a singular X'SX: inv raises)
+                xx_inv = linalg.inv(xx)
+                logdet_xx = float(np.linalg.slogdet(xx)[1])
+            else:
+                c_inv = np.linalg.inv(chol)
+                xx_inv = _matrix_mult(c_inv.T, c_inv)
+                logdet_xx = 2.0 * float(np.log(np.diag(chol)).sum())
+            beta = _matrix_mult(xx_inv, _matrix_mult(xt, self.yt))
+        else:
+            xx_inv = np.zeros((0, 0))
+            beta = np.zeros((0, 1))
+            logdet_xx = 0.0
+        r = self.yt - _matrix_mult(X, beta)
+        Q = float(np.dot(r[:, 0] * S, r[:, 0]))
+        return beta, Q / (float(self.N) - float(p)), Q, xx_inv, logdet_xx
 
     def _neg_log_likelihood(
         self, h: float, X: FloatArray | None = None, reml: bool = True
     ) -> float:
-        """Objective ``-log_likelihood(h)`` for the bounded search in `_get_max`;
-        1e6 outside [0, 1].  ``X`` is already rotated and not stacked."""
-        # Objective (-LL) for the bounded search in _get_max.  That search never
-        # leaves its grid interval inside [0, 0.99], so the h > 1 guard is purely
-        # defensive; it is kept so LL is never evaluated where it is nan:
-        # for h > 1, h*kva + (1-h) can be negative and LL is nan (bug 4).
+        """Objective ``-log_likelihood(h)`` for the bounded searches of `_get_best`
+        and `_get_max`; 1e6 outside [0, 1].  ``X`` is already rotated and not stacked."""
+        # The searches never leave their grid interval inside [0, 1], so the
+        # guard is purely defensive; it is kept so LL is never evaluated where
+        # it is nan: for h > 1, h*kva + (1-h) can be negative (bug 4).
         if h < 0 or h > 1:
             return 1e6
         return -self.log_likelihood(h, X, stack=False, reml=reml).ll
@@ -1297,7 +1504,10 @@ class LMM:
 
         n = float(self.N)
         q = float(X.shape[1])
-        beta, sigma, Q, xx_inv, xx = self.ml_solution(h, X)
+        if self.legacy_fit:
+            beta, sigma, Q, xx_inv, xx = self.ml_solution(h, X)
+        else:
+            beta, sigma, Q, xx_inv, logdet_xx = self._gls_normal(h, X)
         ll = (
             n * np.log(2 * np.pi)
             + np.log(h * self.kva + (1.0 - h)).sum()
@@ -1307,17 +1517,103 @@ class LMM:
         ll = -0.5 * ll
 
         if reml:
-            ll_reml_part = (
-                q * np.log(2.0 * np.pi * sigma)
-                + np.log(linalg.det(_matrix_mult(X.T, X)))
-                - np.log(linalg.det(xx))
-            )
+            if self.legacy_fit:  # pylmm 1.0.0: det can overflow or underflow
+                ll_reml_part = (
+                    q * np.log(2.0 * np.pi * sigma)
+                    + np.log(linalg.det(_matrix_mult(X.T, X)))
+                    - np.log(linalg.det(xx))
+                )
+            else:
+                ll_reml_part = (
+                    q * np.log(2.0 * np.pi * sigma)
+                    + np.linalg.slogdet(_matrix_mult(X.T, X))[1]
+                    - logdet_xx
+                )
             ll = ll + 0.5 * ll_reml_part
 
         return LogLikResult(float(ll), beta, sigma, xx_inv)
 
+    def _get_best(self, H: FloatArray, X: FloatArray | None = None, reml: bool = True) -> Any:
+        """The maximiser of the likelihood on [0, 1], helper of `fit` (the default search).
+
+        Every local maximum of ``self.ll_grid`` is refined with a bounded
+        scalar search (``xatol=1e-10``) on its bracketing interval: an
+        interior peak ``i`` on ``[H[i-1], H[i+1]]``, a grid end that is
+        higher than its neighbour on ``[H[0], H[1]]`` or ``[H[-2], H[-1]]``.
+        The highest of the refined points, the grid peaks and the two grid
+        ends is returned; ties go to the smallest ``h``, so a flat profile
+        (``h`` not identifiable, e.g. ``K = I``) gives 0.
+
+        Parameters
+        ----------
+        H : (ngrids + 1,) array
+            The grid of ``h`` values that ``ll_grid`` was computed on, from
+            0 to 1.
+        X : array, optional
+            Rotated design passed to the objective (not stacked).
+        reml : bool, default True
+            REML or ML objective.
+
+        Returns
+        -------
+        float
+            The estimated ``h`` in [0, 1] (numpy float64).
+        """
+        ll = self.ll_grid
+        n = len(ll)
+        cands: list[tuple[float, float]] = [(float(ll[0]), float(H[0]))]
+        if n > 1:
+            cands.append((float(ll[-1]), float(H[-1])))
+        finite = ll[np.isfinite(ll)]
+        if not len(finite) or np.ptp(finite) <= 1e-12 * max(1.0, np.abs(finite).max()):
+            return np.float64(H[0])  # a profile flat to rounding: h is not identifiable
+        if n > 1:
+            brackets = []
+            if ll[0] > ll[1]:
+                brackets.append((0, 1))
+            for i in range(1, n - 1):
+                if ll[i] >= ll[i - 1] and ll[i] >= ll[i + 1] and ll[i] > min(ll[i - 1], ll[i + 1]):
+                    brackets.append((i - 1, i + 1))
+                    cands.append((float(ll[i]), float(H[i])))
+            if ll[-1] > ll[-2]:
+                brackets.append((n - 2, n - 1))
+            for lo, hi in brackets:
+                res = optimize.minimize_scalar(
+                    self._neg_log_likelihood,
+                    args=(X, reml),
+                    bounds=(H[lo], H[hi]),
+                    method="bounded",
+                    options={"xatol": 1e-10},
+                )
+                cands.append((-float(res.fun), float(res.x)))
+            if len(brackets) > 1 and self.verbose:
+                sys.stderr.write("NOTE: Found multiple optima.  Returning the best...\n")
+        best = max(c[0] for c in cands)
+        return np.float64(min(c[1] for c in cands if c[0] >= best))
+
+    def _check_ml_ill_posed(self) -> bool:
+        """Whether the ML likelihood is unbounded as ``h -> 1`` (bug 17), cached.
+
+        It is when ``K`` is singular and its null space (the eigenvectors
+        whose eigenvalue was raised to the 1e-6 floor) lies in the span of
+        the covariates ``X0``: the covariates then absorb ``y`` in those
+        directions, whose variance ``sigma2 * (1 - h)`` goes to 0 as
+        ``h -> 1``.  The common case is a centred kinship (``K 1 = 0``, as
+        `calculate_kinship` builds) from more SNPs than individuals, whose
+        null space is exactly the intercept.  REML is not affected.
+        """
+        if self._ml_ill_posed is None:
+            null = self.kva <= 1e-6
+            ill = False
+            if null.any() and self.q and null.sum() <= self.q:
+                basis = linalg.qr(self.x0t, mode="economic")[0]
+                inside = (basis[null, :] ** 2).sum(axis=1)  # 1 = in the span of X0
+                ill = bool((inside > 1.0 - 1e-6).all())
+            self._ml_ill_posed = ill
+        return self._ml_ill_posed
+
     def _get_max(self, H: FloatArray, X: FloatArray | None = None, reml: bool = True) -> Any:
-        """Locate the maximiser of the likelihood from the grid, helper of `fit`.
+        """The search of pylmm 1.0.0 (``legacy_fit=True``), helper of `fit`.
 
         Scans ``self.ll_grid`` for interior local maxima (indices 1 to n-3, so
         the last two grid points are never candidate peaks: bug 2), refines
@@ -1381,10 +1677,16 @@ class LMM:
         """Estimate the heritability ``h`` (and ``beta``, ``sigma2``) of the model.
 
         The log-likelihood is evaluated on the grid ``h = 0, 1/ngrids, ...,
-        (ngrids - 1)/ngrids`` and the first interior peak is refined with a
-        bounded search (`_get_max`).  The result is stored on the instance
-        (``opt_h``, ``opt_ll``, ``opt_beta``, ``opt_sigma``, ``ll_grid``,
-        ``h_grid``) and returned.
+        1`` (both ends included); every local maximum of the grid, an end
+        included, is refined with a bounded search inside its bracketing
+        grid interval, and the highest is kept (`_get_best`).  The result is
+        stored on the instance (``opt_h``, ``opt_ll``, ``opt_beta``,
+        ``opt_sigma``, ``ll_grid``, ``h_grid``) and returned.
+
+        With ``legacy_fit=True`` (see `LMM`) the search is pylmm 1.0.0's:
+        the grid ``0, 1/ngrids, ..., (ngrids - 1)/ngrids`` (0 to 0.99),
+        only interior peaks below the last two grid points are refined, and
+        the first is kept, else the higher grid end.
 
         Parameters
         ----------
@@ -1394,37 +1696,49 @@ class LMM:
             fit (the per-SNP refit of `gwas`); otherwise the null model with
             ``X0`` only is fitted.  Overwrites ``x0t_stack``.
         ngrids : int, default 100
-            Number of grid points on [0, (ngrids - 1)/ngrids]; with 100 the
-            grid is 0, 0.01, ..., 0.99.
+            Number of grid intervals on [0, 1] (``ngrids + 1`` points, step
+            ``1 / ngrids``); with 100 the grid is 0, 0.01, ..., 1.  (With
+            ``legacy_fit``, ``ngrids`` points 0, ..., 0.99.)
         reml : bool, default True
             REML (default) or ML.
 
         Returns
         -------
         h : float
-            Estimated heritability in [0, 0.99] (numpy float64).
+            Estimated heritability in [0, 1] (numpy float64).
         beta : (p, 1) array
             Coefficients at ``h`` (``p = q``, or ``q + 1`` with ``X``).
         sigma : float
-            ``sigma2 = Q / (N - p)``.
+            ``sigma2``: ``Q / (N - p)`` under REML, ``Q / N`` under ML (with
+            ``legacy_fit``, ``Q / (N - p)`` in both).
         log_likelihood : float
             The REML or ML log-likelihood at ``h``.
 
         Raises
         ------
+        ValueError
+            If ``ngrids`` is not a positive integer.
         scipy.linalg.LinAlgError
             If the weighted normal equations are singular (not expected after
             the constructor's checks).
 
+        Warns
+        -----
+        UserWarning
+            Under ML (``reml=False``) when the ML likelihood has no maximum:
+            ``K`` is singular and its null space lies in the span of the
+            covariates, as for a centred kinship built from more SNPs than
+            individuals with an intercept (bug 17).  The likelihood then grows
+            without bound as ``h -> 1``, held back only by the 1e-6
+            eigenvalue floor, so the ML ``h`` (an interior local maximum or a
+            spike at 1) is unreliable; use REML.  Not with ``legacy_fit``.
+
         Notes
         -----
-        ``h`` never reaches 1: the grid ends at 0.99 (known, not yet
-        fixed), so a very heritable trait is reported as 0.99.  A peak at
-        grid index 98 (h = 0.98) is not detected as an interior maximum,
-        so ``h`` snaps to 0.99 there.  ML is unbounded above for a centred
-        GRM with more SNPs than individuals and can sit at 0.99; REML is
-        preferred.  With several grid peaks the first is returned (a note
-        goes to stderr if ``verbose``).
+        A grid of step 0.01 finds every peak of the profile that is at
+        least one grid step away from the others; two peaks closer than
+        that are refined as one.  ``h = 1`` is returned when the profile
+        increases up to 1 (the residual variance is then 0).
 
         Examples
         --------
@@ -1439,23 +1753,46 @@ class LMM:
         >>> beta.shape, type(sigma).__name__
         ((1, 1), 'float')
         >>> model.h_grid[[0, -1]]
-        array([0.  , 0.99])
+        array([0., 1.])
         >>> bool(h == model.opt_h)
         True
+        >>> old = LMM(y, K, legacy_fit=True)         # pylmm 1.0.0's search
+        >>> _ = old.fit()
+        >>> old.h_grid[[0, -1]]
+        array([0.  , 0.99])
         """
-
+        if isinstance(ngrids, bool) or not isinstance(ngrids, (int, np.integer)) or ngrids < 1:
+            raise ValueError("ngrids must be a positive integer, got %r" % (ngrids,))
         if X is None:
             design = self.x0t
         else:
             self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
             design = self.x0t_stack
 
-        H = np.array(range(ngrids)) / float(ngrids)
+        if self.legacy_fit:
+            H = np.array(range(ngrids)) / float(ngrids)
+        else:
+            H = np.arange(ngrids + 1) / float(ngrids)
         grid_ll = np.array([self.log_likelihood(h, design, stack=False, reml=reml).ll for h in H])
         self.ll_grid = grid_ll
 
-        hmax = self._get_max(H, design, reml)
+        if self.legacy_fit:
+            hmax = self._get_max(H, design, reml)
+        else:
+            hmax = self._get_best(H, design, reml)
         L, beta, sigma, beta_stderr = self.log_likelihood(hmax, design, stack=False, reml=reml)
+        if not reml and not self.legacy_fit:
+            p = float(design.shape[1])
+            sigma = sigma * (float(self.N) - p) / float(self.N)  # the ML Q / N (bug 9)
+            if self._check_ml_ill_posed():
+                warnings.warn(
+                    "the ML likelihood has no maximum: the kinship matrix is singular and "
+                    "its null space lies in the span of the covariates (e.g. a centred "
+                    "kinship from more SNPs than individuals, with an intercept), so it "
+                    "grows without bound as h -> 1 except for the 1e-6 eigenvalue floor, "
+                    "and the ML estimate of h is unreliable; use REML",
+                    stacklevel=2,
+                )
 
         self.h_grid = H
         self.opt_h = hmax.sum()
@@ -1582,7 +1919,10 @@ class LMM:
         if h is None:
             h = self.opt_h
 
-        L, beta, sigma, beta_var = self.log_likelihood(h, design, stack=False, reml=reml)
+        if self.legacy_fit:  # 1.0.0: through log_likelihood (the same numbers, more work)
+            L, beta, sigma, beta_var = self.log_likelihood(h, design, stack=False, reml=reml)
+        else:
+            beta, sigma, _, beta_var, _ = self.ml_solution(h, design)
         q = len(beta)
         # ML test: sigma^2 = Q/n, the ML estimate (bug 9, fixed in 1.0.0); REML
         # keeps Q/(n-q).  The reference distribution is t(n-q) either way.
@@ -1643,8 +1983,11 @@ class LMM:
         benchmarks (the largest relative differences are for values near 0)
         and a few 1e-12 of the largest value.  With badly scaled or nearly
         collinear covariates (e.g. a raw date ~2e7 or a year column next to
-        the intercept) `association`, which inverts ``X'SX``, loses
-        precision and the two can differ by up to a few 1e-6 relative; the
+        the intercept) both stay accurate (`association` solves the
+        weighted least squares by QR; about 3e-13 of the largest ``t`` off
+        an accurate reference for a date ~2e7).  With ``legacy_fit=True``
+        `association` inverts ``X'SX`` as pylmm 1.0.0 did, loses precision
+        there, and the two can differ by up to a few 1e-6 relative; the
         batched values are then the more accurate ones (against a 40-digit
         reference, about 3e-11 vs 3e-7 off).  Centring or scaling such
         covariates makes both paths accurate.  Columns are not checked for being constant or collinear with ``X0`` (use
@@ -1740,9 +2083,10 @@ class LMM:
             Number of columns of the design (the degrees of freedom are
             ``N - q``).
         log : bool, default False
-            Return ``2 + logsf`` (the natural log of the one-sided tail, plus
-            2) instead of the p-value.  Known bug 5 (it should add ``log 2``);
-            unreachable, no caller passes it.
+            Return the natural log of the two-sided p-value instead of the
+            p-value (`log_pvalue`: accurate where the p-value underflows to
+            0).  Before this release it returned ``2 + logsf``, which was
+            wrong by ``2 - log 2`` (bug 5); no caller passed it.
 
         Returns
         -------
@@ -1755,13 +2099,10 @@ class LMM:
             If the inputs are not scalar-like (more than one test).
         """
 
-        # Known issue (bug 5, see AGENTS.md): the log option is wrong (adds 2, not log 2)
-        # and unreachable.
         ts = beta / np.sqrt(var * sigma)
-        # ps = 2.0*(1.0 - stats.t.cdf(np.abs(ts), self.N-q))
-        # sf == survival function - this is more accurate -- could also use logsf if the precision is not good enough
-        if log:
-            ps = 2.0 + (stats.t.logsf(np.abs(ts), self.N - q))
+        # sf (the survival function) is accurate in the tail, unlike 1 - cdf
+        if log:  # bug 5, fixed: it returned 2 + logsf
+            ps = np.asarray(log_pvalue(ts, self.N - q))
         else:
             ps = 2.0 * (stats.t.sf(np.abs(ts), self.N - q))
         if not len(ts) == 1 or not len(ps) == 1:

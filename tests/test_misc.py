@@ -7,7 +7,7 @@ from pylmm import lmm, misc
 def test_fit_two(hmdp):
     Y, K, snps = hmdp
     K2 = lmm.calculate_kinship(snps.copy())
-    h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(Y, K, K2)
+    h1, h2, e, beta, sigma, log_likelihood = misc.fit_two(Y, K, K2, legacy_fit=True)
     exp = h.load_kv("misc_fitTwo.kv.txt")
     got = {"h1": h1, "h2": h2, "e": e, "sigma": sigma, "LL": log_likelihood}
     for i, b in enumerate(np.asarray(beta).ravel()):

@@ -9,6 +9,9 @@ see tests/golden/README.md.  The golden file and key names keep the old flag
 names: "reml", "removeMissing", "covfile".)  That
 check is what catches a kinship that was read wrongly, e.g. silently
 zero-filled.
+
+The goldens are pylmm 1.0.0's, so every golden run passes --legacy-fit (Phase
+6.3); test_cli_default_fit_on_readme_slice checks the default search.
 """
 
 import helpers as h
@@ -56,7 +59,17 @@ def check_null_fit(output, key, api=None):
 
 
 def bed_args(base, phenofile=h.FAKE_PHENOS):
-    return ["gwas", "-v", "--bfile", base, "--kinship", h.README_KIN, "--pheno", phenofile]
+    return [
+        "gwas",
+        "-v",
+        "--legacy-fit",
+        "--bfile",
+        base,
+        "--kinship",
+        h.README_KIN,
+        "--pheno",
+        phenofile,
+    ]
 
 
 def test_cli_bed_readme_command(tmp_path):
@@ -121,6 +134,7 @@ def test_cli_tped(tmp_path):
         [
             "gwas",
             "-v",
+            "--legacy-fit",
             "--tfile",
             base,
             "--kinship",
@@ -138,7 +152,17 @@ def test_cli_tped(tmp_path):
 
 
 def emma_args(emma, kfile, pheno=h.HMDP_Y):
-    return ["gwas", "-v", "--emma-geno", emma, "--emma-pheno", pheno, "--kinship", kfile]
+    return [
+        "gwas",
+        "-v",
+        "--legacy-fit",
+        "--emma-geno",
+        emma,
+        "--emma-pheno",
+        pheno,
+        "--kinship",
+        kfile,
+    ]
 
 
 @pytest.mark.parametrize("cov", [False, True], ids=["nocov", "cov"])
@@ -207,3 +231,30 @@ def test_cli_bed_full_readme_command(tmp_path):
     )
     h.assert_pvalues_valid(got[:, 3], "full README GWAS")
     check_null_fit(log, "bed_snps1000", api="bed_reml")
+
+
+def test_cli_default_fit_on_readme_slice(tmp_path, bed50):
+    """Without --legacy-fit: the README null fit is refined inside [0, 0.01]
+    (h = 0.004 instead of 1.0.0's unrefined grid end 0), as the library's
+    default.  On these inbred-panel data (1219 mice, about 100 strains) that
+    small h moves -log10 p by up to 0.17."""
+    from pylmm import lmm
+
+    out = str(tmp_path / "out")
+    args = [a for a in bed_args(bed50) if a != "--legacy-fit"]
+    log = h.run_cli([*args, "-o", out], cwd=tmp_path)
+    hh, _ = h.null_fit_from_log(log)
+    assert hh == pytest.approx(0.004, abs=0.0005 + 1e-9)
+    ids, got = h.load_gwas_out(out)
+    _, exp = h.load_gwas_out(h.golden_path("gwas_cli_bed_snps50_reml.out"))
+    ok = ~np.isnan(exp[:, 3])
+    d = np.abs(np.log10(got[ok, 3]) - np.log10(exp[ok, 3]))
+    assert 0.05 < d.max() < 0.25
+    # the same numbers as the library's default scan
+    snps = h.read_bed_snps(h.BED_GWAS_SMALL_NSNPS, norm=True)
+    from pylmm import plink_io
+
+    reader = plink_io.PlinkReader(h.BED_BASE, type="b", pheno_file=h.FAKE_PHENOS)
+    K = h.load_readme_kinship(len(reader.indivs))
+    t_lib, _ = lmm.gwas(reader.phenos[:, 0], snps, K)
+    h.assert_fit_close(got[:, 2], t_lib, what="CLI vs library t, default fit")
