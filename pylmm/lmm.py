@@ -10,7 +10,7 @@ This module provides the numerical core of pylmm: a kinship matrix estimator
 (`calculate_kinship`), the model class `LMM` (variance-component fit, Wald
 test of one SNP or, batched, of a block of SNPs), the scan `gwas` that
 applies it to many SNPs, and the input checks they share
-(`check_covariates`, `check_ids`, `snp_estimable`).
+(`check_covariates`, `check_ids`, `snp_estimable`, `snp_estimable_columns`).
 
 The model, for ``n`` individuals, is::
 
@@ -74,6 +74,8 @@ from typing import Any, Literal, NamedTuple, TypeAlias, overload
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy import linalg, optimize, stats
+
+from pylmm.genotypes import DEFAULT_BLOCK_SIZE, check_block_size
 
 FloatArray: TypeAlias = NDArray[np.float64]
 # A float64 numpy array of any shape (the shape is given in each docstring).
@@ -267,27 +269,56 @@ def snp_estimable(
 
 # A column whose residual on span(X0), computed for the whole block, has squared
 # norm above this share of the column's own squared norm is estimable for sure
-# (see _estimable_columns); anything else is decided by snp_estimable itself.
+# (see snp_estimable_columns); anything else is decided by snp_estimable itself.
 _ESTIMABLE_CLEAR = 1e-6
 
 
-def _estimable_columns(
-    X: FloatArray, X0: FloatArray, Q: FloatArray | None = None
+def snp_estimable_columns(
+    X: ArrayLike, X0: ArrayLike, Q: FloatArray | None = None
 ) -> NDArray[np.bool_]:
-    """`snp_estimable` (default ``rtol``) of every column of ``X`` (n, m), as a boolean (m,) array.
+    """`snp_estimable` of every column of a block of SNPs, computed for the block at once.
 
-    The same decisions as calling `snp_estimable` per column, computed for
-    the block at once.  A column is accepted here only if it is finite and
-    its residual ``r`` on span(X0), computed for the whole block, has
-    ``|r|^2 > _ESTIMABLE_CLEAR * |x|^2``.  `snp_estimable` computes the same
-    quantities in a different summation order; their difference is a
-    rounding error of order ``n * eps * |x|^2`` (below 1e-9 |x|^2 for any
-    realistic n), far below the margin between ``_ESTIMABLE_CLEAR`` (1e-6)
-    and the thresholds it applies (``ESTIMABLE_RTOL * ref`` with ``ref <=
-    |x|^2``, and 1e-20 |x|^2), so it accepts these columns too.  Every other
-    column (non-finite, constant, collinear or borderline) is passed to
-    `snp_estimable` itself.
+    Parameters
+    ----------
+    X : (n, m) array
+        SNPs, one per column (a column with ``nan`` or ``inf`` is not
+        estimable).
+    X0 : (n, q) array
+        Covariates, assumed of full column rank (see `check_covariates`).
+    Q : (n, q) array, optional
+        Orthonormal basis of the columns of ``X0``, as for `snp_estimable`.
+
+    Returns
+    -------
+    (m,) bool array
+        Exactly the decisions of ``snp_estimable(X[:, j], X0)`` (default
+        ``rtol``).
+
+    Notes
+    -----
+    A column is accepted here only if it is finite and its residual ``r`` on
+    span(X0), computed for the whole block, has ``|r|^2 > 1e-6 |x|^2``.
+    `snp_estimable` computes the same quantities in a different summation
+    order; the difference is a rounding error of order ``n * eps * |x|^2``
+    (below 1e-9 |x|^2 for any realistic n), far below the margin between
+    1e-6 and the thresholds `snp_estimable` applies (``ESTIMABLE_RTOL *
+    ref`` with ``ref <= |x|^2``, and 1e-20 |x|^2), so it accepts these
+    columns too.  Every other column (non-finite, constant, collinear,
+    borderline, or with an overflowing norm) is passed to `snp_estimable`
+    itself.  `gwas` and ``pylmm gwas`` use it to select the SNPs of a block
+    for `LMM.association_batch`.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pylmm.lmm import snp_estimable_columns
+    >>> X0 = np.ones((10, 1))
+    >>> X = np.column_stack([np.arange(10.0), np.full(10, 2.0), np.r_[np.nan, np.ones(9)]])
+    >>> snp_estimable_columns(X, X0)
+    array([ True, False, False])
     """
+    X = np.asarray(X, dtype=np.float64)
+    X0 = np.asarray(X0, dtype=np.float64)
     n, q = X0.shape
     m = X.shape[1]
     if n - q - 1 < 1:
@@ -538,10 +569,6 @@ class AssociationResult(NamedTuple):
     beta_var: FloatArray
 
 
-GWAS_BLOCK_SIZE = 1000
-"""Default number of SNPs tested together by `gwas` (and ``pylmm gwas --block-size``)."""
-
-
 def gwas(
     Y: ArrayLike,
     X: ArrayLike,
@@ -554,9 +581,9 @@ def gwas(
     ids: Sequence[Any] | None = None,
     kinship_ids: Sequence[Any] | None = None,
     batch: bool = True,
-    block_size: int = GWAS_BLOCK_SIZE,
+    block_size: int = DEFAULT_BLOCK_SIZE,
 ) -> tuple[list[float], list[float]]:
-    """Scan SNPs one at a time with the mixed model (Wald test per SNP).
+    """Scan SNPs with the mixed model (a Wald test per SNP, in blocks of SNPs).
 
     For each column of ``X`` the model ``y = X0 b + x a + u + e`` (see the
     module docstring) is tested for ``a = 0``.  By default the variance
@@ -600,14 +627,18 @@ def gwas(
     batch : bool, default True
         Test the complete SNPs (no ``nan``) in blocks with
         `LMM.association_batch`: one matrix product rotates a whole block,
-        then closed-form per-SNP formulas.  Much faster, and the same
-        statistics as the per-SNP path up to rounding (at worst about
-        1e-10 relative, for values near 0).  False tests every SNP with `LMM.association`, the code
-        path of pylmm 1.0.0.  Ignored with ``refit=True``; SNPs with
-        missing calls always take the per-SNP path.
-    block_size : int, default `GWAS_BLOCK_SIZE` (1000)
-        Number of SNPs per block with ``batch=True`` (bounds the memory of
-        the rotated block, ``n * block_size`` floats).
+        then closed-form per-SNP formulas.  Much faster.  For
+        well-conditioned covariates the statistics equal those of the
+        per-SNP path up to rounding (within about 1e-9 relative in the
+        tests); with badly scaled covariates (e.g. a raw date or year
+        column) the two can differ by up to a few 1e-6 relative, and the batched
+        values are the more accurate ones (see `LMM.association_batch`).
+        False tests every SNP with `LMM.association`, the code path of
+        pylmm 1.0.0.  Ignored with ``refit=True``; SNPs with missing calls
+        always take the per-SNP path.
+    block_size : int, default `pylmm.genotypes.DEFAULT_BLOCK_SIZE` (1024)
+        Number of SNPs per block with ``batch=True``.  A block takes about
+        6-8 arrays of ``n * block_size`` floats of memory.
 
     Returns
     -------
@@ -636,8 +667,8 @@ def gwas(
     ValueError
         For an infinite or constant phenotype, ``X`` or ``X0`` with the wrong
         number of rows, nan/inf or rank-deficient ``X0``, ``n <= q + 1``
-        observations, mismatching ``ids``/``kinship_ids``, ``block_size <
-        1``, and everything `LMM` raises for ``K`` (wrong shape, nan/inf, bad
+        observations, mismatching ``ids``/``kinship_ids``, a ``block_size``
+        that is not a positive integer, and everything `LMM` raises for ``K`` (wrong shape, nan/inf, bad
         ``kva``/``kve``).
 
     Warns
@@ -672,8 +703,7 @@ def gwas(
     True
     """
     _check_eigen_args(kva, kve)
-    if block_size < 1:
-        raise ValueError("block_size must be at least 1, got %d" % block_size)
+    block_size = check_block_size(block_size)
     Y = _check_phenotype(Y)
     X = np.asarray(X, dtype=np.float64)
     n = len(Y)
@@ -737,7 +767,7 @@ def gwas(
                 t_stats[j], p_values[j] = res
         # the complete, estimable SNPs of this block, tested together
         cand = start + np.where(complete)[0]
-        batched = [int(i) for i in cand[_estimable_columns(X[:, cand], X0, Q0)]]
+        batched = [int(i) for i in cand[snp_estimable_columns(X[:, cand], X0, Q0)]]
         if batched:
             r = L.association_batch(X[:, batched], reml=reml)
             for k, i in enumerate(batched):
@@ -1608,12 +1638,16 @@ class LMM:
             Q    = (r0 - beta xr)' S (r0 - beta xr)
             beta_var = sigma2 / s,  t = beta / sqrt(beta_var)
 
-        These equal `association`'s numbers up to rounding: in the tests and
-        benchmarks at most ~1e-10 relative (for values near 0, or an
-        ill-conditioned ``X0``; the batched values were then the closer
-        ones to a QR least-squares reference) and a few 1e-12 of the largest
-        value.  Columns are
-        not checked for being constant or collinear with ``X0`` (use
+        For well-conditioned covariates these equal `association`'s numbers
+        up to rounding: within about 1e-9 relative in the tests and
+        benchmarks (the largest relative differences are for values near 0)
+        and a few 1e-12 of the largest value.  With badly scaled or nearly
+        collinear covariates (e.g. a raw date ~2e7 or a year column next to
+        the intercept) `association`, which inverts ``X'SX``, loses
+        precision and the two can differ by up to a few 1e-6 relative; the
+        batched values are then the more accurate ones (against a 40-digit
+        reference, about 3e-11 vs 3e-7 off).  Centring or scaling such
+        covariates makes both paths accurate.  Columns are not checked for being constant or collinear with ``X0`` (use
         `snp_estimable`, as `gwas` does): for such a column ``s`` is zero or
         rounding noise, and the result is ``nan`` (``s <= 0``) or
         meaningless.  The p-value is exactly 0.0 when it underflows.
