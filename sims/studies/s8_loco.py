@@ -61,7 +61,7 @@ GRID = {
     "h2": [0.0, 0.3, 0.6, 0.9],
     "n_causal": [300],
 }
-REPS = 50
+REPS = 100
 
 QUICK_GRID = {
     "panel": ["inbred_panel_quick"],
