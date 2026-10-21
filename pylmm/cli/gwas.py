@@ -218,9 +218,11 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="PATH",
         help="precomputed eigendecomposition of the kinship: a .npz file (`pylmm kinship "
         "--eigen-npz`) or the PATH.kva/PATH.kve text files (`pylmm kinship --eigen-text`).  "
-        "Its sample IDs (in the .npz, or PATH.id / PATH.grm.id for text) must be the tested "
-        "individuals (an error otherwise); its rows are reordered to them.  Without IDs its "
-        "rows are assumed to be the kinship's.  Used only when no individual is dropped",
+        "Its sample IDs (in the .npz, or PATH.id / PATH.grm.id for text) must include every "
+        "tested individual (an error otherwise); its rows are reordered to them, and with "
+        "extra individuals (dropped since) it is ignored and recomputed.  Without IDs its "
+        "rows are assumed to be the kinship's, and it is used only when no individual is "
+        "dropped or reordered",
     )
     kin.add_argument(
         "--id-match",
@@ -562,9 +564,17 @@ def _align_kinship(
     K: FloatArray, kin_ids: list[samples.SampleID], reader: plink_io.PlinkReader
 ) -> tuple[FloatArray, bool]:
     """K (rows ``kin_ids``) and ``reader`` aligned by ID; see `read_aligned_kinship`."""
-    al = samples.align_samples(
-        {"genotype file": reader.indivs, "kinship": kin_ids}, match=reader.id_match
-    )
+    try:
+        al = samples.align_samples(
+            {"genotype file": reader.indivs, "kinship": kin_ids}, match=reader.id_match
+        )
+    except samples.InputError as e:
+        if reader.id_match == "fid_iid" and all(fid == "0" for fid, _ in kin_ids):
+            raise samples.InputError(
+                "%s.  Every kinship FID is 0 (plink2 writes that for samples without an FID): "
+                "try --id-match iid" % e
+            ) from e
+        raise
     for line in al.report():
         log.warning("%s", line)
     aligned = False
@@ -654,6 +664,12 @@ def _check_input_files(args: argparse.Namespace, reader: plink_io.PlinkReader) -
                 raise UsageError("--grm %s: no such file %s" % (args.grm, fn))
     elif not os.path.isfile(args.kinship):
         raise UsageError("--kinship %s: no such file" % args.kinship)
+    elif kinship_io.kinship_format(args.kinship) == "rel":
+        id_file = kinship_io.rel_id_path(args.kinship)
+        if not os.path.isfile(id_file):
+            raise UsageError(
+                "--kinship %s: no such file %s (the IDs of a plink2 .rel)" % (args.kinship, id_file)
+            )
     # No phenotype file is a usage error (bug 14, fixed in 1.0.0: this
     # used to be os.path.isfile(None), a TypeError).
     pheno_file = args.pheno or reader.fbase + ".phenos"

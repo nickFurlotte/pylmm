@@ -27,13 +27,16 @@ rounded to about 7 significant digits (a relative error of at most
 ``2**-24``, about 6e-8).  A K written with `write_grm` and read back
 is therefore not bit for bit the K computed in float64, and a scan run on it
 differs from one run on the text kinship by rounding: see
-``tests/helpers.py`` (``GRM_FLOAT32_RTOL_P``) for the measured size.  The text
-format keeps all the digits.
+``tests/helpers.py`` (``GRM_FLOAT32_RTOL_P``) for the measured size.
+pylmm's own text kinship (``pylmm kinship -o``) keeps all the digits; a
+plink2 *text* ``.rel`` keeps only 6 significant digits (``%g``), less than a
+GRM (``REL_TEXT_*`` in ``tests/helpers.py``): prefer ``plink2 --make-rel
+bin`` (float64) or a GRM.
 
 **plink2 relationship matrices** (`read_rel`, read only): ``plink2
 --make-rel`` writes ``<prefix>.rel`` (text; the lower triangle by default,
-or the square matrix with ``square``), ``<prefix>.rel.bin`` (binary; float64,
-or float32 with ``bin4``; square by default, or the triangle) and
+or the square matrix with ``square``), ``<prefix>.rel.bin`` (binary, little-endian;
+float64, or float32 with ``bin4``; square by default, or the triangle) and
 ``<prefix>.rel.id`` (a ``#FID IID`` or ``#IID`` header, then one sample per
 line; without an FID column, the FID is ``0``, as plink2's ``.fam`` export
 writes it).  The shape and precision are told from the number of values (or
@@ -128,7 +131,7 @@ def kinship_format(path: str) -> KinshipFormat:
     return "text"
 
 
-def read_kinship_ids(path: str) -> list[SampleID]:
+def read_kinship_id_file(path: str) -> list[SampleID]:
     """Read a kinship's sample IDs: a GCTA ``.grm.id``, a plink2 ``.rel.id`` or a pylmm ``.id``.
 
     One sample per line, ``FID IID`` (further columns are ignored).  A first
@@ -245,7 +248,7 @@ def read_grm(prefix: str) -> tuple[FloatArray, list[SampleID]]:
     for fn in (bin_file, id_file):
         if not os.path.isfile(fn):
             raise InputError("GRM %s: no file %s" % (prefix, fn))
-    ids = read_kinship_ids(id_file)
+    ids = read_kinship_id_file(id_file)
     K = _read_tri_bin(bin_file, len(ids), "GRM file", id_file)
     return K, ids
 
@@ -263,7 +266,7 @@ def read_grm_counts(prefix: str) -> FloatArray:
     for fn in (n_file, id_file):
         if not os.path.isfile(fn):
             raise InputError("GRM %s: no file %s" % (prefix, fn))
-    return _read_tri_bin(n_file, len(read_kinship_ids(id_file)), "GRM count file", id_file)
+    return _read_tri_bin(n_file, len(read_kinship_id_file(id_file)), "GRM count file", id_file)
 
 
 def write_grm(
@@ -293,8 +296,9 @@ def write_grm(
     ------
     ValueError
         If K is not square, not symmetric (up to a relative 1e-6), has
-        nan/inf values, or its size or that of `n_snps` does not match `ids`,
-        or an ID field is empty or has whitespace.
+        nan/inf values or values beyond the float32 range, its size or that
+        of `n_snps` does not match `ids`, `n_snps` is negative or not
+        finite, or an ID field is empty or has whitespace.
     """
     prefix = grm_prefix(prefix)
     K = np.asarray(K, dtype=np.float64)
@@ -315,9 +319,19 @@ def write_grm(
         N = np.full((n, n), float(N))
     elif N.shape != (n, n):
         raise ValueError("n_snps has shape %s; expected a number or (%d, %d)" % (N.shape, n, n))
+    if not (np.isfinite(N).all() and (N >= 0).all()):
+        raise ValueError("n_snps must be finite and >= 0")
     rows, cols = np.tril_indices(n)
-    K[rows, cols].astype(_GRM_DTYPE).tofile(prefix + ".grm.bin")
-    N[rows, cols].astype(_GRM_DTYPE).tofile(prefix + ".grm.N.bin")
+    with np.errstate(over="ignore"):
+        tri = K[rows, cols].astype(_GRM_DTYPE)
+        tri_n = N[rows, cols].astype(_GRM_DTYPE)
+    if not (np.isfinite(tri).all() and np.isfinite(tri_n).all()):
+        raise ValueError(
+            "K or n_snps has values beyond the float32 range (|x| > %g) of a GRM"
+            % float(np.finfo(_GRM_DTYPE).max)
+        )
+    tri.tofile(prefix + ".grm.bin")
+    tri_n.tofile(prefix + ".grm.N.bin")
     write_id_file(prefix + ".grm.id", [(str(f), str(i)) for f, i in ids])
 
 
@@ -408,7 +422,7 @@ def read_rel(path: str) -> tuple[FloatArray, list[SampleID]]:
     for fn in (path, id_file):
         if not os.path.isfile(fn):
             raise InputError("plink2 relationship matrix %s: no file %s" % (path, fn))
-    ids = read_kinship_ids(id_file)
+    ids = read_kinship_id_file(id_file)
     n = len(ids)
     if path.endswith(".rel.bin"):
         size = os.path.getsize(path)
@@ -529,7 +543,8 @@ def read_eigen(path: str) -> Eigen:
     version of ``pylmm kinship --eigen-npz``, ``fid`` / ``iid`` and
     ``kinship_type``.  The text pair has no IDs of its own; they are read
     from ``path.id`` or ``path.grm.id`` (the ID file ``pylmm kinship -o
-    path`` writes, as text or ``--out-format grm``) if one exists.  The
+    path`` writes, as text or ``--out-format grm``) if one exists; if both
+    exist they must list the same samples.  The
     shapes are not checked against each other, except that the IDs must
     name the rows of Kve.
 
@@ -538,7 +553,8 @@ def read_eigen(path: str) -> Eigen:
     InputError
         If the files cannot be read, a ``.npz`` lacks ``Kva`` or ``Kve``,
         its ``fid`` / ``iid`` arrays are not two equal-length 1-d arrays,
-        or the number of IDs is not the number of rows of Kve.
+        the number of IDs is not the number of rows of Kve, or (text)
+        ``path.id`` and ``path.grm.id`` both exist and differ.
     """
     ids: list[SampleID] | None = None
     kinship_type: str | None = None
@@ -565,10 +581,16 @@ def read_eigen(path: str) -> Eigen:
                     kinship_type = str(z["kinship_type"])
         else:
             kva, kve = np.loadtxt(path + ".kva", ndmin=1), np.loadtxt(path + ".kve", ndmin=2)
-            for id_file in (path + ".id", path + ".grm.id"):
-                if os.path.isfile(id_file):
-                    ids = read_kinship_ids(id_file)
-                    break
+            found = [f for f in (path + ".id", path + ".grm.id") if os.path.isfile(f)]
+            id_lists = [read_kinship_id_file(f) for f in found]
+            if len(id_lists) == 2 and id_lists[0] != id_lists[1]:
+                raise InputError(
+                    "eigen files %s.kva/.kve: both %s and %s exist and list different samples; "
+                    "remove the stale one (pylmm kinship -o %s writes %s as text, %s with "
+                    "--out-format grm)" % (path, found[0], found[1], path, found[0], found[1])
+                )
+            if id_lists:
+                ids = id_lists[0]
     except OSError as e:
         raise InputError(
             "cannot read the --eigen decomposition %s: %s (expected a .npz file or %s.kva and "

@@ -16,7 +16,7 @@ pylmmGWAS,--covfile,yes,pylmm gwas,--covar,yes,renamed,
 pylmmGWAS,--emmaCOV,yes,pylmm gwas,--emma-covar,yes,behaviour-changed,"renamed, and now mutually exclusive with --covar (--covfile used to win)"
 pylmmGWAS,--noMean,no,pylmm gwas,--no-intercept,no,renamed,
 pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,"required (or --grm); its rows are aligned by the IDs of FILE.id if that exists; a plink2 .rel/.rel.gz/.rel.bin is read with its .rel.id (after 1.0.0)"
-pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,behaviour-changed,"after 1.0.0: a decomposition with sample IDs (.npz fid/iid, or PATH.id for text) is matched to the tested individuals: an error if one is missing, reordered if permuted; one without IDs is used as before, with a warning"
+pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,behaviour-changed,"after 1.0.0: a decomposition with sample IDs (.npz fid/iid, or PATH.id / PATH.grm.id for text) is matched to the tested individuals: an error if one is missing, reordered if permuted; one without IDs is used as before, with a warning"
 pylmmGWAS,--removeMissingGenotypes,no,pylmm gwas,--remove-missing-genotypes,no,renamed,
 pylmmGWAS,--refit,no,pylmm gwas,--refit,no,unchanged,
 pylmmGWAS,--REML,no,pylmm gwas,--reml,no,renamed,"REML is the default, so the flag can be dropped; --reml and --ml are mutually exclusive"
