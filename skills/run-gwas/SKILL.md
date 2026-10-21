@@ -55,8 +55,12 @@ standardises after mean imputation and drops MAF < 0.01 / missingness > 0.05 SNP
 `--kinship-type ibs` is EMMA's IBS kinship (to match an EMMA-era inbred-panel paper); `centered` is GEMMA
 `-gk 1`'s formula (0/1/2 counts). `-v` logs the scale of K (`kinship scale: mean diagonal
 ...`): the fitted h is on that scale (`estimate-heritability` section 3). The library's
-`calculate_kinship` gives the same K from the raw genotypes. A K from another tool works
-if it is a plain n × n text matrix; write its `.id` file (`pylmm.samples.write_id_file`).
+`calculate_kinship` gives the same K from the raw genotypes. A K from another tool: a GCTA GRM
+(`gcta --make-grm`, `plink2 --make-grm-bin`) is read natively with `--grm PREFIX` in place of
+`--kinship`, a plink2 `--make-rel` file with `--kinship X.rel` (or `.rel.bin`), both aligned by their
+IDs; a plain n × n text matrix (GEMMA) needs its `.id` file (`pylmm.samples.write_id_file`); see
+`convert-genotype-formats`. `pylmm kinship --out-format grm -o geno` writes a GRM (float32: scans on it
+match the text K's to about 1e-7).
 
 **Inbred panels** (strains with replicate animals, few distinct genotypes): a K built from the tested
 SNPs absorbs much of a causal SNP's signal, so power is low and λ_GC from one scan is noisy. Prefer LOCO
@@ -96,7 +100,7 @@ Options that matter:
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
 | `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; changes BETA's scale) |
-| `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`) |
+| `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`; the file carries the sample IDs, which must be the tested individuals: an error otherwise) |
 | `--block-size N` | 1024 | SNPs read (a BED file is decoded a block at a time) and tested together (one matrix product per block); lower it if memory is tight (about 6-8 × n × N floats) |
 | `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower); `--refit` and SNPs with missing calls always run this way. With well-conditioned covariates both give the same numbers up to rounding (within ~1e-9 relative); with a badly scaled covariate (a raw date or year column) they can differ by up to a few 1e-6 relative, and the batched default is the more accurate. Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are the same, and both paths are then accurate |
 
