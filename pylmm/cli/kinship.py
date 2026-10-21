@@ -9,7 +9,8 @@
 ``K = W W' / m`` over the ``m`` SNPs of the genotype input, with ``W`` the
 standardised genotypes (mean-imputed); monomorphic SNPs and SNPs with no
 called genotype are skipped, but still counted in ``m``.  The SNPs are read
-in blocks of ``--block-size``.
+in blocks of ``--block-size`` (`pylmm.plink_io.PlinkReader.iter_blocks`), and
+``W W'`` is summed over blocks of ``--block-size`` kept SNPs.
 
 Next to the kinship ``FILE`` (``-o``) it writes ``FILE.id``, the (FID, IID) of each row
 (one ``FID IID`` per line), which ``pylmm gwas --kinship FILE`` uses to align
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Iterator
 from typing import Any, cast
 
 import numpy as np
@@ -37,6 +39,7 @@ from pylmm.cli._common import (
     log,
     positive_int,
 )
+from pylmm.samples import InputError
 
 FloatArray = NDArray[np.float64]
 
@@ -126,7 +129,8 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="N",
         type=positive_int,
         default=1000,
-        help="the number of SNPs held in memory at once (default: 1000)",
+        help="the number of SNPs read, and summed into K, at once: a few arrays of n x N floats in "
+        "memory (default: 1000)",
     )
     add_logging_options(p)
     return p
@@ -170,18 +174,50 @@ def count_emma_snps(fn: str) -> int:
         return sum(1 for line in f if line.strip())
 
 
+def iter_snp_vectors(reader: plink_io.PlinkReader, block_size: int) -> Iterator[FloatArray]:
+    """The genotype vectors of every SNP of ``reader``, read ``block_size`` SNPs at a time.
+
+    Read with `pylmm.plink_io.PlinkReader.iter_blocks` (a BED file is decoded
+    a block at a time); each vector is bit for bit the one `iter_snps`
+    returns.  If the SNP metadata `iter_blocks` needs cannot be parsed (e.g. a
+    ``.bim`` line with fewer than 6 fields, which `iter_snps` reads), the
+    SNPs are read one at a time instead, with a warning.
+
+    Each vector is a copy, and a block is released before the next one is
+    read, so about one block (and its decoding) is held at a time.
+    """
+    try:
+        blocks = reader.iter_blocks(block_size)
+    except InputError as e:
+        log.warning("%s; reading the SNPs one at a time", e)
+        for snp, _ in reader.iter_snps():
+            yield snp
+        return
+    while True:
+        item = next(blocks, None)
+        if item is None:
+            return
+        G = item[0]
+        del item
+        for j in range(G.shape[1]):
+            yield G[:, j].copy()
+        del G  # before the next block is decoded
+
+
 def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray:
-    """``K = W W' / m`` over all SNPs of ``reader``, ``block_size`` SNPs at a time.
+    """``K = W W' / m`` over all ``m`` SNPs of ``reader``, ``block_size`` SNPs at a time.
 
     SNPs that are monomorphic or have a missing value (after the reader's
     imputation: no called genotype at all) are skipped but still counted in
-    ``m`` (bug 8 in docs/phase4-simulations.md; unchanged here).
+    ``m`` (bug 8 in docs/phase4-simulations.md; unchanged here).  ``W W'`` is
+    accumulated over blocks of ``block_size`` kept SNPs (`iter_snp_vectors`
+    reads blocks of ``block_size`` SNPs), so K does not depend on how the SNPs
+    are read.
 
     Parameters
     ----------
     reader : pylmm.plink_io.PlinkReader
-        The genotype reader, with standardised SNPs (the default).  For EMMA
-        input, ``reader.num_snps`` must be set after `iter_snps`.
+        The genotype reader, with standardised SNPs (the default).
     block_size : int
         The number of SNPs in memory at once.
 
@@ -193,42 +229,53 @@ def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray
     Raises
     ------
     UsageError
-        If no SNP with a non-constant genotype was read.
+        If the genotype input has no SNP.
     """
     n = len(reader.indivs)
     W = np.ones((n, block_size)) * np.nan
-    i = 0
+    i = 0  # SNPs read
+    j = 0  # SNPs in W
+    flushed = 0  # SNPs read when W was last added to K
     K: FloatArray | None = None
     n_all_missing = 0
     next_report = _REPORT_EVERY
-    while i < reader.num_snps:
-        j = 0
-        while j < block_size and i < reader.num_snps:
-            snp, _ = next(reader)
-            # Skip monomorphic SNPs and SNPs with no called genotype (bug 11:
-            # an all-missing SNP used to crash, or to make K all nan).
-            if not np.isfinite(snp).all() or snp.var() == 0:
-                if np.isnan(snp).all():
-                    n_all_missing += 1
-                i += 1
-                continue
-            W[:, j] = snp
-            i += 1
-            j += 1
-        if j < block_size:
-            W = W[:, list(range(0, j))]
+
+    def add(K: FloatArray | None, W: FloatArray, last: bool) -> FloatArray:
+        nonlocal next_report
         # Progress at INFO every 10000 SNPs (and at the end), else at DEBUG.
-        if i >= next_report or i >= reader.num_snps:
+        if i >= next_report or last:
             log.info("Processing first %d SNPs", i)
             next_report = (i // _REPORT_EVERY + 1) * _REPORT_EVERY
         else:
             log.debug("Processing first %d SNPs", i)
-        K = np.dot(W, W.T) if K is None else K + np.dot(W, W.T)
+        ww: FloatArray = np.dot(W, W.T)
+        return ww if K is None else K + ww
+
+    snps = iter_snp_vectors(reader, block_size)
+    snp = next(snps, None)
+    while snp is not None:
+        i += 1
+        following = next(snps, None)  # None after the last SNP
+        # Skip monomorphic SNPs and SNPs with no called genotype (bug 11:
+        # an all-missing SNP used to crash, or to make K all nan).
+        if not np.isfinite(snp).all() or snp.var() == 0:
+            if np.isnan(snp).all():
+                n_all_missing += 1
+        else:
+            W[:, j] = snp
+            j += 1
+            if j == block_size:
+                K = add(K, W, following is None)
+                j = 0
+                flushed = i
+        snp = following
+    if i > flushed:  # the SNPs after the last full block (perhaps all skipped)
+        K = add(K, W[:, list(range(0, j))], True)
     if n_all_missing:
         log.warning("skipped %d SNPs with no called genotype", n_all_missing)
     if K is None:
         raise UsageError("No SNP with a non-constant genotype was read; cannot compute a kinship.")
-    result: FloatArray = K / float(reader.num_snps)
+    result: FloatArray = K / float(i)
     return result
 
 
@@ -286,17 +333,15 @@ def run(args: argparse.Namespace) -> None:
         check_writable("--eigen-npz", npz if npz.endswith(".npz") else npz + ".npz")
     log.info("Reading PLINK input...")
     reader = open_genotypes(args)
-    reader.iter_snps()
-    if reader.type == "emma":
-        # The EMMA reader does not know its number of SNPs; count them (one
-        # cheap pass).  A wrong --emma-num-snps used to compute K from the
-        # first M SNPs, or to crash with StopIteration.
-        reader.num_snps = count_emma_snps(args.emma_geno)
-        if args.emma_num_snps is not None and args.emma_num_snps != reader.num_snps:
+    if args.emma_num_snps is not None:
+        # The SNPs are counted from the file (one cheap pass).  A wrong
+        # --emma-num-snps used to compute K from the first M SNPs, or to crash
+        # with StopIteration.
+        m = count_emma_snps(args.emma_geno)
+        if args.emma_num_snps != m:
             raise UsageError(
                 "--emma-num-snps %d: the --emma-geno file %s has %d SNPs (non-blank lines); "
-                "fix the number or leave the option out"
-                % (args.emma_num_snps, args.emma_geno, reader.num_snps)
+                "fix the number or leave the option out" % (args.emma_num_snps, args.emma_geno, m)
             )
     K = compute_kinship(reader, args.block_size)
     try:

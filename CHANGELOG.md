@@ -43,7 +43,9 @@ maps them).
 - `pylmm.lmm.snp_estimable_columns(X, X0)`: `snp_estimable` for every column of a block at once, with exactly
   its decisions.
 - `sims/bench/gwas_batch.py` (`just bench gwas_batch [--quick]`): batched vs per-SNP wall time and
-  differences, synthetic and on the bundled BED file.
+  differences, synthetic and on the bundled BED file; `--cli-baseline DIR` also times the `pylmm gwas` of
+  another checkout (e.g. an earlier revision) and checks that its output is byte-identical (every run
+  imports `pylmm` from its own tree, which is checked).
 
 ### Changed
 - `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
@@ -80,6 +82,21 @@ maps them).
   reader fails mid-file, the SNPs read before the failure are tested and written first. No SNP is tested
   twice and no line is written twice; on Ctrl-C or a failed write the lines already written stay, and the
   SNPs of the current block read but not yet written get none.
+- `pylmm gwas` and `pylmm kinship` read the genotypes a block at a time with `PlinkReader.iter_blocks`
+  (a BED file is decoded block-wise) instead of one SNP at a time; SNP IDs come from the block's
+  `variants.snp` (`SNP_<k>` for EMMA). Output files are byte-identical to before at the same
+  `--block-size` (`pylmm gwas`, and with `--no-batch` still 1.0.0's; `pylmm kinship`, which still sums
+  `W W'` over blocks of `--block-size` kept SNPs). `pylmm gwas` on 20,000 SNPs of the README data
+  (single-threaded BLAS, median of 7, `sims/bench/gwas_batch.py --cli-baseline`): 2.51 s -> 2.25 s
+  (1.1x; reading the genotypes 0.61 s -> 0.35 s, most of it now the per-SNP standardisation);
+  `pylmm kinship` on the same SNPs 2.09 s -> 2.01 s.
+- A block is read whole, so after a data or I/O error of the reader inside a block (`InputError`, e.g.
+  a truncated BED file or a bad TPED or EMMA line, or `OSError`) `pylmm gwas` reads the rest of the file
+  one SNP at a time from that block's first SNP (the SNPs already written are skipped unstandardised):
+  the SNPs before the error are written, then the error is reported, as before. An error that does not
+  recur (transient) is logged as a warning and the scan completes. Any other exception of the block
+  reader is raised as is. A `.bim` that `variants` rejects (a line with fewer than 6 fields) is read one
+  SNP at a time, with a warning at the start, by both commands, as before.
 
 ## [1.0.0] - 2026-10-19
 

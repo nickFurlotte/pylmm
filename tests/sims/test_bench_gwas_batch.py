@@ -33,3 +33,23 @@ def test_run_cli_slice(tmp_path):
     assert r is not None and r["m"] == 30
     for _abs, rel, same_nan in r["cols"].values():
         assert same_nan and rel < 1e3 * h.BATCH_RTOL
+
+
+@pytest.mark.skipif(
+    not gwas_batch.os.path.exists(gwas_batch.BED_BASE + ".bed"), reason="no bundled data"
+)
+def test_run_cli_slice_with_baseline(tmp_path):
+    """A baseline checkout (here this one): timed, and its output is byte-identical."""
+    r = gwas_batch.run_cli(30, 1, str(tmp_path), baseline=h.REPO)
+    assert r is not None and r["baseline"]["s"] > 0 and r["baseline"]["identical"]
+
+
+@pytest.mark.skipif(
+    not gwas_batch.os.path.exists(gwas_batch.BED_BASE + ".bed"), reason="no bundled data"
+)
+def test_run_cli_baseline_without_pylmm_is_an_error(tmp_path):
+    """A baseline directory that is not a pylmm checkout would time this tree again: refused."""
+    empty = tmp_path / "not-a-checkout"
+    empty.mkdir()
+    with pytest.raises(RuntimeError, match="imported from"):
+        gwas_batch.run_cli(30, 1, str(tmp_path), baseline=str(empty))

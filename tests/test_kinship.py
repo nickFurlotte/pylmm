@@ -163,3 +163,51 @@ def test_cli_kinship_full_bed_reproduces_readme_kin(tmp_path):
     h.assert_close(
         K, h.load_readme_kinship(K.shape[0]), what="pylmm kinship full BED vs data/*.pylmm.kin"
     )
+
+
+def test_cli_kinship_bim_the_block_reader_rejects(tmp_path):
+    """A 5-column .bim (no A2): read one SNP at a time, with a warning; the same K bytes."""
+    base = h.write_bed_subset(tmp_path, 300)
+    h.run_cli(["kinship", "--bfile", base, "-o", "six.kin", "--block-size", "64"], cwd=tmp_path)
+    with open(base + ".bim") as f:
+        rows = [line.split()[:5] for line in f]
+    with open(base + ".bim", "w") as f:
+        f.writelines(" ".join(r) + "\n" for r in rows)
+    log = h.run_cli(
+        ["kinship", "--bfile", base, "-o", "five.kin", "--block-size", "64"], cwd=tmp_path
+    )
+    assert "reading the SNPs one at a time" in log and "line 1" in log
+    with open(tmp_path / "six.kin", "rb") as a, open(tmp_path / "five.kin", "rb") as b:
+        assert a.read() == b.read()
+
+
+@pytest.mark.parametrize("block_size", ["1", "7", "1000"])
+def test_cli_kinship_is_w_wt_over_m_at_any_block_size(tmp_path, block_size):
+    """Missing calls, an all-missing and a constant SNP: at each block size, K is W W' / m over
+    the kept SNPs (m counting all SNPs), to rounding.  (Byte identity with the previous code
+    at the same block size was checked against it, outside the suite: see PR #25.)"""
+    base = h.write_bed_subset(tmp_path, 40)
+    with open(base + ".fam") as f:
+        n = sum(1 for _ in f)
+    nb = (n + 3) // 4
+    raw = bytearray(open(base + ".bed", "rb").read())
+    for i in range(n):  # SNP 3 all missing (code 01), SNP 4 constant (code 00)
+        sh = 2 * (i % 4)
+        raw[3 + 2 * nb + i // 4] = (raw[3 + 2 * nb + i // 4] & ~(3 << sh)) | (1 << sh)
+        raw[3 + 3 * nb + i // 4] &= ~(3 << sh)
+    for i in range(0, n, 7):  # missing calls in SNP 6
+        sh = 2 * (i % 4)
+        raw[3 + 5 * nb + i // 4] = (raw[3 + 5 * nb + i // 4] & ~(3 << sh)) | (1 << sh)
+    with open(base + ".bed", "wb") as f:
+        f.write(bytes(raw))
+    out = str(tmp_path / "k.txt")
+    log = h.run_cli(
+        ["kinship", "--bfile", base, "-o", out, "--block-size", block_size], cwd=tmp_path
+    )
+    assert "skipped 1 SNPs with no called genotype" in log
+    K = np.loadtxt(out)
+    from pylmm.plink_io import PlinkReader
+
+    W = np.column_stack([g for g, _ in PlinkReader(base).iter_snps()])
+    keep = np.isfinite(W).all(axis=0) & (W.var(axis=0) > 0)
+    h.assert_close(K, W[:, keep] @ W[:, keep].T / W.shape[1], what="K")

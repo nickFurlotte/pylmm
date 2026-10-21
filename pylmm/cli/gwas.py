@@ -13,8 +13,8 @@ once (or per SNP with ``--refit``) and writes one tab-separated line per SNP:
 
 The steps are separate functions: `load_inputs` (genotypes, phenotype,
 covariates, kinship and its eigendecomposition, aligned by sample ID),
-`fit_null_model` and `scan` (the per-SNP tests, in blocks of ``--block-size``
-SNPs, written in file order).
+`fit_null_model` and `scan` (the per-SNP tests, on blocks of ``--block-size``
+SNPs read with `pylmm.plink_io.PlinkReader.iter_blocks`, written in file order).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from pylmm.cli._common import (
     log,
     positive_int,
 )
-from pylmm.genotypes import DEFAULT_BLOCK_SIZE, check_block_size
+from pylmm.genotypes import DEFAULT_BLOCK_SIZE, Variants, check_block_size
 from pylmm.lmm import (
     LMM,
     AssociationResult,
@@ -253,8 +253,9 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="N",
         type=positive_int,
         default=DEFAULT_BLOCK_SIZE,
-        help="the number of SNPs read and tested together: the complete SNPs of a block (no "
-        "missing call) are rotated with one matrix product and tested in closed form; memory "
+        help="the number of SNPs read and tested together: a block is read at once (a BED "
+        "file is decoded a block at a time), and its complete SNPs (no missing call) are "
+        "rotated with one matrix product and tested in closed form; memory "
         "is about 6-8 x n x N floats (default: %d)" % DEFAULT_BLOCK_SIZE,
     )
     performance.add_argument(
@@ -940,14 +941,22 @@ def iter_block_results(
             yield _test_snp(G[:, j], inputs, L, Q0, args, counts)
 
 
+def _log_progress(count: int, b: int) -> None:
+    """Log ``At SNP k`` for every multiple k of 1000 among SNPs ``count + 1 .. count + b``."""
+    for k in range((count // 1000 + 1) * 1000, count + b + 1, 1000):
+        log.info("At SNP %d", k)
+
+
 def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> int:
     """Test every SNP of ``inputs.reader`` and write a result line for each.
 
-    The SNPs are read in blocks of ``--block-size`` and tested together
-    (`iter_block_results`); each line is written, in file order, as soon as
-    its result is known.  A SNP that cannot be tested (constant, collinear
-    with the covariates, or too few called individuals) gets a line of
-    ``nan``.
+    The SNPs are read in blocks of ``--block-size``
+    (`pylmm.plink_io.PlinkReader.iter_blocks`; a BED file is decoded a block
+    at a time) and tested together (`iter_block_results`); each line is
+    written, in file order, as soon as its result is known.  The SNP IDs are
+    the block's ``variants.snp`` (``SNP_<k>`` for EMMA input).  A SNP that
+    cannot be tested (constant, collinear with the covariates, or too few
+    called individuals) gets a line of ``nan``.
 
     On an error, the lines written are those of 1.0.0's one-SNP-at-a-time
     scan: if the reader fails (e.g. a truncated file), the SNPs read before
@@ -958,6 +967,19 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     write, the lines already written stay; the SNPs of the current block that
     were read but not yet written get none.
 
+    A block is read whole, so a reader error inside a block (an `InputError`
+    such as a truncated BED file or a bad TPED or EMMA line, or an `OSError`)
+    loses the block's earlier SNPs.  The scan then reads the rest of the
+    file one SNP at a time (`_scan_snps`, buffered into blocks of
+    ``--block-size`` as before), from the first SNP of that block: the SNPs
+    before the error are tested and written and the error is raised, as
+    above (an error that does not recur there, e.g. a transient one, is
+    logged as a warning and the scan continues).  If the SNP metadata
+    `iter_blocks` needs cannot be parsed (a ``.bim`` line with fewer than 6
+    fields, which `iter_snps` reads), the whole scan reads one SNP at a
+    time, with a warning at the start.  Any other exception from the block
+    reader (a bug, not a data or I/O error) is raised as is.
+
     Returns
     -------
     int
@@ -967,20 +989,120 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
     counts: dict[str, int] = {}
     count = 0
-    snps: Iterator[tuple[FloatArray, str]] = iter(inputs.reader)
-
-    def test_and_write(block: list[tuple[FloatArray, str]]) -> None:
-        if not block:
-            return
-        G = np.column_stack([snp for snp, _ in block])
-        results = iter_block_results(G, inputs, L, Q0, args, counts)
-        for (_, snp_id), result in zip(block, results):
-            if result is None:
-                write_result(out, snp_id, np.nan, np.nan, np.nan, np.nan)
-            else:
-                write_result(out, snp_id, *result)
 
     write_header(out)
+    error: Exception | None = None
+    blocks: Iterator[tuple[FloatArray, Variants]] | None = None
+    try:
+        blocks = inputs.reader.iter_blocks(args.block_size)
+    except _READ_ERRORS as e:  # e.g. a .bim the variant metadata cannot parse
+        log.warning("%s; reading the SNPs one at a time (slower)", e)
+        return _finish(_scan_snps(inputs, L, args, out, Q0, counts, 0), counts)
+    try:
+        while blocks is not None:
+            # Only the reader is guarded: an error in a test or a write is raised as is.
+            try:
+                G, variants = next(blocks)
+            except StopIteration:
+                break
+            except _READ_ERRORS as e:
+                error = e
+                break
+            _log_progress(count, G.shape[1])
+            count += G.shape[1]
+            _write_block(out, G, variants.snp, inputs, L, Q0, args, counts)
+            del G, variants  # before the next block is decoded
+    finally:
+        close = getattr(blocks, "close", None)
+        if close is not None:
+            close()
+    if error is not None:
+        # Read the SNPs of the failed block one at a time, so that every SNP
+        # before the error is written (and the error raised) as before blocks.
+        restart = count + 1
+        log.debug(
+            "reading the block of SNP %d failed (%r): reading one SNP at a time", restart, error
+        )
+        count = _scan_snps(inputs, L, args, out, Q0, counts, count)
+        log.warning(
+            "reading SNPs in blocks failed from SNP %d (%s), but reading them one at a time "
+            "worked; the results are complete",
+            restart,
+            error,
+        )
+    return _finish(count, counts)
+
+
+_READ_ERRORS = (samples.InputError, OSError)
+"""The block reader's data and I/O errors, after which `scan` reads one SNP at a time."""
+
+
+def _finish(count: int, counts: dict[str, int]) -> int:
+    """Log the count of SNPs that are nan for lack of rank; return ``count``."""
+    if counts.get("collinear"):
+        log.info(
+            "%d of %d SNPs are nan because, on the individuals with a called genotype, "
+            "the covariates are no longer of full rank",
+            counts["collinear"],
+            count,
+        )
+    return count
+
+
+def _write_block(
+    out: IO[str],
+    G: FloatArray,
+    snp_ids: Any,
+    inputs: GwasInputs,
+    L: LMM,
+    Q0: FloatArray,
+    args: argparse.Namespace,
+    counts: dict[str, int],
+) -> None:
+    """Test the SNPs of a block (`iter_block_results`) and write their lines in order."""
+    results = iter_block_results(G, inputs, L, Q0, args, counts)
+    for snp_id, result in zip(snp_ids, results):
+        if result is None:
+            write_result(out, snp_id, np.nan, np.nan, np.nan, np.nan)
+        else:
+            write_result(out, snp_id, *result)
+
+
+def _scan_snps(
+    inputs: GwasInputs,
+    L: LMM,
+    args: argparse.Namespace,
+    out: IO[str],
+    Q0: FloatArray,
+    counts: dict[str, int],
+    start: int,
+) -> int:
+    """`scan` from SNP ``start + 1``, reading one SNP at a time (`iter_snps`); the SNP count.
+
+    The fallback of `scan` when a block cannot be read: the SNPs are
+    buffered into blocks of ``--block-size`` and tested as in `scan`; if the
+    reader fails, the SNPs read before the failure are tested and written,
+    then the error is raised.
+    """
+    snps: Iterator[tuple[FloatArray, str]] = iter(inputs.reader)
+    # Skip the SNPs already written from blocks; unstandardised, which is
+    # most of the cost of reading a SNP.
+    reader = inputs.reader
+    norm = reader.norm_genotype
+    reader.norm_genotype = False
+    try:
+        for _ in range(start):
+            if next(snps, None) is None:
+                return start
+    finally:
+        reader.norm_genotype = norm
+    count = start
+
+    def test_and_write(block: list[tuple[FloatArray, str]]) -> None:
+        if block:
+            G = np.column_stack([snp for snp, _ in block])
+            _write_block(out, G, [snp_id for _, snp_id in block], inputs, L, Q0, args, counts)
+
     while True:
         block: list[tuple[FloatArray, str]] = []
         try:
@@ -1001,13 +1123,6 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
         test_and_write(block)
         if len(block) < args.block_size:
             break
-    if counts.get("collinear"):
-        log.info(
-            "%d of %d SNPs are nan because, on the individuals with a called genotype, "
-            "the covariates are no longer of full rank",
-            counts["collinear"],
-            count,
-        )
     return count
 
 
