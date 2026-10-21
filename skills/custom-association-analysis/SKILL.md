@@ -114,9 +114,9 @@ for c in ZZ:
 print("lead SNP: p=%.1e with K from all SNPs, %.1e with LOCO" % (results["trait"][lead], p_loco[lead]))
 ```
 
-With missing calls, this `K_loco` is not exactly `calculate_kinship` of the other chromosomes' SNPs (the two
-normalise missing calls differently, a known, not yet fixed issue; max entry difference 0.16 with 10% missing calls in a
-check); with complete genotypes they agree. For a file too large for memory, accumulate `ZZ[c]` while
+This `K_loco` is `calculate_kinship` of the other chromosomes' raw genotypes (`norm_genotype=False`; the same
+missing-call convention as the reader's `W`), to rounding, unless some SNPs are constant: they are zeros in
+`W` and count in `m_all` here, but not in `calculate_kinship`'s `m`. For a file too large for memory, accumulate `ZZ[c]` while
 streaming SNP blocks; each block carries its SNPs' chromosomes:
 
 ```python

@@ -51,7 +51,7 @@ Y = X0 b + x a + u + e,    u ~ N(0, h s2 K),    e ~ N(0, (1 - h) s2 I)
   P3D). `refit=True` (`--refit`) refits them per SNP.
 * REML is the default everywhere (`reml=True`, `--reml`); `reml=False` / `--ml` is maximum likelihood.
 
-The modules: `pylmm.lmm` (`calculate_kinship`, `LMM`, `gwas`), `pylmm.plink_io` (`PlinkReader`),
+The modules: `pylmm.lmm` (`LMM`, `gwas`), `pylmm.kinship` (`calculate_kinship`, `kinship_scale`), `pylmm.plink_io` (`PlinkReader`),
 `pylmm.genotypes` (variant metadata, `ArraySource`, the `GenotypeSource` interface), `pylmm.samples`
 (sample IDs and alignment), `pylmm.misc` (`fit_two`, two kinships). Their docstrings are
 complete (numpydoc, with examples): `help(pylmm.lmm.LMM)`.
@@ -81,8 +81,8 @@ print(W.shape, ids[:2], snp_names[0])
 assert W.shape == (1219, 2000) and ids[0] == ("1", "1")
 ```
 
-**Genotype coding.** By default (`norm_genotype=True`) each SNP is standardised: missing calls are replaced
-by the mean, then the SNP is centred and scaled to variance 1. With `norm_genotype=False` you get the raw
+**Genotype coding.** By default (`norm_genotype=True`) each SNP is standardised: centred and scaled with the
+mean and SD of its called genotypes, then a missing call is set to 0 (the mean). With `norm_genotype=False` you get the raw
 value, the **fraction of copies of A2**, the second allele of the `.bim` line (column 6): 0.0, 0.5, 1.0, or
 nan for a missing call. It is not a 0/1/2 count. A plink2-written `.bim` has A1 = ALT and A2 = REF, so the
 counted allele is REF.
@@ -218,24 +218,30 @@ vector together.
 
 ## 4. Kinship
 
-Two implementations of the realized relationship matrix `K = Z Z' / m` (`Z` the standardised SNPs):
+`calculate_kinship(W)` (in `pylmm.kinship`, also importable from `pylmm.lmm`) and `pylmm kinship` (the
+command line, which also writes `K.id`, the `FID IID` of each row) compute the same kinship from the same
+SNPs, to the last bit at the same block size. Three kinds (`kind=` / `--kinship-type`):
 
-* `pylmm kinship` (the command line) streams the SNPs of a file through `PlinkReader`'s standardisation
-  (centre and scale over the called values, then put 0 for missing calls) and writes `K` plus `K.id`, the
-  `FID IID` of each row. In Python that is `W @ W.T / m` for `W` read with the default
-  `norm_genotype=True`.
-* `calculate_kinship(W)` mean-imputes, then standardises each column of whatever `W` you give it (0/1/2,
-  dosages, fractions, already standardised).
+| kind | K | use |
+|---|---|---|
+| `standardized` (default) | `Z Z' / m`, `Z` the SNPs standardised to mean 0 and variance 1 (GCTA-style GRM, GEMMA `-gk 2`) | most analyses |
+| `centered` | `C C' / m`, `C` the centred SNPs, not scaled (GEMMA `-gk 1`); the CLI counts 0/1/2 copies of A2 | matching GEMMA's default |
+| `ibs` | EMMA's identity-by-state kinship: the share of alleles two individuals have in common, diagonal 1 (Kang et al. 2008) | matching EMMA-era inbred-panel papers |
 
-They agree when no call is missing. With missing calls the reader's SNPs have variance below 1, so the
-command-line K is a little smaller (known, not yet fixed; see *Known caveats* in AGENTS.md). Both skip monomorphic SNPs but count
-them in `m`.
+One convention for missing calls: each SNP is centred (and, for `standardized`, scaled) with the mean and
+SD of its *called* genotypes, and a missing call is set to the mean, as `PlinkReader`'s standardisation
+does; `ibs` follows EMMA (missing calls at the SNP's mean). SNPs with no called genotype, and for
+`standardized` and `centered` constant SNPs, are skipped and not counted in `m`. Give
+`calculate_kinship` the raw genotypes (`norm_genotype=False`, or 0/1/2 counts): a matrix already
+standardised by the reader has its missing calls at 0 and is standardised again.
 
 ```python
-from pylmm.lmm import calculate_kinship
+from pylmm.kinship import calculate_kinship, kinship_scale
 
-K_2000 = calculate_kinship(W)              # from the 2000 SNPs above (67 missing calls in SNP 1 alone)
-print(K_2000.shape, round(float(np.mean(np.diag(K_2000))), 4))
+with PlinkReader(BED, norm_genotype=False) as reader:      # raw 0 / 0.5 / 1 / nan
+    W_raw = np.column_stack([g for g, _ in itertools.islice(reader.iter_snps(), 2000)])
+K_2000 = calculate_kinship(W_raw)          # from the 2000 SNPs above (67 missing calls in SNP 1 alone)
+print(K_2000.shape, kinship_scale(K_2000))
 ```
 
 To try the command line on the same 2000 SNPs, copy them to a small BED file set (byte for byte, with
@@ -246,15 +252,14 @@ plink_tools.subset_bed(BED, "mini", np.arange(2000))
 ```
 
 ```bash
-uv run pylmm kinship --bfile mini -o mini.kin -v
+uv run pylmm kinship --bfile mini -o mini.kin -v 2>&1 | grep "kinship scale"
 head -n 2 mini.kin.id
 ```
 
 ```python
 K_cli = np.loadtxt("mini.kin")
-assert np.allclose(K_cli, W @ W.T / W.shape[1], atol=1e-12)      # the reader's standardisation
-print("mean diagonal: CLI %.4f, calculate_kinship %.4f; max |difference| %.3f"
-      % (np.diag(K_cli).mean(), np.diag(K_2000).mean(), np.abs(K_cli - K_2000).max()))
+assert np.array_equal(K_cli, K_2000)                              # the library's K, bit for bit
+assert np.allclose(K_cli, W @ W.T / W.shape[1], atol=1e-12)      # = the reader's standardised SNPs
 assert samples.read_id_file("mini.kin.id") == ids
 
 # The rest of this guide uses the kinship of all 98,740 SNPs, shipped with the example data
@@ -262,6 +267,25 @@ assert samples.read_id_file("mini.kin.id") == ids
 K_FILE = BED + ".pylmm.kin"                 # it has its ID file, K_FILE + ".id"
 K = np.loadtxt(K_FILE)
 ```
+
+**The scale of K** is the scale of `h` (section 5): `kinship_scale(K)` returns its mean diagonal and its
+centred mean diagonal `c = trace(P K P) / (n - 1)`, and `pylmm kinship -v` logs both. The standardized K
+has a mean diagonal of about 1 - (the missing rate) (0.987 for the bundled BED data, 1.3% missing); the
+IBS K has a diagonal of 1 but, for related strains, `c` well below 1 (0.34 on the bundled HMDP strains),
+so its `h` is larger for the same data: compare the PVE `h c / (h c + 1 - h)`, not `h`. Nothing is
+rescaled for you.
+
+```python
+with PlinkReader("data/hmdp.liver.snps", type="emma", norm_genotype=False) as emma:
+    G_hmdp = np.column_stack([g for g, _ in itertools.islice(emma.iter_snps(), 3000)])  # 94 strains, 0/1
+for kind in ("standardized", "ibs"):
+    print(kind, kinship_scale(calculate_kinship(G_hmdp, kind=kind)))
+```
+
+pylmm 1.0.0 had two conventions (the library imputed before standardising, the command line did not:
+mean diagonal 1.000 vs 0.987 on the bundled BED data) and counted skipped SNPs in `m`, shrinking K by the
+share of monomorphic SNPs (7.5% on the HMDP strains); bug 8. `calculate_kinship(W, legacy=True)` and
+`pylmm kinship --legacy-kinship` reproduce each 1.0.0 K exactly.
 
 * The `.id` sidecar is what lets `pylmm gwas` (and `PlinkReader(k_file=...)`) align K to the genotype
   file by ID. Without it K's rows are *assumed* to be in genotype order: `pylmm gwas --bfile`/`--tfile`
@@ -271,8 +295,6 @@ K = np.loadtxt(K_FILE)
 * EMMA genotypes have no IDs, so with `--emma-geno` (or `type="emma"`) K's rows are always the genotype
   columns in order: no `.id` is needed and none is warned about; a `K.id` that exists is ignored, with a
   warning. Check the order yourself (keep the strain list you wrote the columns from).
-* SNPs that are monomorphic or all missing are skipped but still counted in `m`, so K shrinks if many SNPs
-  are monomorphic (a known issue, bug 8). This changes `h` (section 5) but not t or p.
 * `calculate_kinship(W, center=True)` returns a centred K scaled so that `trace(P K P) = n - 1`.
 * With IDs, `PlinkReader(prefix, k_file="K")` reads K, reorders it to the genotype file, and drops
   genotype individuals that are not in it from `indivs`, `phenos` and the genotype vectors.
@@ -310,7 +332,8 @@ assert 0.4 < h < 0.8
 **Is `h` comparable with a published h²?** `h` is the share of `s2` on the scale of K. It equals the
 proportion of phenotypic variance explained only if K is scaled so that the average variance it implies is
 1 (Gower's centring: `trace(P K P) / (n - 1) = 1`, `P = I - 11'/n`); a mean diagonal of 1 is the usual
-approximation. A kinship from another tool, or one shrunk by monomorphic SNPs, may not be. Dividing K by
+approximation. A kinship from another tool, or another kind (`ibs`), may not be (`kinship_scale`, section
+4). Dividing K by
 `c` changes `h` exactly as `h' = h c / (h c + 1 - h)`, and changes no test statistic:
 
 ```python
@@ -561,7 +584,7 @@ pylmm's default path (REML null fit, Wald test) was checked by simulation studie
 * **Power ≥ OLS**, much higher under population structure (e.g. 0.94 vs 0.15 at h² = 0.5, 5% variance
   explained, Balding–Nichols), and OLS is badly inflated there.
 * **Known limits** (not yet fixed; see *Known caveats* in AGENTS.md): ĥ capped at 0.99; ML unidentified with a centred K from m > n
-  SNPs; kinship normalisation (bug 8).
+  SNPs. (The kinship normalisation, bug 8, is fixed: section 4.)
 * The golden tests (`tests/golden/`) pin every number of the original 2013 code: the CLI output is
   byte-identical for the default path.
 
