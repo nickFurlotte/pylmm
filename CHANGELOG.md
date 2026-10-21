@@ -25,8 +25,8 @@ maps them).
   `(len(indivs), b)`, bit for bit the vectors of `iter_snps` (standardised or not), for the individuals and
   `norm_genotype` of the time of the call. A BED file is decoded a block at a time: with the `.bim` read in
   both, 2.3-6.0x the throughput of `iter_snps` unstandardised and 1.0-1.6x standardised (block sizes 256 to
-  4096, full and `--quick` runs of `sims/bench/bed_blocks.py`). `iter_snps` and the CLI output are
-  unchanged.
+  4096, full and `--quick` runs of `sims/bench/bed_blocks.py`; standardised, 2.1-2.3x on the bundled file
+  since blocks are standardised at once, see Changed). `iter_snps` and the CLI output are unchanged.
 - `pylmm.genotypes`: the `GenotypeSource` protocol (`sample_ids`, `num_samples`, `variants`,
   `norm_genotype`, `iter_blocks`), implemented by `PlinkReader` and by the new `ArraySource`, which wraps an in-memory
   `(n, m)` genotype matrix (e.g. read from VCF, BGEN or VCF Zarr with another library) with optional IDs and
@@ -51,6 +51,16 @@ maps them).
 - `normalize_genotype` (per-SNP standardisation) extracts the called values once: ~40% faster, results
   bit for bit unchanged for one SNP (1-d input, the documented use; 2-d input also gives the 1.0.0 result,
   tested on a few arrays).
+- Standardised blocks (`PlinkReader.iter_blocks` for BED, TPED and EMMA input, `ArraySource.iter_blocks`,
+  so also `pylmm gwas` and `pylmm kinship`): `normalize_genotype` called on each SNP in a Python loop -> a
+  whole block standardised in a few vectorised passes, with every SNP's float64 bits unchanged (the sums
+  are taken over the same values in the same order and layout; a per-row-length probe falls back to the
+  per-SNP loop if a numpy ever sums otherwise; fuzzed bit for bit in CI, numpy 1.23.2 to current; SNPs of
+  more than 2048 individuals with missing calls still go one by one, which is as fast there). Standardised
+  `iter_blocks` throughput on the bundled BED file: 1.6-1.7x (2.1-2.3x that of `iter_snps`, was 1.3-1.4x);
+  `pylmm gwas` on 20,000 README SNPs (1 BLAS thread, 15 interleaved runs): 2.27 s -> 2.11 s. Output of
+  `pylmm gwas` and `pylmm kinship` byte-identical. `sims/bench/bed_blocks.py` reports the before/after
+  column ("vs per-SNP std"); `sims/bench/gwas_batch.py --cli-only` times only `pylmm gwas`.
 
 #### Batched association tests (faster scans)
 - `gwas()` and `pylmm gwas` (without `--refit`) test the SNPs without missing calls in blocks: one matrix

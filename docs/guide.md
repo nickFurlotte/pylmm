@@ -113,7 +113,7 @@ print(int(on_chr2.sum()), "SNPs on chromosome 2, from bp", variants.bp[on_chr2].
 **Blocks of SNPs.** `reader.iter_blocks(block_size)` yields `(G, variants)`: `G` is an `(n, b)` float64
 matrix of `b <= block_size` SNPs (the same values as `iter_snps`, bit for bit, standardised or not) and
 `variants` is the metadata of those SNPs. A BED file is decoded a block at a time, 2-6x faster than
-one SNP at a time (but only up to 1.6x when standardising, which then takes most of the time). A block is
+one SNP at a time (about 2x when standardising, which is done for the whole block at once). A block is
 `8 * n * block_size` bytes (default 1024 SNPs: 10 MB for 1219 mice); pick a smaller block for a very
 large `n`. Process a genome block by block instead of building the full matrix:
 
@@ -510,8 +510,8 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
 * SNPs with missing calls under `--remove-missing-genotypes` (or library `gwas`) each cost an
   eigendecomposition; `--refit` costs a likelihood search per SNP.
 * Process SNPs in blocks with `reader.iter_blocks(block_size)` rather than building a full genotype matrix;
-  for a BED file it also decodes 2-6x faster than `iter_snps` (unstandardised; 1.0-1.6x standardised, where
-  the per-SNP standardisation dominates; `sims/bench/bed_blocks.py` measures it). `pylmm gwas` and
+  for a BED file it also decodes 2-6x faster than `iter_snps` (unstandardised; about 2x standardised, on
+  1219 mice; `sims/bench/bed_blocks.py` measures it). `pylmm gwas` and
   `pylmm kinship` read their genotypes this way.
 
 ```bash
