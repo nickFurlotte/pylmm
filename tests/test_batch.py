@@ -1,9 +1,11 @@
 """Batched Wald tests (Phase 6.1): `LMM.association_batch`, `gwas(batch=...)` and
 ``pylmm gwas --block-size / --no-batch``.
 
-The batched path must give the numbers of the one-SNP-at-a-time path (the
-1.0.0 code, ``batch=False`` / ``--no-batch``) up to rounding
-(``helpers.BATCH_RTOL``), nan in the same places, in the same order.  The
+On well-conditioned designs the batched path must give the numbers of the
+one-SNP-at-a-time path (the 1.0.0 code, ``batch=False`` / ``--no-batch``) up
+to rounding (``helpers.BATCH_RTOL``), nan in the same places, in the same
+order; on a badly scaled covariate, where the 1.0.0 path loses precision, it
+must match an accurate reference (``helpers.BATCH_REF_RTOL``).  The
 goldens (test_association.py, test_cli_gwas.py) run on the default, batched,
 path and are not touched.
 """
@@ -11,19 +13,21 @@ path and are not touched.
 import contextlib
 import io
 import os
+import warnings
 
 import helpers as h
 import numpy as np
 import pytest
+import scipy
 from scipy import linalg
 
 from pylmm.lmm import (
     LMM,
     AssociationResult,
-    _estimable_columns,
     calculate_kinship,
     gwas,
     snp_estimable,
+    snp_estimable_columns,
 )
 
 
@@ -44,13 +48,23 @@ def _covariates(kind, n, rng):
     cov = rng.normal(size=(n, 3)) * [1.0, 100.0, 1e-3]  # very different scales
     if kind == "covariates":
         return np.column_stack([np.ones(n), cov])
-    assert kind == "no-intercept"
-    return cov
+    if kind == "no-intercept":
+        return cov
+    assert kind == "empty"
+    return np.zeros((n, 0))
 
 
-# X0 with no column at all is left out: the null fit (LMM.fit, scipy.linalg.inv of a 0 x 0
-# matrix) fails on it with the floor scipy, 1.9.2, before either test path runs.
-COVARIATE_KINDS = ["intercept", "covariates", "no-intercept"]
+# An X0 with no column (q = 0): the null fit (LMM.fit, scipy.linalg.inv of a 0 x 0 matrix)
+# fails on it before scipy 1.14 (checked: 1.13.1 fails, 1.14.0 works), in 1.0.0 as on
+# either path here, so the comparison needs scipy >= 1.14.
+OLD_SCIPY = tuple(int(v) for v in scipy.__version__.split(".")[:2]) < (1, 14)
+EMPTY_X0 = pytest.param(
+    "empty",
+    marks=pytest.mark.skipif(
+        OLD_SCIPY, reason="LMM.fit with q = 0 needs scipy >= 1.14 (fails in 1.0.0 too)"
+    ),
+)
+COVARIATE_KINDS = ["intercept", "covariates", "no-intercept", EMPTY_X0]
 
 
 @pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
@@ -61,7 +75,7 @@ def test_association_batch_matches_association(kind, reml):
     L = LMM(y, K, kva, kve, X0)
     L.fit(reml=reml)
     cols = [j for j in range(X.shape[1]) if snp_estimable(X[:, j], L.X0)]
-    assert len(cols) == X.shape[1] or kind == "no-intercept"
+    assert len(cols) == X.shape[1] or kind in ("no-intercept", "empty")
     ref = np.array([L.association(X[:, j], reml=reml, return_beta=True) for j in cols])
     res = L.association_batch(X[:, cols], reml=reml)
     assert isinstance(res, AssociationResult)
@@ -114,7 +128,7 @@ def _hard_columns(X0, rng):
     return np.column_stack(cols)
 
 
-@pytest.mark.parametrize("kind", [*COVARIATE_KINDS, "empty"])
+@pytest.mark.parametrize("kind", ["intercept", "covariates", "no-intercept", "empty"])
 def test_estimable_columns_equals_snp_estimable(kind):
     """The vectorised estimability check makes exactly the decisions of snp_estimable."""
     rng = np.random.default_rng(3)
@@ -123,11 +137,11 @@ def test_estimable_columns_equals_snp_estimable(kind):
     X0 = np.ones((n, 1)) if X0 is None else X0
     X = _hard_columns(X0, rng)
     expected = [snp_estimable(X[:, j], X0) for j in range(X.shape[1])]
-    assert _estimable_columns(X, X0).tolist() == expected
+    assert snp_estimable_columns(X, X0).tolist() == expected
     assert 0 < sum(expected) < X.shape[1]
     # too few individuals for q covariates plus the SNP
     small = X0[: X0.shape[1] + 1]
-    got = _estimable_columns(X[: len(small)], small)
+    got = snp_estimable_columns(X[: len(small)], small)
     assert got.tolist() == [snp_estimable(c, small) for c in X[: len(small)].T]
 
 
@@ -174,8 +188,9 @@ def test_gwas_block_boundaries_and_order():
     h.assert_batch_close(t_perm, np.asarray(t_ref)[perm], what="permuted columns")
     t1, _ = gwas(y, X[:, 0], K, kva, kve)  # one SNP as an (n,) vector
     h.assert_batch_close(t1, t_ref[:1], what="one SNP")
-    with pytest.raises(ValueError, match="block_size"):
-        gwas(y, X, K, block_size=0)
+    for bad in [0, -3, 1.5, True, "8"]:
+        with pytest.raises(ValueError, match="block_size"):
+            gwas(y, X, K, block_size=bad)
 
 
 def test_gwas_missing_phenotype_batched():
@@ -226,6 +241,56 @@ def test_gwas_batch_bed(bed_null):
     t_old, p_old = gwas(Y, X, K, kva, kve, batch=False)
     h.assert_batch_close(t_new, t_old, what="bed t")
     h.assert_batch_close(p_new, p_old, what="bed p")
+
+
+def _gls_reference(L, X, h, x0_scaled, reml=True):
+    """t, beta, beta_var per SNP by whitened QR on an equivalent, well-scaled X0."""
+    w = np.sqrt(1.0 / (h * L.kva + 1 - h))
+    x0t = L.kve.T @ x0_scaled
+    yw = L.yt[:, 0] * w
+    out = []
+    for j in range(X.shape[1]):
+        D = np.column_stack([x0t, L.kve.T @ X[:, j]]) * w[:, None]
+        Q, R = np.linalg.qr(D)
+        b = linalg.solve_triangular(R, Q.T @ yw)
+        r = yw - D @ b
+        p = D.shape[1]
+        s2 = (r @ r) / ((L.N - p) if reml else L.N)
+        rinv = linalg.solve_triangular(R, np.eye(p))[-1]
+        v = s2 * (rinv @ rinv)
+        out.append((b[-1] / np.sqrt(v), b[-1], v))
+    return np.array(out)
+
+
+@pytest.mark.parametrize(
+    "covariate",
+    ["year", "yyyymmdd", "1e4"],
+    ids=["year 2000-2020", "date 2e7 +- 1e3", "1e4 +- 1"],
+)
+@pytest.mark.parametrize("reml", [True, False], ids=["reml", "ml"])
+def test_batch_accurate_on_badly_scaled_covariates(covariate, reml):
+    """Where the 1.0.0 path loses ~1e-6 (review S2), the batched path matches an accurate reference."""
+    rng = np.random.default_rng(1)
+    n = 300
+    W = rng.binomial(2, 0.3, size=(n, 1200)).astype(float)
+    K = calculate_kinship(W[:, :1000])
+    X = W[:, 1000:]
+    y = rng.normal(size=n) + 0.3 * X[:, 0]
+    c = {
+        "year": rng.integers(2000, 2021, n).astype(float),
+        "yyyymmdd": 2.0e7 + 1e3 * rng.normal(size=n),
+        "1e4": 1e4 + rng.normal(size=n),
+    }[covariate]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # scipy's LinAlgWarning from the null fit's inverse
+        L = LMM(y, K, X0=np.column_stack([np.ones(n), c]))
+        h0 = L.fit(reml=reml)[0]
+        res = L.association_batch(X, h=h0, reml=reml)
+        t_gwas, _ = gwas(y, X, K, X0=L.X0, reml=reml)
+    ref = _gls_reference(L, X, h0, np.column_stack([np.ones(n), (c - c.mean()) / c.std()]), reml)
+    for got, k, name in [(res.t, 0, "t"), (res.beta, 1, "beta"), (res.beta_var, 2, "beta_var")]:
+        h.assert_ref_close(got, ref[:, k], what=name)
+    h.assert_ref_close(t_gwas, ref[:, 0], what="gwas t")
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +362,120 @@ def test_cli_block_size_must_be_positive(tmp_path):
     assert "not positive" in out or "--block-size" in out
 
 
-def test_cli_input_error_mid_block_writes_the_snps_before_it(tmp_path):
+# ---------------------------------------------------------------------------
+# pylmm gwas: what is written when something fails mid-scan (review finding S1)
+#
+# The rule is 1.0.0's: every SNP before the failing one has its line, the
+# failing one and later ones have none, no SNP is tested twice and no line is
+# written twice.  1.0.0 tested and wrote one SNP at a time, so with
+# --no-batch the partial output is a prefix of the clean --no-batch output,
+# which is byte for byte 1.0.0's.
+# ---------------------------------------------------------------------------
+
+FAIL_NSNPS = 20  # the first HMDP SNPs, with the missing calls of all but these filled in:
+FAIL_MISSING = [2, 5, 7, 10, 12, 15, 17, 19]  # (tested one at a time, the others batched)
+
+
+def _write_mixed_emma(d):
+    """The first FAIL_NSNPS HMDP SNPs; NA set to 0 except in the rows FAIL_MISSING."""
+    fn = h.write_emma_subset(d, FAIL_NSNPS)
+    with open(fn) as f:
+        rows = f.read().splitlines()
+    rows = [r if j in FAIL_MISSING else r.replace("NA", "0") for j, r in enumerate(rows)]
+    with open(fn, "w") as f:
+        f.write("\n".join(rows) + "\n")
+    return fn
+
+
+def _inprocess(tmp_path, tag, flags, patch=None):
+    """Run pylmm gwas in this process on FAIL_NSNPS HMDP SNPs; (rc, output lines).
+
+    ``patch`` is (monkeypatch, object, attribute, k, exception): the k-th
+    call of ``object.attribute`` raises ``exception`` instead.
+    """
+    from pylmm.cli import main
+
+    d = tmp_path / tag
+    d.mkdir()
+    out = str(d / "out")
+    argv = ["gwas", "-q", "--emma-geno", _write_mixed_emma(d)]
+    argv += ["--emma-pheno", h.HMDP_Y, "--kinship", h.write_headerless_kinship(d)]
+    argv += [*flags, "-o", out]
+    calls = [0]
+    with contextlib.ExitStack() as stack:
+        if patch is not None:
+            monkeypatch, obj, name, k, exc = patch
+            mp = stack.enter_context(monkeypatch.context())
+            orig = getattr(obj, name)
+
+            def fail_on_kth_call(*a, **kw):
+                calls[0] += 1
+                if calls[0] == k:
+                    raise exc
+                return orig(*a, **kw)
+
+            mp.setattr(obj, name, fail_on_kth_call)
+        rc = main(argv)
+    with open(out) as f:
+        return rc, f.read().splitlines(), calls[0]
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--no-batch"],
+        ["--no-batch", "--block-size", "3"],
+        ["--remove-missing-genotypes"],
+        ["--remove-missing-genotypes", "--block-size", "3"],
+    ],
+    ids=["no-batch", "no-batch-bs3", "default", "default-bs3"],
+)
+def test_cli_error_while_testing_a_snp(tmp_path, monkeypatch, flags):
+    """An unexpected error in the 5th per-SNP test: the lines of every SNP before it, only."""
+    from pylmm.cli import gwas as cli_gwas
+
+    rc, clean, _ = _inprocess(tmp_path, "clean", flags)
+    assert rc == 0 and len(clean) == 1 + FAIL_NSNPS
+    patch = (monkeypatch, cli_gwas, "_test_snp", 5, FloatingPointError("boom"))
+    rc, lines, calls = _inprocess(tmp_path, "fail", flags, patch)
+    if "--no-batch" in flags:
+        failing = 4  # every SNP is tested on its own: the 5th SNP
+    else:  # only the SNPs with a missing call are; the others are batched
+        failing = FAIL_MISSING[4]
+    assert rc == 1 and calls == 5  # no SNP tested twice
+    assert lines == clean[: 1 + failing]
+
+
+def test_cli_interrupt_and_write_failure_do_not_duplicate_lines(tmp_path, monkeypatch):
+    from pylmm.cli import gwas as cli_gwas
+
+    flags = ["--remove-missing-genotypes", "--block-size", "3"]
+    rc, clean, _ = _inprocess(tmp_path, "clean", flags)
+    failing = FAIL_MISSING[4]
+    patch = (monkeypatch, cli_gwas, "_test_snp", 5, KeyboardInterrupt())
+    rc, lines, calls = _inprocess(tmp_path, "interrupt", flags, patch)
+    assert rc == 130 and calls == 5 and lines == clean[: 1 + failing]
+    # the 5th result line cannot be written (e.g. disk full): the 4 before it stay, once
+    patch = (monkeypatch, cli_gwas, "write_result", 5, OSError("No space left on device"))
+    rc, lines, calls = _inprocess(tmp_path, "write", flags, patch)
+    assert rc == 2 and calls == 5 and lines == clean[:5]
+
+
+@pytest.mark.parametrize(
+    "flags", [[], ["--no-batch"], ["--block-size", "3"]], ids=["default", "no-batch", "bs3"]
+)
+def test_cli_reader_error_mid_file(tmp_path, monkeypatch, flags):
+    """The reader fails on SNP 7: SNPs 1-6 are tested and written, then the error is reported."""
+    from pylmm import plink_io
+
+    rc, clean, _ = _inprocess(tmp_path, "clean", flags)
+    patch = (monkeypatch, plink_io.PlinkReader, "__next__", 7, RuntimeError("disk gone"))
+    rc, lines, _ = _inprocess(tmp_path, "fail", flags, patch)
+    assert rc == 1 and lines == clean[:7]
+
+
+@pytest.mark.parametrize("flags", [[], ["--no-batch"]], ids=["default", "no-batch"])
+def test_cli_input_error_mid_block_writes_the_snps_before_it(tmp_path, flags):
     """A ragged EMMA row: the SNPs before it are written, as before batching."""
     emma = h.write_emma_subset(tmp_path, 10)
     with open(emma) as f:
@@ -307,7 +485,7 @@ def test_cli_input_error_mid_block_writes_the_snps_before_it(tmp_path):
         f.writelines(rows)
     out = str(tmp_path / "out")
     args = ["gwas", "--emma-geno", emma, "--emma-pheno", h.HMDP_Y]
-    args += ["--kinship", h.write_headerless_kinship(tmp_path), "-o", out]
+    args += ["--kinship", h.write_headerless_kinship(tmp_path), "-o", out, *flags]
     log = h.run_cli(args, cwd=tmp_path, expect_rc=2)
     assert "line 7" in log
     ids, _ = h.load_gwas_out(out)

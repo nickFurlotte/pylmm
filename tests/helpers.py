@@ -113,8 +113,38 @@ EIG_ATOL_SCALE = 1e-10
 # and sims/bench/gwas_batch.py (n = 500 and 2000, up to 20,000 SNPs) stayed
 # below both.  BATCH_RTOL is 10x the worst relative difference, BATCH_ATOL_SCALE
 # ~6x the worst absolute one; both are far below any change of the model.
+#
+# These hold for WELL-CONDITIONED designs only (the data above).  With a badly
+# scaled covariate next to the intercept (a raw date ~2e7, 1e4 +- 1, a year
+# column) the 1.0.0 per-SNP path, which inverts X'SX, loses up to ~1e-6
+# relative and the two paths differ by that much; the batched path stays
+# accurate (BATCH_REF_RTOL below).  A failure of assert_batch_close on such
+# data is the old path's error: do not loosen these to make it pass, compare
+# with a reference instead (test_batch.py::test_batch_accurate_on_badly_scaled_covariates).
 BATCH_RTOL = 1e-9
 BATCH_ATOL_SCALE = 2e-11
+
+# Batched Wald test vs an accurate reference on a badly scaled covariate: GLS by
+# whitened QR (numpy) on the same model with the covariate centred and scaled
+# (same column span, so the same SNP statistics in exact arithmetic, and a
+# well-conditioned problem).  Measurement (macOS arm64, numpy 2.5 / Accelerate,
+# n = 300, 200 SNPs, intercept + one covariate, REML, at the fitted h), max
+# relative error in t over all SNPs (beta alike; beta_var <= 5e-13):
+#   covariate             batched   1.0.0 per-SNP path
+#   19000 +- 100          2.3e-12   1.4e-10
+#   year 2000-2020        4.8e-12   1.8e-8
+#   2e7 +- 1e3            1.1e-10   3.2e-6
+#   1e4 +- 1              5.6e-11   2.6e-7
+# (the review's 40-digit mpmath reference agreed: batched 3e-11, per-SNP 3e-7 off
+# for 1e4 + N(0, 1)).  Relative errors of t near 0 are absolute in nature, so the
+# test allows |a - b| <= BATCH_REF_RTOL |b| + BATCH_REF_ATOL_SCALE max|b|.  On the
+# test's own data (year, 2e7 +- 1e3, 1e4 +- 1; REML and ML; t, beta, beta_var and
+# gwas() t) the batched path's worst errors were 5.2e-13 of max|b| and 3.5e-11
+# relative (entries >= 1% of max), while the 1.0.0 path fails the same check on
+# the 2e7 and 1e4 covariates (6e-10 to 3.5e-9 of max|t|).  BATCH_REF_RTOL is ~300x
+# and BATCH_REF_ATOL_SCALE ~200x the batched path's worst errors.
+BATCH_REF_RTOL = 1e-8
+BATCH_REF_ATOL_SCALE = 1e-10
 
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|
@@ -183,6 +213,17 @@ def _record_batch_diff(actual, expected, scale, what):
         f.write(
             "%s\t%.3e\t%.3e\n" % (what, d.max() / scale, (d[big] / np.abs(expected[ok][big])).max())
         )
+
+
+def assert_ref_close(actual, reference, what=""):
+    """Batched statistics vs an accurate reference: see BATCH_REF_RTOL."""
+    reference = np.asarray(reference, dtype=np.float64)
+    scale = np.abs(reference).max()
+    if os.environ.get("PYLMM_RECORD_BATCH"):
+        _record_batch_diff(actual, reference, scale, "ref " + what)
+    assert_close(
+        actual, reference, rtol=BATCH_REF_RTOL, atol=BATCH_REF_ATOL_SCALE * scale, what=what
+    )
 
 
 def assert_pvalues_valid(ps, what=""):
