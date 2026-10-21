@@ -97,7 +97,7 @@ Options that matter:
 | option | default | when to change it |
 |---|---|---|
 | `--reml` / `--ml` | REML | ML only to match a method that used ML; ML is ill-posed for a centred K from more SNPs than individuals |
-| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in the simulation studies; **can abort at high h²** (per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md)): avoid it when the null h is near 0.99 |
+| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in the simulation studies; **can abort at high h²** (per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md)): avoid it when the null h is near 0.99 (fixed since: the per-SNP search is bounded and covers [0, 1]) |
 | `--covar F --covar-name a b` | none | covariates; the intercept is added unless `--no-intercept` |
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
@@ -165,7 +165,7 @@ Checklist:
 
 1. **Sample counts.** `-v` logs how many individuals were read and dropped (missing phenotype or
    covariate, not in the kinship). Unexpected drops usually mean an ID mismatch.
-2. **The null fit** line (`null model: heritability=..., sigma=...`): h at 0 or 0.99 is a boundary estimate
+2. **The null fit** line (`null model: heritability=..., sigma=...`): h at 0 or 1 is a boundary estimate
    (see `estimate-heritability`).
 3. **λ_GC** near 1 for a polygenic trait. Inflation (> 1.1) with an LMM suggests a missing covariate or a
    K that does not match the samples. (λ growing with n·h²/M is the linear-regression, no-LMM result; with

@@ -135,7 +135,9 @@ def _hand_loco(Y, X, chrom, loco, X0=None, **kw):
     return t, p
 
 
-@pytest.mark.parametrize("kw", [{}, {"batch": False}, {"refit": True}, {"reml": False}], ids=str)
+@pytest.mark.parametrize(
+    "kw", [{}, {"batch": False}, {"refit": True}, {"reml": False}, {"legacy_fit": True}], ids=str
+)
 def test_gwas_loco_equals_hand_loop(kw):
     """gwas_loco == gwas per chromosome with K_{-c}, bit for bit (missing Y and calls, X0)."""
     rng = np.random.default_rng(5)
@@ -279,7 +281,9 @@ def test_cli_loco_equals_kinship_on_complement(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "flags", [["--no-batch"], ["--refit"], ["--remove-missing-genotypes"], ["--ml"]], ids=str
+    "flags",
+    [["--no-batch"], ["--refit"], ["--remove-missing-genotypes"], ["--ml"], ["--legacy-fit"]],
+    ids=str,
 )
 def test_cli_loco_options(tmp_path, flags):
     """--loco with --no-batch, --refit, --remove-missing-genotypes, --ml: the library's numbers."""
@@ -292,6 +296,7 @@ def test_cli_loco_options(tmp_path, flags):
         "--refit": {"refit": True},
         "--remove-missing-genotypes": {},
         "--ml": {"reml": False},
+        "--legacy-fit": {"legacy_fit": True},
     }[flags[0]]
     norm = flags[0] != "--remove-missing-genotypes"
     res, _ = _library_loco(base, y, norm=norm, **kw)

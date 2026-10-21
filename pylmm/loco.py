@@ -374,6 +374,7 @@ def gwas_loco(
     batch: bool = True,
     block_size: int = DEFAULT_BLOCK_SIZE,
     kind: KinshipKind = "standardized",
+    legacy_fit: bool = False,
 ) -> LocoResult:
     """Scan SNPs with leave-one-chromosome-out kinships.
 
@@ -405,6 +406,8 @@ def gwas_loco(
         As for `pylmm.lmm.gwas`.
     kind : {"standardized", "centered", "ibs"}, default "standardized"
         The kinship built from ``X`` (ignored with ``kinships``).
+    legacy_fit : bool, default False
+        pylmm 1.0.0's variance-component fit, as for `pylmm.lmm.gwas`.
 
     Returns
     -------
@@ -467,7 +470,7 @@ def gwas_loco(
         K = kinships.kinship(c if c in kinships.chromosomes else None)
         if not all_kept:
             K = K[keep][:, keep]
-        L = LMM(y_kept, K, X0=x0_kept)
+        L = LMM(y_kept, K, X0=x0_kept, legacy_fit=legacy_fit)
         L.fit(reml=reml)
         h[c] = float(L.opt_h)
         tc, pc = gwas(
@@ -481,6 +484,7 @@ def gwas_loco(
             refit=refit,
             batch=batch,
             block_size=block_size,
+            legacy_fit=legacy_fit,
         )
         for k, j in enumerate(cols):
             t_stats[j], p_values[j] = tc[k], pc[k]

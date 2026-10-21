@@ -288,7 +288,8 @@ def test_ml_unbounded_with_centred_grm_and_intercept():
 # pylmm-convention switches: with all of them on, the oracle reproduces pylmm
 # ---------------------------------------------------------------------------
 
-PYLMM = {"eig_clamp": 1e-6, "h_grid": "pylmm"}
+PYLMM = {"eig_clamp": 1e-6, "h_grid": "pylmm"}  # pylmm 1.0.0 = LMM(..., legacy_fit=True)
+PYLMM_DEFAULT = {"eig_clamp": 1e-6}  # the default search since Phase 6.3: the oracle's own
 
 
 def _rank_deficient_problem(seed=0, n=150, m=60, h2=0.5):
@@ -342,39 +343,46 @@ def test_ll_conventions_ml_exact_reml_constant_offset():
     assert gap[1] > 10 * gap[0]
 
 
-def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6):
+def _check_matches_pylmm(y, kin, X0, xs, tol_h=1e-6, tol_t=1e-6, legacy_fit=True, reml_only=False):
     """Oracle with all pylmm switches vs pylmm: null fit (REML and ML) and
     GWAS t (REML, and reml=False, which since Phase 5.2 is ML throughout:
-    ML null fit and ML Wald test with sigma^2 = Q/n)."""
-    from pylmm.lmm import LMM
-    from sims import methods
+    ML null fit and ML Wald test with sigma^2 = Q/n).  ``legacy_fit=True``:
+    pylmm 1.0.0's search against ``h_grid='pylmm'``; False: the default
+    search against the oracle's own (with pylmm's eigenvalue clamp)."""
+    from pylmm.lmm import LMM, gwas
 
     K = np.asarray(kin.K)
-    for reml in (True, False):
-        L = LMM(y, K, *kin.eig_for_pylmm(), X0=X0)
+    conv = PYLMM if legacy_fit else PYLMM_DEFAULT
+    modes = (True,) if reml_only else (True, False)
+    for reml in modes:
+        L = LMM(y, K, *kin.eig_for_pylmm(), X0=X0, legacy_fit=legacy_fit)
         h, beta, sigma, ll = L.fit(reml=reml)
-        f = oracle.fit(y, K, X0, reml=reml, **PYLMM)
+        f = oracle.fit(y, K, X0, reml=reml, **conv)
         np.testing.assert_allclose(float(np.sum(h)), f.h, atol=tol_h)
         np.testing.assert_allclose(float(np.sum(ll)), f.ll_pylmm, atol=1e-6)
-        np.testing.assert_allclose(float(np.sum(sigma)), f.sigma2_reml, rtol=1e-5)
+        # 1.0.0 reported Q/(n-p) under ML too (bug 9)
+        np.testing.assert_allclose(
+            float(np.sum(sigma)), f.sigma2_reml if legacy_fit else f.sigma2, rtol=1e-5
+        )
         np.testing.assert_allclose(np.ravel(beta), f.beta, rtol=1e-5, atol=1e-7)
-    for reml in (True, False):
-        t_p, p_p = methods.pylmm_gwas(y, xs, kin, X0=X0, reml=reml)
-        w = [
-            oracle.wald(y, K, xs[:, j], X0=X0, null_reml=reml, **PYLMM) for j in range(xs.shape[1])
-        ]
+    for reml in modes:
+        kva, kve = kin.eig_for_pylmm()
+        t_p, p_p = gwas(y, xs, K, kva, kve, X0=X0, reml=reml, legacy_fit=legacy_fit)
+        w = [oracle.wald(y, K, xs[:, j], X0=X0, null_reml=reml, **conv) for j in range(xs.shape[1])]
         np.testing.assert_allclose(t_p, [v.t for v in w], atol=tol_t, rtol=tol_t)
         np.testing.assert_allclose(p_p, [v.p for v in w], rtol=1e-4)
 
 
-def test_pylmm_convention_matches_pylmm_synthetic():
+@pytest.mark.parametrize("legacy_fit", [True, False], ids=["legacy", "default"])
+def test_pylmm_convention_matches_pylmm_synthetic(legacy_fit):
     for seed in range(3):
         y, kin, X0, x = _rank_deficient_problem(seed)
         xs = np.c_[x, np.random.default_rng(seed).binomial(2, 0.4, len(y))]
-        _check_matches_pylmm(y, kin, X0, xs.astype(float))
+        _check_matches_pylmm(y, kin, X0, xs.astype(float), legacy_fit=legacy_fit)
 
 
-def test_pylmm_convention_matches_pylmm_bed_subset():
+@pytest.mark.parametrize("legacy_fit", [True, False], ids=["legacy", "default"])
+def test_pylmm_convention_matches_pylmm_bed_subset(legacy_fit):
     """Real genotypes: 300 random BED mice, K from 2500 SNPs (rank ~99)."""
     from sims import phenotypes
 
@@ -386,7 +394,7 @@ def test_pylmm_convention_matches_pylmm_bed_subset():
     T = T[:, T.std(axis=0) > 0][:, :5]
     for h2, seed in ((0.3, 0), (0.8, 1)):
         y = phenotypes.simulate(kin, h2, np.random.default_rng(seed)).y
-        _check_matches_pylmm(y, kin, None, T)
+        _check_matches_pylmm(y, kin, None, T, legacy_fit=legacy_fit)
 
 
 def test_pylmm_convention_reproduces_example_null_failures():
@@ -412,6 +420,8 @@ def test_pylmm_convention_reproduces_example_null_failures():
         # (before Phase 5.1 an optimum this close to 0.99 could, on some
         # platforms, send the unbounded Brent above 1: bug 4's BracketError)
         _check_matches_pylmm(y, kin, None, G)
+        # the default search is the oracle's (REML: ML is unbounded with this K, bug 17)
+        _check_matches_pylmm(y, kin, None, G, legacy_fit=False, reml_only=True)
         fine = oracle.fit(y, kin.K, eig_clamp=1e-6)
         if fine.h > 0.99:
             assert oracle.fit(y, kin.K, **PYLMM).h == pytest.approx(0.99)
@@ -435,9 +445,12 @@ def test_pylmm_convention_reproduces_example_null_failures():
         pytest.fail("no seed gave a clean optimum above 0.99")
     assert grid.h == pytest.approx(0.99)
     with contextlib.redirect_stderr(io.StringIO()):
-        L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm())
+        L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm(), legacy_fit=True)
         h = float(np.sum(L.fit(reml=True)[0]))
     assert h == pytest.approx(0.99)
+    # the default search (Phase 6.3) finds the oracle's optimum above 0.99
+    L = LMM(y, np.asarray(kin.K), *kin.eig_for_pylmm())
+    assert float(L.fit(reml=True)[0]) == pytest.approx(fine.h, abs=1e-6)
 
 
 def test_sigma_conventions():

@@ -92,10 +92,12 @@ assert 0.2 < h_hat < 0.8 and 0.8 < metrics.lambda_gc(ps[null]) < 1.25
 ```
 
 `oracle.fit(y, K, X0)` is an independent dense REML/ML fit (O(n³) per evaluation: n ≤ 500) to compare
-`h` with; `oracle.wald(y, K, x, X0, h=...)` the matching Wald test:
+`h` with; `oracle.wald(y, K, x, X0, h=...)` the matching Wald test. `eig_clamp=1e-6` applies pylmm's
+eigenvalue floor, so both maximise the same likelihood (add `h_grid="pylmm"` to compare with
+`LMM(..., legacy_fit=True)`, pylmm 1.0.0's search):
 
 ```python
-ofit = oracle.fit(ph.y, np.asarray(kin.K), ph.X0, reml=True, eig_clamp=1e-6, h_grid="pylmm")
+ofit = oracle.fit(ph.y, np.asarray(kin.K), ph.X0, reml=True, eig_clamp=1e-6)
 print("pylmm h=%.6f  oracle h=%.6f" % (h_hat, ofit.h))
 assert abs(h_hat - ofit.h) < 1e-4
 ```
