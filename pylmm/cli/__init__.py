@@ -110,6 +110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(None if argv is None else list(argv))
+        args.argv = list(sys.argv[1:] if argv is None else argv)
         args.check(args.parser, args)
     except SystemExit as e:  # --help, --version, or a usage error argparse printed
         return _exit_code(e.code)

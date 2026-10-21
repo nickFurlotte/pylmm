@@ -73,7 +73,7 @@ pylmm *args:
 readme-example OUTDIR="readme-example":
     mkdir -p "{{OUTDIR}}"
     uv run pylmm kinship -v --bfile data/snps.132k.clean.noX -o "{{OUTDIR}}/snps.kin"
-    uv run pylmm gwas -v --bfile data/snps.132k.clean.noX --kinship "{{OUTDIR}}/snps.kin" --pheno data/snps.132k.clean.noX.fake.phenos -o "{{OUTDIR}}/results.tsv"
+    uv run pylmm gwas -v --bfile data/snps.132k.clean.noX --kinship "{{OUTDIR}}/snps.kin" --pheno data/snps.132k.clean.noX.fake.phenos -o "{{OUTDIR}}/results.tsv.gz"
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # DANGER: OVERWRITES tests/golden/ -- ONLY for a deliberate, reviewed

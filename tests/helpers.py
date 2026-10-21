@@ -219,6 +219,20 @@ EIGEN_REUSE_ATOL = 1e-11
 # ~40x the worst.
 LOCO_KINSHIP_ATOL_SCALE = 1e-13
 
+# The summary-statistics table (tests/test_sumstats.py, Phase 6.2b).
+# PLINK2_GLM_RTOL: pylmm gwas with K = identity (the LMM is ordinary least squares)
+# vs plink2 --glm (tests/data/plink2/geno_alt.y.glm.linear), which prints 6
+# significant digits (relative rounding up to 5e-6).  Measured: max relative
+# difference 4.7e-6 (beta, standard_error, t_stat, p_value; 300 SNPs, with and
+# without --remove-missing-genotypes); effect_allele_frequency 9e-7, n exact.
+PLINK2_GLM_RTOL = 1e-5
+# SUMSTATS_GLS_RTOL: beta, standard_error and t_stat of pylmm gwas vs a dense GLS
+# fit (numpy inverse of h K + (1 - h) I at the null h of the run record) on the
+# mean-imputed copies of A1 (pylmm floors K's eigenvalues at 1e-6, the dense fit does
+# not).  Measured (80 x 300 synthetic, h = 0.62): beta max relative 4.8e-9 (2.4e-11
+# absolute); every column passes at rtol = atol/max = 5e-9.  20x.
+SUMSTATS_GLS_RTOL = 1e-7
+
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|
 PSD_RTOL = 1e-10  # min eigenvalue >= -PSD_RTOL * max eigenvalue
@@ -561,15 +575,30 @@ def check_no_comment_header(args):
             )
 
 
+def legacy_output(argv):
+    """``argv`` of a ``pylmm`` command, with ``--output-format legacy`` added to a ``gwas`` run
+    that does not choose a format.
+
+    The tests that compare `pylmm gwas` numbers with the goldens and with each other parse
+    the 1.0.0 columns (`load_gwas_out`), so their runs ask for them; the default
+    summary-statistics table is tested in tests/test_sumstats.py (also against these
+    columns)."""
+    argv = [str(a) for a in argv]
+    if argv and argv[0] == "gwas" and "--output-format" not in argv:
+        argv = [*argv, "--output-format", "legacy"]
+    return argv
+
+
 def run_cli(args, cwd, timeout=CLI_TIMEOUT, expect_rc=0):
     """Run `python -m pylmm <args>` with the current interpreter in cwd
     (normally the test's tmp_path); fail if the exit code is not
     `expect_rc` or after `timeout` seconds.
 
-    `args` starts with the subcommand (`gwas`, `kinship`).  Returns the
-    merged stdout+stderr (the -v log).  The timeout is a threading.Timer
-    watchdog."""
-    args = [str(a) for a in args]
+    `args` starts with the subcommand (`gwas`, `kinship`); a `gwas` run
+    writes the legacy columns unless it says otherwise (`legacy_output`).
+    Returns the merged stdout+stderr (the -v log).  The timeout is a
+    threading.Timer watchdog."""
+    args = legacy_output(args)
     check_no_comment_header(args)
     env = dict(os.environ)
     env["PYTHONPATH"] = REPO + os.pathsep + env.get("PYTHONPATH", "")

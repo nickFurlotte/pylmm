@@ -25,3 +25,18 @@ The `.log` and temporary files were deleted. These are plink2's GRMs (frequencie
 these 50 samples, missingness-corrected), not pylmm's: they are not positive
 semi-definite and differ from `pylmm kinship`'s K; the tests compare the file layouts
 and IDs, not the kinship definitions.
+
+## plink2 `--glm` reference (tests/test_sumstats.py)
+
+`geno.pheno`: a phenotype for these 50 samples (FID IID y, with a header), written by a
+seeded script: `y = 0.8 c10 - 0.5 c20 + N(0, 1)`, `c` the mean-imputed copies of A1 of
+snp10 and snp20, `numpy.random.default_rng(11)`. `geno_alt.y.glm.linear` is plink2's
+linear regression of it on each SNP, A1 = ALT (the `.bim` column 5):
+
+```text
+plink2 --bfile geno --pheno geno.pheno --glm allow-no-covars omit-ref --out geno_alt
+```
+
+(Without `omit-ref`, plink2 --glm takes the minor allele as A1.) pylmm gwas with an identity
+kinship is the same least-squares fit, so its summary-statistics columns must match these
+to plink2's printed precision (6 significant digits).

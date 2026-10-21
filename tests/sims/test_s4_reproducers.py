@@ -24,6 +24,7 @@ import inspect
 import io
 import os
 
+import helpers as h
 import numpy as np
 import pytest
 from scipy import linalg
@@ -112,7 +113,7 @@ def bed_toy(tmp_path):
 def run_gwas(argv, rc=0):
     """`pylmm gwas <argv>` in-process, stderr silenced; check the exit code."""
     with quiet():
-        got = cli.main(["gwas", *argv])
+        got = cli.main(h.legacy_output(["gwas", *argv]))
     assert got == rc
 
 
@@ -120,7 +121,7 @@ def run_gwas_err(argv, rc=0):
     """run_gwas, returning what the CLI wrote to stderr."""
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
-        got = cli.main(["gwas", *argv])
+        got = cli.main(h.legacy_output(["gwas", *argv]))
     assert got == rc, err.getvalue()
     return err.getvalue()
 

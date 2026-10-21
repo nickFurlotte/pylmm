@@ -1,59 +1,122 @@
 """Summarise a `pylmm gwas` output file: counts, lambda_GC, top hits or loci, optional plots.
 
-    python skills/interpret-gwas-results/scripts/summarize_gwas.py results.tsv \
-        --bfile geno --per-allele --clump-kb 1000 --top 10 --plot results.png
+    python skills/interpret-gwas-results/scripts/summarize_gwas.py results.tsv.gz \
+        --clump-kb 1000 --top 10 --plot results.png
 
-``--bfile PREFIX`` joins the chromosome, position and alleles of ``PREFIX.bim``
-(the output has one line per ``.bim`` line, in order).
+Reads both output formats of ``pylmm gwas``:
 
-``--per-allele`` (needs ``--bfile``) converts BETA, which pylmm reports per SD
-of the standardised genotype, to the effect per copy of the counted allele A2
-(``.bim`` column 6), ``BETA / sd``, with ``sd`` the SD of the raw 0/1/2 A2
-dosage over the called individuals of ``PREFIX.bed`` (as pylmm standardises
-it); the SE likewise.  The A1 effect is the same with the sign flipped.  Not
-valid for scans run with ``--remove-missing-genotypes`` (BETA is then on a
-different scale for SNPs without missing calls), and approximate if the
-kinship dropped individuals of the ``.fam``.
+* the summary-statistics table (the default; ``.tsv`` or ``.tsv.gz``): it
+  carries the chromosome, position and alleles, and ``beta`` is already the
+  effect per copy of the effect allele (A1);
+* the legacy columns (``--output-format legacy``: ``SNP_ID BETA BETA_SD
+  F_STAT P_VALUE``).  ``--bfile PREFIX`` then joins the chromosome, position
+  and alleles of ``PREFIX.bim`` (one output line per ``.bim`` line, in
+  order), and ``--per-allele`` (needs ``--bfile``) converts BETA, per SD of
+  the standardised A2 dosage, to the effect per copy of A2 (``.bim`` column
+  6), ``BETA / sd``, with ``sd`` the SD of the raw 0/1/2 A2 dosage over the
+  called individuals of ``PREFIX.bed``; the SE likewise; the A1 effect is
+  the same with the sign flipped.  Not valid for scans run with
+  ``--remove-missing-genotypes``, and approximate if the kinship dropped
+  individuals of the ``.fam`` (the summary-statistics table has neither
+  problem).
 
 ``--clump-kb KB`` groups the hits into loci by a simple distance window (no
 LD): the best SNP left becomes a lead, and every SNP within KB kilobases of it
 on the same chromosome joins its locus.  ``--clump-snps N`` does the same with
-a window of N SNPs on either side, in file order, when there are no positions
-(no ``--bfile``).  ``--clump-p`` only starts loci at SNPs below that p.
+a window of N SNPs on either side, in file order, when there are no positions.
+``--clump-p`` only starts loci at SNPs below that p.
 
-SNPs are ranked by p, ties (e.g. p = 0.0 underflows) by abs(t).  ``--plot``
+SNPs are ranked by -log10 p (``neg_log_10_p_value``, exact where p underflows
+to 0; for legacy files -log10 P_VALUE, ties broken by abs(t)).  ``--plot``
 draws a Manhattan plot (x = base-pair position, chromosomes side by side,
-when ``--bfile`` gives positions) and a QQ plot; it needs matplotlib.  Only
-numpy and scipy otherwise.  Importable as a module (`read_results`,
-`lambda_gc`, `read_bim`, `dosage_sd`, `rank`, `clump`, `summarize`).
+when positions are known) and a QQ plot; it needs matplotlib.  Only numpy and
+scipy otherwise.  Importable as a module (`read_results`, `lambda_gc`,
+`read_bim`, `dosage_sd`, `rank`, `clump`, `summarize`).
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import sys
 
 import numpy as np
 from scipy import stats
 
-COLUMNS = ("SNP_ID", "BETA", "BETA_SD", "F_STAT", "P_VALUE")
+LEGACY_COLUMNS = ("SNP_ID", "BETA", "BETA_SD", "F_STAT", "P_VALUE")
+SUMSTATS_FIRST = ("chromosome", "base_pair_location", "effect_allele", "other_allele", "beta")
 CHI2_MEDIAN = float(stats.chi2.ppf(0.5, 1))  # 0.4549...
 BED_MAGIC = bytes([0x6C, 0x1B, 0x01])
 
 
+def _float(x: str) -> float:
+    return float("nan") if x == "NA" else float(x)
+
+
 def read_results(path: str) -> dict[str, np.ndarray]:
-    """The columns of a `pylmm gwas` output file (``nan`` for untestable SNPs)."""
-    with open(path) as f:
+    """The columns of a `pylmm gwas` output file, as arrays under common names.
+
+    Keys: ``format`` (``"sumstats"`` or ``"legacy"``), ``id``, ``beta``,
+    ``se``, ``t``, ``p``, ``nlp`` (-log10 p), and for the summary-statistics
+    table also ``chrom``, ``pos`` (-1 if unknown), ``effect_allele``,
+    ``other_allele``, ``eaf`` and ``n``.  ``nan`` for untested SNPs.  For a
+    legacy file ``beta`` / ``se`` are BETA / BETA_SD (per SD of the A2
+    dosage) and ``t`` is F_STAT; for the table, the per-copy effect of the
+    effect allele and ``t_stat``.
+    """
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt") as f:
         header = f.readline().rstrip("\n").split("\t")
-        if tuple(header) != COLUMNS:
-            raise ValueError("%s: not a pylmm gwas output (header %r)" % (path, header))
         rows = [line.rstrip("\n").split("\t") for line in f if line.strip()]
-    ids = np.array([r[0] for r in rows], dtype=str)
-    vals = np.array([[float(x) for x in r[1:]] for r in rows], dtype=float).reshape(-1, 4)
-    out = {"SNP_ID": ids}
-    for j, name in enumerate(COLUMNS[1:]):
-        out[name] = vals[:, j]
-    return out
+    col = {c: k for k, c in enumerate(header)}
+
+    def num(name: str) -> np.ndarray:
+        return np.array([_float(r[col[name]]) for r in rows], dtype=float)
+
+    if tuple(header) == LEGACY_COLUMNS:
+        p = num("P_VALUE")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            nlp = -np.log10(p)
+        return {
+            "format": np.array("legacy"),
+            "id": np.array([r[0] for r in rows], dtype=str),
+            "beta": num("BETA"),
+            "se": num("BETA_SD"),
+            "t": num("F_STAT"),
+            "p": p,
+            "nlp": nlp,
+        }
+    if tuple(header[: len(SUMSTATS_FIRST)]) != SUMSTATS_FIRST:
+        raise ValueError("%s: not a pylmm gwas output (header %r)" % (path, header[:6]))
+    pos = num("base_pair_location")
+    return {
+        "format": np.array("sumstats"),
+        "id": np.array([r[col["variant_id"]] for r in rows], dtype=str),
+        "chrom": np.array([r[col["chromosome"]] for r in rows], dtype=str),
+        "pos": np.where(np.isnan(pos), -1, pos).astype(np.int64),
+        "effect_allele": np.array([r[col["effect_allele"]] for r in rows], dtype=str),
+        "other_allele": np.array([r[col["other_allele"]] for r in rows], dtype=str),
+        "beta": num("beta"),
+        "se": num("standard_error"),
+        "eaf": num("effect_allele_frequency"),
+        "n": num("n"),
+        "t": num("t_stat"),
+        "p": num("p_value"),
+        "nlp": num("neg_log_10_p_value"),
+    }
+
+
+def positions(res: dict[str, np.ndarray]) -> dict[str, np.ndarray] | None:
+    """The chromosome/position/alleles of a summary-statistics table, as `read_bim` gives
+    them (``a1`` = effect allele), or None if it has no positions (legacy, EMMA)."""
+    if "chrom" not in res or (res["pos"] < 0).all():
+        return None
+    return {
+        "chrom": res["chrom"],
+        "pos": res["pos"],
+        "a1": res["effect_allele"],
+        "a2": res["other_allele"],
+    }
 
 
 def lambda_gc(p: np.ndarray) -> float:
@@ -101,10 +164,10 @@ def dosage_sd(prefix: str, chunk: int = 4096) -> np.ndarray:
 
 
 def rank(res: dict[str, np.ndarray]) -> np.ndarray:
-    """Indices of the testable SNPs, best first: by p, ties (p = 0.0 underflows) by abs(t)."""
-    p, t = res["P_VALUE"], res["F_STAT"]
-    ok = np.flatnonzero(~np.isnan(p))
-    order = np.lexsort((-np.abs(t[ok]), p[ok]))
+    """Indices of the tested SNPs, best first: by -log10 p, ties by abs(t)."""
+    nlp, t = res["nlp"], res["t"]
+    ok = np.flatnonzero(~np.isnan(res["p"]))
+    order = np.lexsort((-np.abs(t[ok]), -nlp[ok]))
     return ok[order]
 
 
@@ -117,26 +180,27 @@ def clump(
 ) -> list[dict]:
     """Greedy window clumping (no LD): loci as dicts with the lead and its members.
 
-    With ``kb`` (and ``bim``), a SNP joins the locus of the best remaining
-    lead on its chromosome within ``kb`` kilobases; with ``snps``, within
-    ``snps`` positions in file order (on the same chromosome if ``bim`` is
-    given).  Leads are taken in `rank` order while their p < ``p_max``.
+    With ``kb`` (and ``bim``: `read_bim` or `positions`), a SNP joins the
+    locus of the best remaining lead on its chromosome within ``kb``
+    kilobases; with ``snps``, within ``snps`` positions in file order (on the
+    same chromosome if ``bim`` is given).  Leads are taken in `rank` order
+    while their p < ``p_max``.
     """
     if (kb is None) == (snps is None):
         raise ValueError("give exactly one of kb (with bim) and snps")
     if kb is not None and bim is None:
         raise ValueError("kb clumping needs the .bim positions; use snps= without them")
-    m = len(res["P_VALUE"])
+    m = len(res["p"])
     chrom = bim["chrom"] if bim is not None else np.zeros(m, dtype=str)
     where = bim["pos"].astype(float) / 1000.0 if kb is not None else np.arange(m, dtype=float)
     width = float(kb if kb is not None else snps)
     taken = np.zeros(m, dtype=bool)
-    tested = ~np.isnan(res["P_VALUE"])
+    tested = ~np.isnan(res["p"])
     loci = []
     for j in rank(res):
         if taken[j]:
             continue
-        if res["P_VALUE"][j] >= p_max:
+        if res["p"][j] >= p_max:
             break
         members = np.flatnonzero(
             (chrom == chrom[j]) & (np.abs(where - where[j]) <= width) & ~taken & tested
@@ -155,10 +219,13 @@ def summarize(
 ) -> dict:
     """Counts, lambda_GC, Bonferroni, and the top SNPs (or the leads of ``loci``).
 
-    ``sd`` (from `dosage_sd`) adds per-copy effects; ``loci`` (from `clump`)
-    lists one entry per locus instead of one per SNP.
+    ``bim`` (`read_bim`, or `positions` of a summary-statistics table) adds
+    positions and alleles; ``sd`` (from `dosage_sd`, legacy files only) adds
+    per-copy effects; ``loci`` (from `clump`) lists one entry per locus
+    instead of one per SNP.
     """
-    p = res["P_VALUE"]
+    p = res["p"]
+    legacy = str(res["format"]) == "legacy"
     ok = ~np.isnan(p)
     m = int(ok.sum())
     if loci is None:
@@ -169,25 +236,29 @@ def summarize(
     for j, members in leads:
         h: dict = {
             "index": j,
-            "snp": str(res["SNP_ID"][j]),
+            "snp": str(res["id"][j]),
             "p": float(p[j]),
-            "t": float(res["F_STAT"][j]),
-            "beta_std": float(res["BETA"][j]),
+            "neg_log10_p": float(res["nlp"][j]),
+            "t": float(res["t"][j]),
         }
+        if legacy:
+            h["beta_std"] = float(res["beta"][j])
+        else:
+            h.update(beta=float(res["beta"][j]), se=float(res["se"][j]), eaf=float(res["eaf"][j]))
         if bim is not None:
             h.update(
                 chrom=str(bim["chrom"][j]),
                 pos=int(bim["pos"][j]),
                 a1=str(bim["a1"][j]),
                 a2=str(bim["a2"][j]),
-                effect_allele=str(bim["a2"][j]),
+                effect_allele=str(bim["a2"][j] if legacy else bim["a1"][j]),
             )
         if sd is not None:
             h.update(
                 dosage_sd=float(sd[j]),
-                beta_a2=float(res["BETA"][j] / sd[j]),
-                se_a2=float(res["BETA_SD"][j] / sd[j]),
-                beta_a1=float(-res["BETA"][j] / sd[j]),
+                beta_a2=float(res["beta"][j] / sd[j]),
+                se_a2=float(res["se"][j] / sd[j]),
+                beta_a1=float(-res["beta"][j] / sd[j]),
             )
         if members is not None:
             h["n_snps"] = len(members)
@@ -208,6 +279,7 @@ def summarize(
         "bonferroni_0.05": 0.05 / m if m else float("nan"),
         "n_below_bonferroni": int((p[ok] < 0.05 / m).sum()) if m else 0,
         "min_p": float(p[ok].min()) if m else float("nan"),
+        "max_neg_log10_p": float(res["nlp"][ok].max()) if m else float("nan"),
         "n_loci": None if loci is None else len(loci),
         "top": hits,
     }
@@ -219,9 +291,9 @@ def plot(res: dict[str, np.ndarray], bim: dict | None, path: str) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    p = res["P_VALUE"]
+    p = res["p"]
     ok = ~np.isnan(p)
-    lp = -np.log10(np.clip(p[ok], 1e-300, 1))
+    lp = res["nlp"][ok]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), gridspec_kw={"width_ratios": [3, 1]})
     if bim is not None:
         chrom, pos = bim["chrom"][ok], bim["pos"][ok].astype(float)
@@ -257,34 +329,40 @@ def plot(res: dict[str, np.ndarray], bim: dict | None, path: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("results", help="output file of pylmm gwas")
+    ap.add_argument("results", help="output file of pylmm gwas (either format)")
     ap.add_argument(
-        "--bfile", help="genotype prefix: join chromosome/position/alleles of PREFIX.bim"
+        "--bfile",
+        help="legacy files: genotype prefix, to join chromosome/position/alleles of PREFIX.bim",
     )
     ap.add_argument("--top", type=int, default=10, help="number of SNPs/loci to list (default 10)")
     ap.add_argument(
         "--per-allele",
         action="store_true",
-        help="also report BETA/SE per copy of A2 (and A1, flipped), from PREFIX.bed (needs --bfile)",
+        help="legacy files: also report BETA/SE per copy of A2 (and A1, flipped), from "
+        "PREFIX.bed (needs --bfile)",
     )
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--clump-kb", type=float, help="clump hits into loci of +-KB kb (needs --bfile)")
+    g.add_argument(
+        "--clump-kb", type=float, help="clump hits into loci of +-KB kb (needs positions)"
+    )
     g.add_argument("--clump-snps", type=int, help="clump hits into loci of +-N SNPs (file order)")
     ap.add_argument(
         "--clump-p", type=float, default=1.0, help="start loci only at SNPs with p below this"
     )
     ap.add_argument("--plot", help="write a Manhattan + QQ PNG here (needs matplotlib)")
     args = ap.parse_args(argv)
+    res = read_results(args.results)
+    legacy = str(res["format"]) == "legacy"
+    if args.per_allele and not legacy:
+        ap.error("--per-allele is for legacy files: the summary-statistics beta is per allele")
     if args.per_allele and not args.bfile:
         ap.error("--per-allele needs --bfile (the dosage SDs come from PREFIX.bed)")
-    if args.clump_kb is not None and not args.bfile:
-        ap.error("--clump-kb needs --bfile for positions; use --clump-snps N without one")
-    res = read_results(args.results)
-    bim = read_bim(args.bfile) if args.bfile else None
-    if bim is not None and len(bim["pos"]) != len(res["P_VALUE"]):
+    bim = read_bim(args.bfile) if args.bfile else positions(res)
+    if args.clump_kb is not None and bim is None:
+        ap.error("--clump-kb needs positions (--bfile for legacy files); use --clump-snps N")
+    if bim is not None and len(bim["pos"]) != len(res["p"]):
         sys.exit(
-            "%s.bim has %d SNPs, the results %d"
-            % (args.bfile, len(bim["pos"]), len(res["P_VALUE"]))
+            "%s.bim has %d SNPs, the results %d" % (args.bfile, len(bim["pos"]), len(res["p"]))
         )
     sd = dosage_sd(args.bfile) if args.per_allele else None
     loci = None
@@ -294,8 +372,8 @@ def main(argv: list[str] | None = None) -> int:
     print("SNPs: %d (%d tested, %d nan)" % (s["n_snps"], s["n_tested"], s["n_nan"]))
     print("lambda_GC: %.3f" % s["lambda_gc"])
     print(
-        "min p: %.3g; Bonferroni 0.05 threshold %.3g, %d SNPs below it"
-        % (s["min_p"], s["bonferroni_0.05"], s["n_below_bonferroni"])
+        "max -log10 p: %.2f; Bonferroni 0.05 threshold %.3g, %d SNPs below it"
+        % (s["max_neg_log10_p"], s["bonferroni_0.05"], s["n_below_bonferroni"])
     )
     if loci is not None:
         window = (
@@ -303,22 +381,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("loci (+-%s windows, leads with p < %g): %d" % (window, args.clump_p, len(loci)))
     what = "loci (lead SNPs)" if loci is not None else "top SNPs"
-    print("%s (beta_std: per SD of the A2 allele; t = F_STAT):" % what)
+    if legacy:
+        print("%s (beta_std: per SD of the A2 allele; t = F_STAT):" % what)
+    else:
+        print("%s (beta: per copy of the effect allele EA):" % what)
     if loci is not None and not loci:
         print("  none: no SNP has p < %g (--clump-p)" % args.clump_p)
     for h in s["top"]:
-        where = (
-            " chr%s:%d A1=%s A2=%s" % (h["chrom"], h["pos"], h["a1"], h["a2"])
-            if "chrom" in h
-            else ""
-        )
-        line = "  %s%s  p=%.3g  t=%.2f  beta_std=%.3g" % (
-            h["snp"],
-            where,
-            h["p"],
-            h["t"],
-            h["beta_std"],
-        )
+        where = ""
+        if "chrom" in h and legacy:
+            where = " chr%s:%d A1=%s A2=%s" % (h["chrom"], h["pos"], h["a1"], h["a2"])
+        elif "chrom" in h:
+            where = " chr%s:%d EA=%s OA=%s" % (h["chrom"], h["pos"], h["a1"], h["a2"])
+        line = "  %s%s  -log10p=%.2f  t=%.2f" % (h["snp"], where, h["neg_log10_p"], h["t"])
+        if legacy:
+            line += "  beta_std=%.3g" % h["beta_std"]
+        else:
+            line += "  beta=%.3g (SE %.3g)  EAF=%.3f" % (h["beta"], h["se"], h["eaf"])
         if "beta_a2" in h:
             line += "  per A2 copy %.3g (SE %.3g), per A1 copy %.3g" % (
                 h["beta_a2"],

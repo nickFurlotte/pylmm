@@ -30,7 +30,7 @@ def run(argv):
     """`pylmm <argv>` in-process: (exit code, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = cli.main(argv)
+        rc = cli.main(h.legacy_output(argv))
     return rc, out.getvalue(), err.getvalue()
 
 
@@ -39,7 +39,7 @@ def python_m(args, cwd):
     env = dict(os.environ)
     env["PYTHONPATH"] = h.REPO + os.pathsep + env.get("PYTHONPATH", "")
     p = subprocess.run(
-        [sys.executable, "-m", "pylmm", *args],
+        [sys.executable, "-m", "pylmm", *h.legacy_output(args)],
         cwd=str(cwd),
         env=env,
         capture_output=True,

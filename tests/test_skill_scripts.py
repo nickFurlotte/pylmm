@@ -214,13 +214,18 @@ SUMMARIZE = os.path.join(REPO, "skills", "interpret-gwas-results", "scripts", "s
 
 
 def _res(p, t):
+    """A legacy-format result (`summarize_gwas.read_results`'s keys)."""
     p, t = np.asarray(p, dtype=float), np.asarray(t, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        nlp = -np.log10(p)
     return {
-        "SNP_ID": np.array(["s%d" % j for j in range(len(p))]),
-        "BETA": t * 0.1,
-        "BETA_SD": np.full(len(p), 0.1),
-        "F_STAT": t,
-        "P_VALUE": p,
+        "format": np.array("legacy"),
+        "id": np.array(["s%d" % j for j in range(len(p))]),
+        "beta": t * 0.1,
+        "se": np.full(len(p), 0.1),
+        "t": t,
+        "p": p,
+        "nlp": nlp,
     }
 
 
@@ -273,7 +278,7 @@ def test_summarize_cli_per_allele_clump_plot(tmp_path):
     t[[4, 20]] = [50.0, 9.0]
     res = tmp_path / "r.tsv"
     with open(res, "w") as f:
-        f.write("\t".join(summarize_gwas.COLUMNS) + "\n")
+        f.write("\t".join(summarize_gwas.LEGACY_COLUMNS) + "\n")
         for j in range(30):
             f.write("snp%d\t%.17g\t0.1\t%.17g\t%.17g\n" % (j + 1, t[j] * 0.1, t[j], p[j]))
     png = str(tmp_path / "m.png")
@@ -301,3 +306,51 @@ def test_summarize_cli_per_allele_clump_plot(tmp_path):
     ).stdout
     assert "loci (+-2 SNPs windows, leads with p < 0): 0" in none
     assert "none: no SNP has p < 0 (--clump-p)" in none
+
+
+def test_summarize_reads_the_summary_statistics_table(tmp_path):
+    from pylmm.genotypes import Variants
+    from pylmm.sumstats import SumStats, write_sumstats
+
+    m = 6
+    v = Variants(
+        snp=["rs%d" % (j + 1) for j in range(m)],
+        chrom=["1"] * 3 + ["2"] * 3,
+        bp=[1000, 2000, 900_000, 1000, 2000, 3000],
+        a1=["A"] * m,
+        a2=["G"] * m,
+    )
+    # two SNPs whose p underflows to 0: ranked by -log10 p, not tied
+    p = np.array([0.5, 0.0, 0.2, 0.0, 1e-9, np.nan])
+    nlp = np.array([0.30103, 400.0, 0.69897, 900.0, 9.0, np.nan])
+    t = np.array([0.7, 45.0, -1.3, -70.0, 6.5, np.nan])
+    table = SumStats.from_variants(
+        v,
+        beta=t / 10,
+        standard_error=np.full(m, 0.1),
+        t_stat=t,
+        p_value=p,
+        neg_log_10_p_value=nlp,
+        effect_allele_frequency=np.full(m, 0.3),
+        n=np.full(m, 50),
+        missing_rate=np.zeros(m),
+        beta_std=t / 20,
+    )
+    fn = str(tmp_path / "r.tsv.gz")
+    write_sumstats(fn, table)
+    res = summarize_gwas.read_results(fn)
+    assert str(res["format"]) == "sumstats"
+    assert list(summarize_gwas.rank(res)) == [3, 1, 4, 2, 0]
+    loci = summarize_gwas.clump(res, summarize_gwas.positions(res), kb=10)
+    assert [lo["lead"] for lo in loci][:2] == [3, 1]
+    out = subprocess.run(
+        [sys.executable, SUMMARIZE, fn, "--clump-kb", "10", "--top", "2"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "rs4 chr2:1000 EA=A OA=G  -log10p=900.00" in out
+    bad = subprocess.run(
+        [sys.executable, SUMMARIZE, fn, "--per-allele"], capture_output=True, text=True
+    )
+    assert bad.returncode == 2 and "for legacy files" in bad.stderr

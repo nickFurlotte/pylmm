@@ -417,7 +417,7 @@ def _inprocess(tmp_path, tag, flags, patch=None):
                 return orig(*a, **kw)
 
             mp.setattr(obj, name, fail_on_kth_call)
-        rc = main(argv)
+        rc = main(h.legacy_output(argv))
     with open(out) as f:
         return rc, f.read().splitlines(), calls[0]
 
@@ -592,7 +592,7 @@ def _main(argv, out):
     """Run ``pylmm <argv> -o out`` in this process; (rc, output lines or None)."""
     from pylmm.cli import main
 
-    rc = main([*argv, "-o", out])
+    rc = main(h.legacy_output([*argv, "-o", out]))
     if not os.path.exists(out):
         return rc, None
     with open(out) as f:
