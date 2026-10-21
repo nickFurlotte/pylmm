@@ -114,23 +114,35 @@ maps them).
   (`just sim s9_tests [--quick]`; write-up `sims/studies/s9_tests.md`): the refit's speed and agreement,
   and the calibration, power and cost of the four tests.
 
-### Changed
-#### Exact per-SNP refit
-- `gwas(refit=True)` / `pylmm gwas --refit`: `LMM.fit(X=x)` per SNP (a 101-point grid and a bounded Brent
-  search per peak, ~130 scalar likelihood evaluations per SNP) -> `LMM.fit_snps`, a block of SNPs at a
-  time: the grid of every SNP as matrix products, then a vectorised safeguarded Newton-Raphson on the
-  analytic first and second derivatives of the rotated likelihood (Zhou & Stephens 2012) inside each grid
-  peak's bracket, falling back to the scalar search for a bracket without a sign change of the
-  derivative or a Newton run that does not converge. Same candidates and tie rule, so the same maximum:
-  |dh| <= 3.6e-7 and |d log-likelihood| <= 2.9e-12 against the per-SNP search on 28,800 fits of S9, and
-  within 3.3e-10 of the dense oracle's maximum; t and p move by at most ~6e-7 relative (the grid search's
-  stopping error). Speedup over the per-SNP search (`sims/bench/refit.py`, single-threaded BLAS, arm64): 26-46x at n = 300 (2000 SNPs), 11-14x at n = 1000, 8-13x at n = 2000; the refit then costs 9.5-12x a default scan.
-- `--refit --no-batch` / `gwas(refit=True, batch=False)` and `--legacy-fit --refit` keep the per-SNP grid
-  search, so `--legacy-fit --no-batch` is still 1.0.0's output byte for byte.
-- `association_batch`'s docstring: "batched vs per SNP <= 1.3e-15 of max |t|" -> that holds for a centred
-  kinship; with many null directions (strain means expanded to animals) at h >= 1 - 1e-7 the per-SNP path
-  drifts by up to ~3e-10 of max |t| and the batched values are the accurate ones.
+- Leave-one-chromosome-out (LOCO) scans. Library: `pylmm.loco.LocoKinship` builds every `K_{-c}` (the
+  kinship of all chromosomes but `c`) in one pass over the raw genotypes, for each kind (standardized,
+  centered, ibs; not `legacy`), keeping one n × n sum per chromosome; `K_{-c}` equals `calculate_kinship`
+  of the other chromosomes' SNPs up to summation order (measured ≤ 2.6e-15 of max |K|).
+  `pylmm.loco.gwas_loco(Y, X, chroms, kinships=None, ...)` fits the null model on each `K_{-c}` and tests
+  that chromosome's SNPs with `gwas` -> `LocoResult(t_stats, p_values, h)`. Command line: `pylmm gwas
+  --loco` (instead of `--kinship`/`--grm`/`--eigen`) reads the genotypes once for the kinships and once to
+  scan, one null fit per chromosome (logged with each `K_{-c}`'s SNP count and scale); `--kinship-type`
+  picks the kind, `--emma-map FILE` gives EMMA rows their chromosomes (e.g. `data/hmdp.liver.snps.map.tsv`).
+  Same output columns, file order. Each chromosome's SNPs must be together in the file; labels are
+  normalised (`chr1`, `01`, `1` are one chromosome; `pylmm.loco.normalize_chrom`); more than
+  `--loco-max-chroms` (default 100) chromosomes, or one chromosome per SNP, is an error; the memory
+  estimate, about (chromosomes + 6) n² × 8 bytes, is logged first. A genotype read error stops `--loco`
+  before any output. Opt-in: the default scan is unchanged, and without `--kinship`/`--grm`/`--loco` the
+  usage error names `--loco`. Evidence (`sims/studies/s8_loco.md`): on a null phenotype both kinships are
+  calibrated (LOCO λ_GC 0.94-1.02); on chromosomes without causal variants K from all SNPs is
+  conservative (λ_GC down to 0.57 on an inbred panel) and LOCO is not (0.97-1.06); the power of a q2 =
+  0.05 QTL at 1e-3 roughly doubles on inbred panels. With causal variants on every chromosome, LOCO's
+  λ_GC of a polygenic trait is above 1 (1.1-2.8; linked signal, not confounding): do not use it as a
+  calibration check and never apply genomic control to a LOCO scan. Cost: one eigendecomposition per
+  chromosome; 14 s vs 11 s on the README data (n = 1219), 199 s vs 27 s at n = 3000 with 10
+  chromosomes.
+- `pylmm.kinship.snp_columns` and `finish_kinship`: the per-SNP step and the final scaling of
+  `KinshipAccumulator`, factored out (K unchanged, bit for bit).
 
+### Changed
+- `pylmm gwas` without `--kinship` or `--grm`: argparse's "one of the arguments --kinship --grm is
+  required" -> the same message from `check_args`, which also suggests `--loco`; exit code 2 as before.
+- `pylmm.kinship.finish_kinship` with no SNP used raises `ValueError` (it divided by zero).
 - `pylmm kinship --eigen-npz`: arrays `Kva`, `Kve` -> also `fid`, `iid` (the samples of Kve's rows; not for
   EMMA input) and `kinship_type` (plain arrays, no pickle; 1.0.0 readers still find `Kva` and `Kve`).
 - `pylmm gwas --eigen`: the decomposition was used only if no individual was dropped or reordered, its rows
@@ -166,6 +178,22 @@ maps them).
   byte-identical to 1.0.0. h moves with the scale (HMDP, 20 transcripts, library: median h 0.440 -> 0.425,
   PVE 0.423 both); t and p do not move for a pure rescaling (the CLI's change), and move slightly with the
   library's missing-call convention (the two 1.0.0 conventions differed by max |Δt| 0.03 on HMDP, study S4). 1.0.0's kinships: `legacy=True`, `--legacy-kinship`.
+
+#### Exact per-SNP refit
+- `gwas(refit=True)` / `pylmm gwas --refit`: `LMM.fit(X=x)` per SNP (a 101-point grid and a bounded Brent
+  search per peak, ~130 scalar likelihood evaluations per SNP) -> `LMM.fit_snps`, a block of SNPs at a
+  time: the grid of every SNP as matrix products, then a vectorised safeguarded Newton-Raphson on the
+  analytic first and second derivatives of the rotated likelihood (Zhou & Stephens 2012) inside each grid
+  peak's bracket, falling back to the scalar search for a bracket without a sign change of the
+  derivative or a Newton run that does not converge. Same candidates and tie rule, so the same maximum:
+  |dh| <= 3.6e-7 and |d log-likelihood| <= 2.9e-12 against the per-SNP search on 28,800 fits of S9, and
+  within 3.3e-10 of the dense oracle's maximum; t and p move by at most ~6e-7 relative (the grid search's
+  stopping error). Speedup over the per-SNP search (`sims/bench/refit.py`, single-threaded BLAS, arm64): 26-46x at n = 300 (2000 SNPs), 11-14x at n = 1000, 8-13x at n = 2000; the refit then costs 9.5-12x a default scan.
+- `--refit --no-batch` / `gwas(refit=True, batch=False)` and `--legacy-fit --refit` keep the per-SNP grid
+  search, so `--legacy-fit --no-batch` is still 1.0.0's output byte for byte.
+- `association_batch`'s docstring: "batched vs per SNP <= 1.3e-15 of max |t|" -> that holds for a centred
+  kinship; with many null directions (strain means expanded to animals) at h >= 1 - 1e-7 the per-SNP path
+  drifts by up to ~3e-10 of max |t| and the batched values are the accurate ones.
 
 #### Batched association tests (faster scans)
 - `gwas()` and `pylmm gwas` (without `--refit`) test the SNPs without missing calls in blocks: one matrix
