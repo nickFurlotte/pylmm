@@ -86,11 +86,20 @@ Getting their K's mean diagonal:
 
 * **Compute their K** from the same genotypes when you can (the tool itself, or the formula). GCTA's GRM
   (also plink2 `--make-grm-bin`) has diagonal `1 + F`: **≈ 1 in outbred samples, ≈ 2 in inbred lines**
-  (F ≈ 1; 1.99 on the bundled mice). GEMMA `-gk 2` (standardised) is ≈ 1 when outbred; GEMMA `-gk 1`
+  (F ≈ 1; 1.99 on the bundled mice). GEMMA `-gk 2` (standardised; it mean-imputes before scaling, so its diagonal stays ≈ 1 with missing
+  calls, and it drops MAF < 0.01 / missingness > 0.05 SNPs by default) is ≈ 1 when outbred; GEMMA `-gk 1`
   (centred, not standardised) has diagonal ≈ the mean of `2p(1-p)(1+F)` over SNPs, well below 1:
   compute it.
-* pylmm's `calculate_kinship` / `pylmm kinship` have mean diagonal ≈ 1 whatever the inbreeding (every SNP
-  is standardised over the sample), a little less with missing calls or monomorphic SNPs (bug 8).
+* pylmm's default `calculate_kinship` / `pylmm kinship` (`kind="standardized"`) have mean diagonal ≈ 1
+  whatever the inbreeding (every SNP is standardised over the sample), about 1 − the missing rate with
+  missing calls (a missing call adds nothing to the diagonal). Constant SNPs are not counted in `m` (in
+  1.0.0 they were, which shrank K: bug 8; `legacy=True` / `--legacy-kinship` reproduce it).
+* EMMA's IBS kinship (`kind="ibs"`, `--kinship-type ibs`; EMMA-era inbred mouse papers) has diagonal 1,
+  but its off-diagonals are the share of alleles in common, ≈ 0.5–0.7 between unrelated strains, so its
+  *centred* scale `trace(P K P)/(n − 1)` is far below 1 (0.34 on the bundled 94 HMDP strains) and its `h`
+  is larger than the standardized K's for the same data (median 0.70 vs 0.43 over 20 HMDP transcripts,
+  with about the same PVE, 0.44 vs 0.42). `pylmm.kinship.kinship_scale(K)` returns both scales;
+  `pylmm kinship -v` logs them.
 
 ```python
 def gcta_grm(G):
@@ -127,9 +136,10 @@ With an inbred GCTA-style GRM, `c ≈ 1/2`: pylmm's `h = 0.5` corresponds to `0.
 
 **PVE** (proportion of phenotypic variance explained; GEMMA's `pve estimate`) does not depend on the
 scale of K: `PVE = h d / (h d + 1 - h)` with `d` = the mean diagonal of the K that was fitted (GEMMA
-uses `trace(K)/n`; the centred version uses `d = trace(P K P) / (n - 1)`, `P = I - 11'/n`). Report PVE
-when the paper reports PVE, when you cannot reconstruct their K, or when you want one number that means
-the same with any kinship scaling:
+uses `trace(K)/n`, `kinship_scale(K).mean_diag`). With an intercept in the model, the centred version
+`d = trace(P K P) / (n - 1)`, `P = I - 11'/n` (`kinship_scale(K).centered_mean_diag`), is the one to use
+for a K with large off-diagonals, such as IBS. Report PVE when the paper reports PVE, when you cannot
+reconstruct their K, or when you want one number that means the same with any kinship scaling:
 
 ```python
 def pve(h, K):
@@ -138,6 +148,26 @@ def pve(h, K):
 
 print("PVE: pylmm K %.3f, GCTA GRM %.3f" % (pve(h_m, K_mice), pve(h_fit, K_gcta)))
 assert abs(pve(h_m, K_mice) - pve(h_fit, K_gcta)) < 0.02
+```
+
+The same with EMMA's IBS kinship, whose diagonal is 1 by construction: use the centred scale.
+
+```python
+from pylmm.kinship import kinship_scale
+
+K_ibs = calculate_kinship(G_mice / 2, kind="ibs")         # IBS needs 0 / 0.5 / 1 genotypes
+s_ibs, s_std = kinship_scale(K_ibs), kinship_scale(K_mice)
+h_ibs = LMM(y_mice, K_ibs).fit()[0]
+
+
+def pve_centred(h, s):
+    return h * s.centered_mean_diag / (h * s.centered_mean_diag + 1 - h)
+
+
+print("IBS: mean diag %.2f, centred %.2f; h %.3f (standardized K: %.3f)"
+      % (s_ibs.mean_diag, s_ibs.centered_mean_diag, h_ibs, h_m))
+print("PVE: IBS %.3f, standardized %.3f" % (pve_centred(h_ibs, s_ibs), pve_centred(h_m, s_std)))
+assert h_ibs > h_m and abs(pve_centred(h_ibs, s_ibs) - pve_centred(h_m, s_std)) < 0.1
 ```
 
 When comparing with another tool or a paper, also check:

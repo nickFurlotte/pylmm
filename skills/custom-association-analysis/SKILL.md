@@ -7,7 +7,7 @@ description: Write custom association analyses with the pylmm Python library (LM
 
 The building blocks (details in [docs/guide.md](../../docs/guide.md)):
 
-* `calculate_kinship(W)` → K; `scipy.linalg.eigh(K)` → `kva, kve` (compute once, reuse).
+* `calculate_kinship(G_raw)` → K, from **raw** genotypes (`norm_genotype=False`; then it is `pylmm kinship`'s K); `scipy.linalg.eigh(K)` → `kva, kve` (compute once, reuse).
 * `LMM(Y, K, kva, kve, X0=X0)` then `.fit()` (null model, REML) and `.association(x)` (one SNP), or
   `.association_batch(X)` (many complete SNPs at once: arrays `t, p, beta, beta_var`; much faster in a
   loop; check `snp_estimable` first, as for `association`).
@@ -50,13 +50,15 @@ Y = 1 + 0.5 * sex + 0.35 * Gs[:, 700] + u + rng.normal(scale=np.sqrt(0.5), size=
 with PlinkReader("cohort") as r:                                    # standardised genotypes
     W = np.hstack([G_block for G_block, _ in r.iter_blocks()])
     bim = r.variants                                                # chrom, snp, cm, bp, a1, a2
+with PlinkReader("cohort", norm_genotype=False) as r:               # raw 0/0.5/1, for the kinship
+    G_raw = np.hstack([G_block for G_block, _ in r.iter_blocks()])
 X0 = np.column_stack([np.ones(n), sex])
 ```
 
 ## Many phenotypes, one eigendecomposition
 
 ```python
-K = calculate_kinship(W)
+K = calculate_kinship(G_raw)          # raw genotypes: reader-standardised W would be standardised twice
 kva, kve = linalg.eigh(K)
 phenos = {"trait": Y, "noise": rng.normal(size=n)}
 results = {}
@@ -114,9 +116,9 @@ for c in ZZ:
 print("lead SNP: p=%.1e with K from all SNPs, %.1e with LOCO" % (results["trait"][lead], p_loco[lead]))
 ```
 
-With missing calls, this `K_loco` is not exactly `calculate_kinship` of the other chromosomes' SNPs (the two
-normalise missing calls differently, a known, not yet fixed issue; max entry difference 0.16 with 10% missing calls in a
-check); with complete genotypes they agree. For a file too large for memory, accumulate `ZZ[c]` while
+This `K_loco` is `calculate_kinship` of the other chromosomes' raw genotypes (`norm_genotype=False`; the same
+missing-call convention as the reader's `W`), to rounding, unless some SNPs are constant: they are zeros in
+`W` and count in `m_all` here, but not in `calculate_kinship`'s `m`. For a file too large for memory, accumulate `ZZ[c]` while
 streaming SNP blocks; each block carries its SNPs' chromosomes:
 
 ```python

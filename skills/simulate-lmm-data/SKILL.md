@@ -28,6 +28,7 @@ print(geno.G.shape, np.bincount(geno.pops))
 | `family` | `n_families, n_sibs, m, include_parents, maf, seed` | nuclear sibships, relatedness 0.5 |
 | `bed` | `n_snps, snps, n_indivs, indivs, select, seed` | the bundled 1219 mice (0/0.5/1 coding, real LD, ~110 distinct genotypes, ~1% missing calls) |
 | `hmdp` | same | the bundled 94-strain EMMA text data |
+| `inbred_panel` | `n, m, n_founders, n_chrom, breakpoints, founder_maf, missing, seed` | 0/1 inbred strains, mosaics of a few founders (RI-like; `meta["chrom"]`); study S6 |
 
 For `bed` / `hmdp`: `n_snps` takes that many SNPs, chosen by `select`: `"first"` (the default: the first
 `n_snps` in `.bim` order, i.e. the start of chromosome 1 only), `"even"` (evenly spaced over the whole
