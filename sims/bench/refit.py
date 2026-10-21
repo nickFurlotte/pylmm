@@ -16,7 +16,7 @@ on seeded synthetic data (unrelated individuals, K from separate SNPs, h2 =
   log-likelihood shortfall of each against the other (``fit_snps`` vs
   ``fit(X=x)`` per SNP), max |dt| / max |t| and max |d -log10 p| of the scans;
 * the wall time of one ``gwas`` scan per test: Wald (fixed ``h``), Wald with
-  the exact refit, LRT and score.
+  the exact refit and the LRT.
 
 Run::
 
@@ -51,7 +51,7 @@ FULL_COVARIATES = [0, 2]
 QUICK_COVARIATES = [2]
 FULL_REPEATS = 3
 QUICK_REPEATS = 1
-TESTS = (("wald", False), ("wald", True), ("lrt", False), ("score", False))
+TESTS = (("wald", False), ("wald", True), ("lrt", False))
 
 
 def simulate(n: int, m: int, n_cov: int, seed: int = 0) -> dict[str, Any]:

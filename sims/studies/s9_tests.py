@@ -1,6 +1,6 @@
 """S9: the association tests (Phase 6.5) -- Wald, Wald with the exact refit, LRT and score.
 
-Questions: are the four tests calibrated under the null (lambda_GC, type-I
+Questions: are the tests calibrated under the null (lambda_GC, type-I
 error down to 1e-5), how much power does each have, does the exact per-SNP
 refit (`LMM.fit_snps`) reach the maximum the per-SNP grid search
 (``LMM.fit(X=x)``) and the dense oracle find, and what does each test cost?
@@ -13,10 +13,12 @@ Per replicate (one simulated phenotype on the cell's fixed cohort):
 2. ``y = u + e`` with ``u ~ N(0, h2 K)``; in the ``power`` scenario
    ``N_CAUSAL`` of the test SNPs are causal, each explaining ``vpe`` of the
    phenotypic variance;
-3. the four tests of `LMM.association_tests` on every test SNP: ``wald``
-   (REML null fit, the default scan), ``wald_refit`` (REML, `LMM.fit_snps`),
-   ``lrt`` (ML null and per-SNP ML fits, chi2(1)) and ``score`` (REML null
-   fit, F(1, n - q - 1)), each timed;
+3. on every test SNP, each timed: ``wald`` (REML null fit, the default scan),
+   ``wald_refit`` (REML, `LMM.fit_snps`), ``lrt`` (`gwas(test="lrt")`: reduced
+   ML null and per-SNP fits, chi2(1)), ``lrt_plain`` (the same with the plain
+   ML likelihood, whose fits sit at the h = 1 spike of a centred K: the LRT
+   before the PR #31 review, and GEMMA's) and ``score`` (`LMM.score_batch`,
+   REML null fit, F(1, n - q - 1));
 4. metrics: lambda_GC and the counts of null p-values below 0.05, 1e-3,
    1e-4 and 1e-5 (pooled over replicates in the report); in ``power``, the
    counts of causal p-values below 1e-3 and 1e-5 and their mean -log10 p;
@@ -48,9 +50,12 @@ import numpy as np
 from sims import genotypes, kinship, metrics, oracle, phenotypes
 
 NAME = "s9_tests"
-STUDY_VERSION = 1
+STUDY_VERSION = 2
 
-TESTS = ("wald", "wald_refit", "lrt", "score")
+TESTS = ("wald", "wald_refit", "lrt", "lrt_plain", "score")
+# lrt: the reduced-ML LRT of gwas(test="lrt"); lrt_plain: the plain ML LRT (both fits
+# on the full model, as GEMMA and the first version of this PR), study only; score:
+# LMM.score_batch, library only (not a gwas test).
 H2S = [0.0, 0.3, 0.8]
 SOURCES = {
     "unrelated300": {"source": "unrelated", "n": 300},
@@ -105,11 +110,20 @@ def _quiet(fn):
         return fn()
 
 
-def _scan(L, T, test):
-    """One test of all SNPs (in blocks of 1024, as gwas does); (p, seconds)."""
+def _scan(L, T, test, out):
+    """One test of all SNPs (in blocks of 1024, as gwas does); (p, seconds).
+
+    Records the null fit's h of the two LRTs in ``out``.
+    """
+    from pylmm.lmm import _lrt_result
+
     t0 = time.perf_counter()
+    ll0 = 0.0
     if test == "lrt":
-        L.fit(reml=False)
+        out["h0_lrt"] = L.lrt_null_fit()[0]
+    elif test == "lrt_plain":
+        h0, _, _, ll0 = L.fit(reml=False)
+        out["h0_lrt_plain"] = float(h0)
     else:
         L.fit(reml=True)
     ps = []
@@ -117,6 +131,11 @@ def _scan(L, T, test):
         X = T[:, b : b + 1024]
         if test == "wald_refit":
             r = L.association_tests(X, "wald", refit=True)
+        elif test == "score":
+            r = L.score_batch(X)
+        elif test == "lrt_plain":
+            f = L.fit_snps(X, reml=False)
+            r = _lrt_result(f.ll, ll0, f.beta, f.beta_var)
         else:
             r = L.association_tests(X, test)
         ps.append(r.p)
@@ -174,7 +193,7 @@ def run_cell(params, seed):
     null[causal] = False
     out: dict = {"n": len(y), "m_null": int(null.sum())}
     for test in TESTS:
-        p, dt = _quiet(lambda test=test: _scan(L, T, test))
+        p, dt = _quiet(lambda test=test: _scan(L, T, test, out))
         out["time_" + test] = dt
         out["us_per_snp_" + test] = 1e6 * dt / T.shape[1]
         out["lambda_" + test] = metrics.lambda_gc(p[null])
@@ -236,6 +255,16 @@ def summarize(df):
                     r["%s_%s" % (k, tag)] = d["%s_%s" % (k, tag)].max()
                 r["fallbacks_" + tag] = d["fallbacks_" + tag].sum()
                 r["at1_" + tag] = d["at1_" + tag].mean()
+        for t in ("lrt", "lrt_plain"):
+            r["h0_at1_" + t] = float((d["h0_" + t] >= 1.0 - 1e-9).mean())
+            r["h0_mean_" + t] = float(d["h0_" + t].mean())
+        # replicate overdispersion of the 0.05 counts: var over replicates / binomial var
+        m_rep = d["m_null"].to_numpy(dtype=float)
+        for test in TESTS:
+            k = d["n_0.05_%s" % test].to_numpy(dtype=float)
+            r["disp_0.05_" + test] = (
+                float(np.var(k, ddof=1) / np.mean(m_rep * 0.05 * 0.95)) if len(k) > 1 else np.nan
+            )
         out.append(r)
     return out
 
@@ -249,6 +278,7 @@ def report(df, outdir):
     pd.DataFrame(rows).to_csv(os.path.join(outdir, "summary.csv"), index=False)
     parts = ["# S9: Wald, Wald with the exact refit, LRT and score tests\n"]
     parts.append(_null_table([r for r in rows if r["scenario"] == "null"]))
+    parts.append(_lrt_table([r for r in rows if r["scenario"] in ("null", "tail")]))
     parts.append(_tail_table([r for r in rows if r["scenario"] in ("null", "tail")]))
     parts.append(_power_table([r for r in rows if r["scenario"] == "power"]))
     parts.append(_refit_table([r for r in rows if "dh_reml" in r]))
@@ -268,6 +298,29 @@ def _null_table(rows):
     for a in ("0.05", "1e-03"):
         for t in TESTS:
             cols.append(("%s %s" % (a, t), lambda r, a=a, t=t: _g(r["t1e_%s_%s" % (a, t)], "%.4f")))
+    parts.append(_table(rows, cols) + "\n")
+    return "".join(parts)
+
+
+def _lrt_table(rows):
+    parts = [
+        "\n## The LRT's null fit and the replicate dispersion\n\n"
+        "Share of replicates whose null ML fit is at h = 1 (and the mean null h): reduced ML "
+        "(lrt) vs plain ML (lrt_plain).  disp: the variance over replicates of the count of "
+        "null p-values below 0.05, over its binomial variance (1 = independent tests; the "
+        "Wilson intervals of the tail table assume 1).\n\n"
+    ]
+    cols = [
+        ("cohort", lambda r: r["cohort"]),
+        ("h2", lambda r: "%g" % r["h2"]),
+        ("scenario", lambda r: r["scenario"]),
+        ("at 1 lrt", lambda r: _g(r["h0_at1_lrt"], "%.2f")),
+        ("at 1 lrt_plain", lambda r: _g(r["h0_at1_lrt_plain"], "%.2f")),
+        ("mean h lrt", lambda r: _g(r["h0_mean_lrt"], "%.3f")),
+        ("mean h lrt_plain", lambda r: _g(r["h0_mean_lrt_plain"], "%.3f")),
+    ]
+    for t in TESTS:
+        cols.append(("disp %s" % t, lambda r, t=t: _g(r["disp_0.05_" + t], "%.1f")))
     parts.append(_table(rows, cols) + "\n")
     return "".join(parts)
 

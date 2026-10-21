@@ -29,6 +29,12 @@ def test_s9_quick_cells_and_report(tmp_path):
             assert 0.3 < r["lambda_" + t] < 3.0
     s9.report(pd.DataFrame(rows), str(tmp_path))
     text = (tmp_path / "summary.md").read_text()
-    for part in ("## Null calibration", "## The tail", "## Power", "## The exact refit", "## Cost"):
+    for part in (
+        "## Null calibration",
+        "## The LRT",
+        "## The tail",
+        "## Power",
+        "## The exact refit",
+    ):
         assert part in text
     assert (tmp_path / "summary.csv").exists()
