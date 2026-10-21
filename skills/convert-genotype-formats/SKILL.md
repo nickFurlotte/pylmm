@@ -168,9 +168,10 @@ the genotypes by ID:
 | pylmm text: `K` plus `K.id` (`FID IID` per line) | `--kinship K` | `np.loadtxt`, `samples.read_id_file` |
 | GEMMA `-gk` (`output/*.cXX.txt`, `*.sXX.txt`): n × n text in `.fam` order, no IDs | `--kinship` after writing the `.fam` IDs as its `.id` | `np.loadtxt` |
 
-A GRM is float32: about 7 significant digits, so a scan on it differs from one on the float64 text K by
-rounding (|Δt| ~ 1e-7). `pylmm kinship --out-format grm -o P` writes one (for GCTA, plink2 or
-`pylmm gwas --grm P`).
+Precision, best first: pylmm's text K and plink2 `--make-rel bin` (float64, exact); a GRM or `bin4`
+(float32, about 7 significant digits: scans move by |Δt| ~ 1e-7); a plink2 **text** `.rel` (`%g`, only 6
+significant digits: |Δt| up to ~1e-5). From plink2, ask for `--make-rel bin` rather than the text
+default. `pylmm kinship --out-format grm -o P` writes a GRM (for GCTA, plink2 or `pylmm gwas --grm P`).
 
 ```python
 from pylmm import kinship_io

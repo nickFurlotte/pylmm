@@ -131,7 +131,7 @@ hl.export_plink(mt, "geno", ind_id=mt.s, fam_id=mt.s,
 | tool | output | read into pylmm |
 |---|---|---|
 | GCTA `--make-grm`, plink2 `--make-grm-bin` | `.grm.bin` (float32 lower triangle with diagonal, row-major), `.grm.N.bin`, `.grm.id` (FID IID, no header; *checked* for plink2) | native: `pylmm gwas --grm PREFIX`, `kinship_io.read_grm` |
-| plink2 `--make-rel` | `.rel` text (lower triangle by default, `square`), `.rel.bin` (float64; `bin4` float32; square by default), `.rel.id` with a `#FID IID` or `#IID` header (*checked*, plink2 a.7.13) | native: `pylmm gwas --kinship X.rel`, `kinship_io.read_rel` |
+| plink2 `--make-rel` | `.rel` text (lower triangle by default, `square`), `.rel.bin` (float64; `bin4` float32; square by default), `.rel.id` with a `#FID IID` or `#IID` header (*checked*, plink2 a.7.13); text is `%g`, 6 significant digits: prefer `bin` | native: `pylmm gwas --kinship X.rel`, `kinship_io.read_rel` |
 | GEMMA `-gk 1` / `-gk 2` | `output/*.cXX.txt` / `*.sXX.txt`, n × n text in `.fam` order | `np.loadtxt`; write the `.fam` IDs as `.id` |
 
 On the bundled 1219 mice, a plink2 GRM (5000 SNPs) has mean diagonal 1.99 (inbred: 1 + F ≈ 2), while

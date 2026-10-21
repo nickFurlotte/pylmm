@@ -85,7 +85,10 @@ maps them).
   triangle or square), `X.rel.bin` (float64 or `bin4` float32, square or triangle) with `X.rel.id` (a
   `#FID IID` or `#IID` header; no FID -> `0`, as plink2 writes to a `.fam`). `pylmm gwas --kinship X.rel`
   (or `.rel.gz` / `.rel.bin`) and `PlinkReader.read_kinship` use it. A plink2 `.rel` used to fail (the
-  `#FID IID` header was read as a sample, a triangle as a ragged matrix).
+  `#FID IID` header was read as a sample, a triangle as a ragged matrix). plink2's text `.rel` holds 6
+  significant digits (`%g`), less than a float32 GRM (scans: |Δt| up to 8e-6 vs 1.2e-7 against its float64
+  `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
+  matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
 - `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
 
 ### Changed

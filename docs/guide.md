@@ -316,8 +316,10 @@ plink2's `--make-rel` files (`P.rel` text, `P.rel.bin` float64 or float32, squar
 
 A GRM holds K in **float32**, about 7 significant digits: what you read back is K rounded
 (`kinship_io.round_like_grm(K)`), and a scan on it matches the scan on the float64 text kinship to
-rounding (|Δt| about 1e-7 on synthetic data), not bit for bit. Keep the text format when you need the
-exact K.
+rounding (|Δt| about 1e-7 on synthetic data), not bit for bit. pylmm's own text kinship
+(`pylmm kinship -o K`) keeps every digit; use it when you need the exact K. A plink2 *text* `.rel` is
+the least precise of all: plink2 prints it with 6 significant digits (`%g`), so scans on it move by
+|Δt| up to about 1e-5. From plink2, prefer `--make-rel bin` (float64, exact) or `--make-grm-bin`.
 
 ```python
 from pylmm import kinship_io
