@@ -36,7 +36,9 @@ from pylmm import kinship_io, plink_io, samples
 from pylmm.cli._common import (
     UsageError,
     add_logging_options,
+    add_pfile_options,
     check_log_file,
+    check_pfile_args,
     check_writable,
     genotype_source,
     log,
@@ -137,6 +139,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="FILE",
         help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
     )
+    add_pfile_options(source, geno)
 
     pheno = p.add_argument_group("phenotype")
     pheno_file = pheno.add_mutually_exclusive_group()
@@ -198,7 +201,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="FILE",
         help="n x n kinship matrix, whitespace-separated text (or .gz), from "
         "`pylmm kinship`.  "
-        "With --bfile/--tfile its rows are matched to the genotypes by the IDs in FILE.id if "
+        "With --bfile/--tfile/--pfile its rows are matched to the genotypes by the IDs in FILE.id if "
         "that exists; otherwise they are assumed to be in genotype order (with a warning).  "
         "With --emma-geno, which has no IDs, the rows are always in genotype order: no "
         "warning without FILE.id, and a FILE.id is ignored (with a warning).  A plink2 "
@@ -317,6 +320,7 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
     if args.emma_geno and args.id_match != "fid-iid":
         parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    check_pfile_args(parser, args)
     if args.grm is not None:
         # The GRM is read as a kinship file named PREFIX.grm.bin (kinship_io.kinship_format).
         args.kinship = kinship_io.grm_prefix(args.grm) + ".grm.bin"
@@ -632,7 +636,7 @@ def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
 
 
 def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
-    """Open the genotype input (``--bfile``, ``--tfile`` or ``--emma-geno``).
+    """Open the genotype input (``--bfile``, ``--tfile``, ``--pfile`` or ``--emma-geno``).
 
     The reader also reads the ``--pheno`` file (or ``PREFIX.phenos``).
 
@@ -649,7 +653,10 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
             pheno_file=args.pheno,
             norm_genotype=not args.remove_missing_genotypes,
             id_match=ID_MATCH_CHOICES[args.id_match],
+            dosage=not args.hardcalls,
         )
+    except ImportError as e:  # --pfile without pgenlib: the message says how to install it
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except OSError as e:  # e.g. a missing .fam: name the option
         raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except ValueError as e:  # the message names the file (genotype or phenotype)
