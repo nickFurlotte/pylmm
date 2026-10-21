@@ -197,6 +197,18 @@ REL_TEXT_RTOL_P = 2e-4
 EIGEN_REUSE_RTOL = 1e-9
 EIGEN_REUSE_ATOL = 1e-11
 
+# Leave-one-chromosome-out kinships (pylmm.loco.LocoKinship.kinship(c)) vs
+# calculate_kinship of the SNPs off chromosome c: the same terms, summed in
+# another order (per chromosome, then over chromosomes, vs blocks of 1000 used
+# SNPs).  |a - b| <= LOCO_KINSHIP_ATOL_SCALE * max|b|.  Measured (Phase 6.4,
+# macOS arm64, numpy 2.x / Accelerate; 12 seeded synthetic sets, n 20-400, m
+# 300-4000, 2-7 chromosomes sorted or interleaved, 0/1 and 0/0.5/1 genotypes,
+# 3% missing calls, constant and all-missing SNPs; each kind, every c and all
+# SNPs): max |a - b| / max|b| 2.4e-15 (standardized), 2.6e-15 (centered), 1.1e-15
+# (ibs); on the README BED (1219 x 98,740, chromosomes 1, 19, all) 6.8e-16.
+# ~40x the worst.
+LOCO_KINSHIP_ATOL_SCALE = 1e-13
+
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|
 PSD_RTOL = 1e-10  # min eigenvalue >= -PSD_RTOL * max eigenvalue

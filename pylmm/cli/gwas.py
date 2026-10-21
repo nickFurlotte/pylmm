@@ -9,7 +9,9 @@
 Reads genotypes (PLINK BED or TPED, or an EMMA matrix), a phenotype, optional
 covariates and a precomputed kinship (``pylmm kinship``), fits the null model
 once (or per SNP with ``--refit``) and writes one tab-separated line per SNP:
-``SNP_ID BETA BETA_SD F_STAT P_VALUE``.
+``SNP_ID BETA BETA_SD F_STAT P_VALUE``.  With ``--loco`` the kinships are
+built from the genotypes instead, one per chromosome, leaving that
+chromosome out (`pylmm.loco`; `scan_loco`).
 
 The steps are separate functions: `load_inputs` (genotypes, phenotype,
 covariates, kinship and its eigendecomposition, aligned by sample ID),
@@ -20,6 +22,7 @@ SNPs read with `pylmm.plink_io.PlinkReader.iter_blocks`, written in file order).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import gzip
 import os
 import time
@@ -43,6 +46,7 @@ from pylmm.cli._common import (
     positive_int,
 )
 from pylmm.genotypes import DEFAULT_BLOCK_SIZE, Variants, check_block_size
+from pylmm.kinship import KINSHIP_KINDS, KinshipKind, kinship_scale
 from pylmm.lmm import (
     LMM,
     AssociationResult,
@@ -51,6 +55,7 @@ from pylmm.lmm import (
     snp_estimable_columns,
     subset_testable,
 )
+from pylmm.loco import LocoKinship
 
 FloatArray = NDArray[np.float64]
 SnpResult = tuple[Any, Any, Any, Any]
@@ -94,7 +99,12 @@ examples:
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
       --block-size 200 -o results.tsv
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
-      --no-batch -o results.tsv"""
+      --no-batch -o results.tsv
+
+  # leave-one-chromosome-out: no --kinship, K_{-c} built from the genotypes
+  pylmm gwas --bfile study --pheno study.phen --loco -o results.tsv
+  pylmm gwas --emma-geno snps.emma --emma-pheno pheno.emma \\
+      --loco --emma-map snps.map.tsv --kinship-type ibs -o results.tsv"""
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +201,9 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "has its own)",
     )
 
-    kin = p.add_argument_group("kinship (--kinship or --grm)")
-    kin_source = kin.add_mutually_exclusive_group(required=True)
+    kin = p.add_argument_group("kinship (--kinship, --grm or --loco)")
+    # Required unless --loco (check_args).
+    kin_source = kin.add_mutually_exclusive_group()
     kin_source.add_argument(
         "--kinship",
         metavar="FILE",
@@ -229,6 +240,31 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         choices=sorted(ID_MATCH_CHOICES),
         default="fid-iid",
         help="match sample IDs on FID and IID (default) or on the IID alone (PLINK input only)",
+    )
+
+    loco = p.add_argument_group("leave one chromosome out (instead of --kinship)")
+    loco.add_argument(
+        "--loco",
+        action="store_true",
+        help="test the SNPs of each chromosome with a kinship built from the SNPs of the other "
+        "chromosomes (like GCTA --mlma-loco), computed from the genotypes in one pass (no "
+        "--kinship): one null fit per chromosome.  Needs each SNP's chromosome (the .bim or "
+        ".map file; --emma-map for --emma-geno) and the SNPs of a chromosome together in the "
+        "file.  Memory: one n x n matrix per chromosome",
+    )
+    loco.add_argument(
+        "--kinship-type",
+        choices=KINSHIP_KINDS,
+        default=None,
+        help="with --loco: the kinship to build, as `pylmm kinship --kinship-type` "
+        "(standardized, centered or ibs; default: standardized)",
+    )
+    loco.add_argument(
+        "--emma-map",
+        metavar="FILE",
+        help="with --loco and --emma-geno: the chromosome of each EMMA row, one line per row "
+        "in order: a header line naming a chr (or chrom, CHR, #CHROM) column, as "
+        "data/hmdp.liver.snps.map.tsv, or no header and the chromosome first, as a PLINK .map",
     )
 
     model = p.add_argument_group("model")
@@ -317,6 +353,28 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
     if args.emma_geno and args.id_match != "fid-iid":
         parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    if args.loco:
+        given = [f for f, v in (("--kinship", args.kinship), ("--grm", args.grm)) if v]
+        if given:
+            parser.error(
+                "--loco builds the kinships from the genotypes: drop %s (to use your own "
+                "per-chromosome kinships, see the custom-association-analysis skill)" % given[0]
+            )
+        if args.eigen:
+            parser.error("--eigen does not apply to --loco (one kinship per chromosome)")
+        if args.emma_geno and not args.emma_map:
+            parser.error(
+                "--loco needs the chromosome of each SNP, and EMMA genotypes have none: give a "
+                "marker map with --emma-map (e.g. data/hmdp.liver.snps.map.tsv)"
+            )
+    elif args.kinship is None and args.grm is None:
+        parser.error("one of the arguments --kinship --grm is required (or --loco)")
+    else:
+        for flag, value in (("--kinship-type", args.kinship_type), ("--emma-map", args.emma_map)):
+            if value is not None:
+                parser.error("%s applies only to --loco" % flag)
+    if args.emma_map and not args.emma_geno:
+        parser.error("--emma-map applies only to --emma-geno (PLINK input has a .bim or .map)")
     if args.grm is not None:
         # The GRM is read as a kinship file named PREFIX.grm.bin (kinship_io.kinship_format).
         args.kinship = kinship_io.grm_prefix(args.grm) + ".grm.bin"
@@ -612,6 +670,11 @@ class GwasInputs:
         all covariates.
     kva, kve : numpy.ndarray or None
         The ``--eigen`` decomposition of K, or None to compute it.
+    loco : pylmm.loco.LocoKinship or None
+        With ``--loco``: the leave-one-chromosome-out kinships, over all of
+        ``reader.indivs`` (K is then the kinship of all SNPs).
+    chroms : numpy.ndarray or None
+        With ``--loco``: the chromosome of each SNP, in file order.
     """
 
     reader: plink_io.PlinkReader
@@ -621,6 +684,8 @@ class GwasInputs:
     keep: NDArray[np.bool_]
     kva: FloatArray | None
     kve: FloatArray | None
+    loco: LocoKinship | None = None
+    chroms: NDArray[np.object_] | None = None
 
 
 def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
@@ -658,7 +723,9 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
 
 def _check_input_files(args: argparse.Namespace, reader: plink_io.PlinkReader) -> None:
     """Fail early, before the kinship is read, if it or a phenotype or covariate file is missing."""
-    if args.grm is not None:
+    if args.loco:
+        pass  # no kinship file
+    elif args.grm is not None:
         for fn in (args.kinship, kinship_io.grm_prefix(args.kinship) + ".grm.id"):
             if not os.path.isfile(fn):
                 raise UsageError("--grm %s: no such file %s" % (args.grm, fn))
@@ -802,12 +869,19 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
     # The kinship is read before the covariates: when it has IDs, the
     # genotype individuals that are not in it are dropped from the reader
     # (indivs, phenos, SNP vectors).
-    log.info("Reading kinship...")
-    begin = time.time()
-    K, kinship_aligned = _usage(read_aligned_kinship, args.kinship, reader)
-    log.info(
-        "Read the %d x %d kinship matrix in %0.3fs", K.shape[0], K.shape[1], time.time() - begin
-    )
+    loco: LocoKinship | None = None
+    chroms: NDArray[np.object_] | None = None
+    if args.loco:
+        chroms = loco_chromosomes(args, reader)
+        loco = compute_loco_kinship(args, reader, chroms)
+        K, kinship_aligned = loco.kinship(), False
+    else:
+        log.info("Reading kinship...")
+        begin = time.time()
+        K, kinship_aligned = _usage(read_aligned_kinship, args.kinship, reader)
+        log.info(
+            "Read the %d x %d kinship matrix in %0.3fs", K.shape[0], K.shape[1], time.time() - begin
+        )
 
     if args.emma_pheno:
         # rows are phenotypes, columns are individuals
@@ -827,7 +901,9 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
     _usage(check_covariates, X0, what=name)
 
     kva, kve = _eigen(args, K, reader, keep, kinship_aligned)
-    return GwasInputs(reader=reader, Y=Y, X0=X0, K=K, keep=keep, kva=kva, kve=kve)
+    return GwasInputs(
+        reader=reader, Y=Y, X0=X0, K=K, keep=keep, kva=kva, kve=kve, loco=loco, chroms=chroms
+    )
 
 
 def _eigen(
@@ -1254,6 +1330,238 @@ def _scan_snps(
     return count
 
 
+# ---------------------------------------------------------------------------
+# leave one chromosome out (--loco)
+# ---------------------------------------------------------------------------
+
+_MAP_CHROM_COLUMNS = ("chr", "chrom", "CHR", "#CHROM", "chromosome", "CHROM")
+"""Header names of the chromosome column of an ``--emma-map`` file."""
+
+
+def read_emma_map(fn: str, m: int) -> NDArray[np.object_]:
+    """The chromosome of each of the ``m`` rows of an EMMA genotype file, from ``--emma-map``.
+
+    The file has one line per EMMA row, in order: either a header line that
+    names the chromosome column (`_MAP_CHROM_COLUMNS`; e.g.
+    ``data/hmdp.liver.snps.map.tsv``, whose ``row`` column, if present, must
+    count 1, 2, ...), or no header and the chromosome in the first column (a
+    PLINK ``.map`` or ``.bim``).
+
+    Raises
+    ------
+    pylmm.samples.InputError
+        Naming the file, if it cannot be read, has another number of lines
+        than ``m``, or its ``row`` column is out of order.
+    """
+    try:
+        with open(fn) as f:
+            lines = [line.split() for line in f if line.strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise samples.InputError("--emma-map %s: cannot read it (%s)" % (fn, e)) from e
+    if not lines:
+        raise samples.InputError("--emma-map %s is empty" % fn)
+    header = lines[0]
+    col = next((header.index(c) for c in _MAP_CHROM_COLUMNS if c in header), None)
+    rows = lines[1:] if col is not None else lines
+    col = 0 if col is None else col
+    if len(rows) != m:
+        raise samples.InputError(
+            "--emma-map %s has %d SNP lines but the EMMA genotype file has %d rows (one line "
+            "per row, in order%s)"
+            % (fn, len(rows), m, ", after the header" if rows is not lines else "")
+        )
+    short = next((k for k, r in enumerate(rows) if len(r) <= col), None)
+    if short is not None:
+        raise samples.InputError(
+            "--emma-map %s, SNP line %d: no chromosome column (%d fields)"
+            % (fn, short + 1, len(rows[short]))
+        )
+    if rows is not lines and "row" in header:
+        rc = header.index("row")
+        bad = next((k for k, r in enumerate(rows) if len(r) <= rc or r[rc] != str(k + 1)), None)
+        if bad is not None:
+            raise samples.InputError(
+                "--emma-map %s: SNP line %d has row %r, expected %d (one line per EMMA row, in "
+                "order)" % (fn, bad + 1, rows[bad][rc] if len(rows[bad]) > rc else "", bad + 1)
+            )
+    return np.array([r[col] for r in rows], dtype=object)
+
+
+def loco_chromosomes(args: argparse.Namespace, reader: plink_io.PlinkReader) -> NDArray[np.object_]:
+    """The chromosome of each SNP for ``--loco``, checked to be in contiguous runs.
+
+    From the ``.bim`` / ``.map`` file (`pylmm.plink_io.PlinkReader.variants`),
+    or for EMMA input from ``--emma-map``.
+
+    Raises
+    ------
+    UsageError
+        If there is no chromosome information, a chromosome's SNPs are not
+        together in the file, or there are fewer than two chromosomes.
+    """
+    if reader.type == "emma":
+        chroms = read_emma_map(args.emma_map, len(reader.variants))
+    else:
+        variants = _usage(lambda: reader.variants)
+        if variants.chrom is None:
+            raise UsageError("--loco needs the chromosome of each SNP; the genotype input has none")
+        chroms = np.asarray(variants.chrom, dtype=object)
+    order: list[str] = []
+    if len(chroms):
+        starts = np.flatnonzero(np.r_[True, chroms[1:] != chroms[:-1]])
+        order = [str(chroms[i]) for i in starts]
+    if len(set(order)) != len(order):
+        again = next(c for k, c in enumerate(order) if c in order[:k])
+        raise UsageError(
+            "--loco: the SNPs of chromosome %s are not together in the genotype file (each "
+            "chromosome's SNPs must be one run; sort them, e.g. plink2 --sort-vars)" % again
+        )
+    if len(order) < 2:
+        raise UsageError(
+            "--loco needs SNPs on at least two chromosomes; the genotype input has %s"
+            % ("chromosome %s only" % order[0] if order else "no SNP")
+        )
+    log.info("--loco: %d SNPs on %d chromosomes (%s)", len(chroms), len(order), ", ".join(order))
+    return chroms
+
+
+def compute_loco_kinship(
+    args: argparse.Namespace, reader: plink_io.PlinkReader, chroms: NDArray[np.object_]
+) -> LocoKinship:
+    """Read the genotypes once and build the leave-one-chromosome-out kinships.
+
+    The raw genotypes of every individual of ``reader`` (as ``pylmm
+    kinship`` reads them: the kinship of ``--kinship-type`` of the SNPs
+    of the other chromosomes, the K ``pylmm kinship`` would write for them,
+    to rounding; ``centered`` counts 0/1/2 copies), read in blocks of
+    ``--block-size``.
+
+    Raises
+    ------
+    UsageError
+        For an IBS genotype that is not 0, 0.5 or 1, or a chromosome
+        without a usable SNP outside it.
+    """
+    kind: KinshipKind = args.kinship_type or "standardized"
+    loco = LocoKinship(
+        len(reader.indivs),
+        kind=kind,
+        scale=2.0 if kind == "centered" else 1.0,  # 0/0.5/1 fractions -> 0/1/2 counts
+    )
+    log.info("Computing the leave-one-chromosome-out kinships (%s)...", kind)
+    begin = time.time()
+    norm = reader.norm_genotype
+    reader.norm_genotype = False  # raw genotypes; iter_blocks captures it at the call
+    try:
+        blocks = reader.iter_blocks(args.block_size)
+    finally:
+        reader.norm_genotype = norm
+    start = 0
+    for G, _ in blocks:
+        b = G.shape[1]
+        try:
+            loco.add_block(G, chroms[start : start + b])
+        except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
+            raise UsageError(
+                "--kinship-type %s, SNPs %d-%d: %s" % (kind, start + 1, start + b, e)
+            ) from e
+        start += b
+        del G
+    if start != len(chroms):  # the reader and the variant metadata disagree
+        raise samples.InputError(
+            "read %d SNPs from the genotype file but its SNP list has %d" % (start, len(chroms))
+        )
+    if loco.n_all_missing:
+        log.warning("skipped %d SNPs with no called genotype", loco.n_all_missing)
+    skipped = loco.n_snps - loco.n_used - loco.n_all_missing
+    if skipped:
+        log.info("skipped %d constant SNPs", skipped)
+    for c in loco.chromosomes:
+        if loco.snps_used(leave_out=c) == 0:
+            raise UsageError(
+                "--loco: no usable SNP outside chromosome %s, so no kinship without it" % c
+            )
+    log.info(
+        "Built the kinships of %d SNPs (%d used) in %0.3fs",
+        loco.n_snps,
+        loco.n_used,
+        time.time() - begin,
+    )
+    return loco
+
+
+def _loco_model(inputs: GwasInputs, args: argparse.Namespace, chrom: str) -> tuple[GwasInputs, LMM]:
+    """The inputs and the null model for chromosome ``chrom``: K = K_{-chrom}."""
+    assert inputs.loco is not None
+    K = inputs.loco.kinship(leave_out=chrom)
+    if not inputs.keep.all():
+        K = K[inputs.keep][:, inputs.keep]
+    scale = kinship_scale(K)
+    log.info(
+        "chromosome %s: K from the %d SNPs of the other chromosomes (mean diagonal %0.4f, "
+        "centred %0.4f)",
+        chrom,
+        inputs.loco.snps_used(leave_out=chrom),
+        scale.mean_diag,
+        scale.centered_mean_diag,
+    )
+    inputs_c = dataclasses.replace(inputs, K=K, kva=None, kve=None)
+    return inputs_c, fit_null_model(inputs_c, args)
+
+
+def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: IO[str]) -> int:
+    """`scan` with ``--loco``: each chromosome's SNPs tested with its own K and null fit.
+
+    The SNPs are read once more, in blocks of ``--block-size``, and written
+    in file order, with the columns of `scan`.  When a chromosome starts, its
+    kinship ``K_{-c}`` (`pylmm.loco.LocoKinship.kinship`, restricted to the
+    tested individuals) is eigendecomposed and the null model fitted
+    (`fit_null_model`, so ``--ml``, ``--refit`` and the fit options apply
+    per chromosome); the SNPs are then tested as by `scan`
+    (`iter_block_results`).  Unlike `scan`, a reader error is raised as is
+    (the SNPs of the blocks before it are written), without a one-SNP-at-a-
+    time retry.
+
+    Returns
+    -------
+    int
+        The number of SNPs.
+    """
+    assert inputs.chroms is not None
+    X0 = inputs.X0
+    Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
+    counts: dict[str, int] = {}
+    count = 0
+    current: str | None = None
+    inputs_c, L = inputs, None
+    write_header(out)
+    blocks = inputs.reader.iter_blocks(args.block_size)
+    try:
+        for G, variants in blocks:
+            b = G.shape[1]
+            _log_progress(count, b)
+            cs = inputs.chroms[count : count + b]
+            a = 0
+            while a < b:  # runs of one chromosome within the block
+                e = a + 1
+                while e < b and cs[e] == cs[a]:
+                    e += 1
+                if cs[a] != current:
+                    current = str(cs[a])
+                    L = None  # release the previous chromosome's model first
+                    inputs_c, L = _loco_model(inputs, args, current)
+                assert L is not None
+                _write_block(out, G[:, a:e], variants.snp[a:e], inputs_c, L, Q0, args, counts)
+                a = e
+            count += b
+            del G, variants
+    finally:
+        close = getattr(blocks, "close", None)
+        if close is not None:
+            close()
+    return _finish(count, counts)
+
+
 def run(args: argparse.Namespace) -> None:
     """Run ``pylmm gwas`` with parsed options.
 
@@ -1269,13 +1577,17 @@ def run(args: argparse.Namespace) -> None:
     """
     check_writable("--out", args.out)
     inputs = load_inputs(args)
-    L = fit_null_model(inputs, args)
+    # With --loco the null model is fitted per chromosome (scan_loco).
+    L = fit_null_model(inputs, args) if inputs.loco is None else None
     try:
         out = open(args.out, "w")
     except OSError as e:
         raise UsageError("--out %s: cannot write it (%s)" % (args.out, e)) from e
     with out:
-        n = scan(inputs, L, args, out)
+        if L is None:
+            n = scan_loco(inputs, args, out)
+        else:
+            n = scan(inputs, L, args, out)
     log.info("Wrote the results for %d SNPs to %s", n, args.out)
 
 
