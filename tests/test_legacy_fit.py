@@ -44,9 +44,15 @@ def v100(tmp_path_factory):
                 timeout=60,
             )
     except (OSError, subprocess.SubprocessError):
-        pytest.skip("the %s tag is not available (shallow clone?)" % V100)
+        msg = "the %s tag is not available (a shallow clone without tags?)" % V100
+        if os.environ.get("CI"):  # CI must run the 1.0.0 contract, not skip it
+            pytest.fail(msg + "; the pytest jobs check out with fetch-tags")
+        pytest.skip(msg)
     with tarfile.open(tar) as t:
-        t.extractall(d / "src", filter="data")
+        if sys.version_info >= (3, 11, 4):  # extraction filters (PEP 706)
+            t.extractall(d / "src", filter="data")
+        else:  # our own git archive of this repository
+            t.extractall(d / "src")
     return str(d / "src")
 
 

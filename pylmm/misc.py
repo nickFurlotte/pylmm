@@ -79,10 +79,12 @@ def fit_two(
     Notes
     -----
     Cost: one eigendecomposition of an ``n x n`` matrix per ``w`` grid point,
-    so ``ngrids + 1`` of them (O(``ngrids`` * n**3)), plus about 100 likelihood
-    evaluations (the fixed inner heritability grid) and a bounded refinement
-    for each. This is slow for large ``n``; lower ``ngrids`` for a coarse
-    answer (it cuts the number of eigendecompositions, not the inner 100).
+    so ``ngrids + 1`` of them (O(``ngrids`` * n**3)), plus for each 101
+    likelihood evaluations (the fixed inner heritability grid) and a bounded
+    refinement per local maximum of that grid. ``w`` itself is not refined:
+    the result is a grid point. This is slow for large ``n``; lower
+    ``ngrids`` for a coarse answer (it cuts the number of eigendecompositions,
+    not the inner 101).
 
     Examples
     --------
