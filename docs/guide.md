@@ -301,11 +301,16 @@ assert 0.4 < h < 0.8
 * `h` is a numpy float; `sigma` (the total variance `s2`) and `ll` are floats; `beta` is a (q, 1) array.
   The genetic and residual variances are `h * sigma` and `(1 - h) * sigma`.
 * After `fit`, the model keeps `opt_h`, `opt_sigma`, `opt_beta`, `opt_ll`, and the log-likelihood on the
-  search grid, `ll_grid` over `h_grid` (0, 0.01, ..., 0.99).
-* `fit(reml=False)` is ML. Prefer REML: with a centred kinship built from more SNPs than individuals the
-  ML optimum can run to the 0.99 cap (no MLE exists; bug 17 in the simulation studies).
-* `h` is searched on [0, 0.99]: `h = 1` is never returned and a true h² ≥ 0.98 is reported as 0.99
-  (known, not yet fixed). Treat 0 and 0.99 as boundary estimates.
+  search grid, `ll_grid` over `h_grid` (0, 0.01, ..., 1).
+* `fit(reml=False)` is ML, with `sigma = Q / n`. Prefer REML: with a centred kinship built from more SNPs
+  than individuals the ML likelihood has no maximum (it grows towards h = 1; bug 17 in the simulation
+  studies), and `fit` warns.
+* `h` is searched on the closed interval [0, 1]: every local maximum of the grid, the ends included, is
+  refined and the best is kept. 0 and 1 are boundary estimates ("no K variance detected", "no residual
+  variance detected"), not precise values.
+* `LMM(..., legacy_fit=True)` (and `gwas(..., legacy_fit=True)`, `pylmm gwas --legacy-fit`) fits as
+  pylmm 1.0.0 did: `h` on 0, ..., 0.99 only (a true h² ≥ 0.98 reads 0.99), the first local maximum, not
+  the best, and `sigma = Q / (n - p)` under ML. Use it to reproduce 1.0.0 results.
 
 **Is `h` comparable with a published h²?** `h` is the share of `s2` on the scale of K. It equals the
 proportion of phenotypic variance explained only if K is scaled so that the average variance it implies is
@@ -534,8 +539,10 @@ pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.phen
    *major* allele for plink 1.9 without `--keep-allele-order`), opposite in sign to plink2 `--glm`.
    With `--remove-missing-genotypes`, SNPs without missing calls are tested on the raw 0–1 scale and SNPs
    with missing calls on the standardised scale, so BETA is not comparable across SNPs (t and p are fine).
-7. **`h` at a boundary.** 0.99 means "≥ 0.98, capped", 0 means none detected; neither is a precise
-   estimate. ML can sit at 0.99 for a centred K from more SNPs than individuals; use REML.
+7. **`h` at a boundary.** 1 means no residual variance detected, 0 none due to K; neither is a precise
+   estimate (use a profile-likelihood interval, `estimate-heritability` skill). ML can run to 1 for a
+   centred K from more SNPs than individuals (`fit` warns); use REML. (pylmm 1.0.0 and `--legacy-fit`
+   cap `h` at 0.99.)
 8. **K scale.** `h` depends on how K is scaled (section 5); test statistics do not.
 9. **Inbred panels.** Replicate animals of one strain share a genotype: K is rank-deficient (the example
    K has rank about 110 for 1219 mice), the effective number of independent tests is small, and λ_GC from
@@ -560,10 +567,14 @@ pylmm's default path (REML null fit, Wald test) was checked by simulation studie
   optimum for h² ≤ 0.95.
 * **Power ≥ OLS**, much higher under population structure (e.g. 0.94 vs 0.15 at h² = 0.5, 5% variance
   explained, Balding–Nichols), and OLS is badly inflated there.
-* **Known limits** (not yet fixed; see *Known caveats* in AGENTS.md): ĥ capped at 0.99; ML unidentified with a centred K from m > n
+* **The h search** (since 1.0.0, `sims/studies/s6_numerics.py`): ĥ on [0, 1] reaches the oracle's maximum
+  in every simulated fit, including true h² of 0.98 and 1 (1.0.0 capped it at 0.99 and could keep a lower
+  local maximum).
+* **Known limits** (see *Known caveats* in AGENTS.md): ML unidentified with a centred K from m > n
   SNPs; kinship normalisation (bug 8).
-* The golden tests (`tests/golden/`) pin every number of the original 2013 code: the CLI output is
-  byte-identical for the default path.
+* The golden tests (`tests/golden/`) pin every number of the original 2013 code, run with
+  `legacy_fit=True` / `--legacy-fit`; `pylmm gwas --legacy-fit --no-batch` writes pylmm 1.0.0's output byte
+  for byte (`tests/test_legacy_fit.py`).
 
 **Against published results** ([replication.md](replication.md)): an agent using only these docs
 and the skills reanalysed two published mouse GWAS from their original phenotypes. Farber et al. 2011

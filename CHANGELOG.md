@@ -2,9 +2,10 @@
 
 All notable user-visible changes to pylmm. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmm gwas`, formerly `pylmmGWAS`,
-without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below, except by the batched tests of
-[Unreleased]: last-digit differences for well-conditioned covariates, up to a few 1e-6 relative with a badly
-scaled covariate (where the new numbers are the more accurate); see there. Entries written
+without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below, except in
+[Unreleased] by the batched tests (last-digit differences for well-conditioned covariates, up to a few 1e-6
+relative with a badly scaled covariate, where the new numbers are the more accurate) and by the new h search
+(*Variance-component fit*; `--legacy-fit --no-batch` gives the 1.0.0 output); see there. Entries written
 before the single `pylmm` command use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
 maps them).
 
@@ -32,6 +33,14 @@ maps them).
   `(n, m)` genotype matrix (e.g. read from VCF, BGEN or VCF Zarr with another library) with optional IDs and
   metadata. `normalize_genotype` is now also a function there (`PlinkReader.normalize_genotype` calls it).
 - `sims/bench/`: Phase 6 benchmarks; `python -m sims.bench.bed_blocks [--quick]`.
+- `legacy_fit=False` on `LMM`, `gwas` and `misc.fit_two`, and `pylmm gwas --legacy-fit`: fit h exactly as
+  pylmm 1.0.0 did (see *Variance-component fit* below). `pylmm gwas --legacy-fit --no-batch` writes 1.0.0's
+  output byte for byte (checked on the full README data and in `tests/test_legacy_fit.py`, which runs the
+  `v1.0.0` tag's code); the golden tests run with it.
+- `pylmm.lmm.log_pvalue(t, df)` and `neg_log10_pvalue(t, df)`: the log and -log10 of the two-sided t
+  p-value, finite where the p-value underflows to 0 (|t| above ~40 at df = 100); vectorised.
+- `sims/studies/s6_numerics.py` (`just sim s6_numerics [--quick]`): the h search, default vs legacy, against
+  the oracle; `python -m sims.studies.s6_numerics` lists the HMDP per-SNP fits the two searches disagree on.
 - `LMM.association_batch(X, h=None, reml=True)`: the Wald test of `association(..., return_beta=True)` for
   every column of `X` at once; returns `AssociationResult(t, p, beta, beta_var)`, arrays.
 - `gwas(..., batch=True, block_size=1024)`: `batch=False` -> one SNP at a time, the 1.0.0 code path;
@@ -97,6 +106,38 @@ maps them).
   recur (transient) is logged as a warning and the scan completes. Any other exception of the block
   reader is raised as is. A `.bim` that `variants` rejects (a line with fewer than 6 fields) is read one
   SNP at a time, with a warning at the start, by both commands, as before.
+
+#### Variance-component fit (Phase 6.3): h on [0, 1], the best optimum
+This changes numbers, also of the default CLI output. `legacy_fit=True` / `--legacy-fit` restores 1.0.0.
+- The h search: grid 0, 0.01, ..., 0.99, only interior peaks below 0.98 refined, the first kept, else the
+  higher grid end unrefined -> grid 0, 0.01, ..., 1 (`ngrids + 1` points), every local maximum refined in
+  its bracket, the two ends included, and the highest kept (bugs 2 and 3, and "first, not best"). `h = 1`
+  can now be returned; a profile flat to rounding gives h = 0. `LMM.h_grid` / `ll_grid` have 101 entries.
+  Simulation study `sims/studies/s6_numerics.py` (960 seeded fits, 4 cohorts, true h² 0 to 1): the REML
+  and ML fits now reach the independent oracle's maximum in every fit; 1.0.0 missed it in 25-68% of the
+  outbred fits at true h² >= 0.95 and 68-100% of the inbred-panel fits at h² >= 0.98 (REML LL short by up
+  to 0.44 on outbred data and 950 on the inbred panel at h² = 1, where 1.0.0 stopped at 0.99). Null calibration unchanged or better (inbred panel, h² = 0.98: λ_GC 0.74 -> 1.02,
+  type-I error at 0.05 0.024 -> 0.048).
+- The README example (`pylmm gwas` on `data/snps.132k.clean.noX`): the REML maximum is at h = 0.0038,
+  inside [0, 0.01], where 1.0.0 returned the unrefined end h = 0 (LL +0.097); the log line reads
+  `heritability=0.004`. t moves by up to 0.30, -log10 p by up to 0.39 (median -0.03); λ_GC 1.18 -> 1.05;
+  SNPs at p < 1e-3: 56 -> 18 (the phenotype is simulated noise).
+- `misc.fit_two`: the w grid 0, ..., (ngrids - 1)/ngrids -> 0, ..., 1, so K1 alone can be chosen (bug 3);
+  `legacy_fit=` as above.
+- `fit(reml=False)` reports `sigma = Q / (n - p)` -> `Q / n`, the ML estimate (bug 9; the ML Wald test has
+  used Q/n since 1.0.0).
+- `fit(reml=False)` warns when the ML likelihood has no maximum: K singular and its null space inside the
+  span of the covariates (a centred kinship from more SNPs than individuals with an intercept, bug 17).
+- `LMM.tstat(..., log=True)`: `2 + logsf` (wrong, unused) -> the natural log of the two-sided p-value
+  (bug 5).
+- Numerics: the REML log-determinants use `slogdet` / Cholesky instead of `log(det(...))` (no overflow
+  with many or large covariates); `LMM.ml_solution` and `association` solve the weighted least squares by
+  QR of `sqrt(S) X` instead of inverting `X'SX`: with a badly scaled covariate (a raw date ~2e7) the
+  per-SNP t is 3e-13 instead of 6e-10 off an accurate reference, and `--no-batch` now agrees with the
+  batched default to rounding there too. The fit itself evaluates the likelihood with the normal
+  equations and a Cholesky factor (fast).
+- Fit time: the default search refines more brackets (an end, every peak) and one more grid point; in the
+  study the median null fit took 5-13 ms against 3-10 ms for 1.0.0's (n = 60-300, six parallel jobs).
 
 ## [1.0.0] - 2026-10-19
 

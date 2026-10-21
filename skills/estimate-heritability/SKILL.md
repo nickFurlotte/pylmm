@@ -1,6 +1,6 @@
 ---
 name: estimate-heritability
-description: Estimate SNP heritability (h2, the variance explained by a kinship matrix) with pylmm's null LMM fit - REML vs ML, reading h2 and the genetic and residual variances, putting h2 on the kinship scale of another tool or paper (GCTA-style GRMs, PVE), individual-level vs strain-mean heritability in inbred panels with replicates, boundary estimates at 0 and the 0.99 cap, a likelihood-ratio test of h2 = 0, and standard errors and confidence intervals from the profile likelihood or a parametric bootstrap. Use when asked for heritability, variance components, h2 or PVE with pylmm, or to compare pylmm's h2 with another tool or a paper.
+description: Estimate SNP heritability (h2, the variance explained by a kinship matrix) with pylmm's null LMM fit - REML vs ML, reading h2 and the genetic and residual variances, putting h2 on the kinship scale of another tool or paper (GCTA-style GRMs, PVE), individual-level vs strain-mean heritability in inbred panels with replicates, boundary estimates at 0 and 1 (0.99 in pylmm 1.0.0), a likelihood-ratio test of h2 = 0, and standard errors and confidence intervals from the profile likelihood or a parametric bootstrap. Use when asked for heritability, variance components, h2 or PVE with pylmm, or to compare pylmm's h2 with another tool or a paper.
 ---
 
 # Estimate heritability with pylmm
@@ -40,7 +40,7 @@ print("h2=%.3f  s2=%.3f  sigma_g2=%.3f  sigma_e2=%.3f" % (h, s2, h * s2, (1 - h)
 assert 0.25 < h < 0.75
 ```
 
-* `h` is a numpy float in [0, 0.99]; `s2` (= `model.opt_sigma`) is the total variance, so the genetic
+* `h` is a numpy float in [0, 1]; `s2` (= `model.opt_sigma`) is the total variance, so the genetic
   variance is `h * s2` and the residual `(1 - h) * s2`. `beta` is (q, 1), in the column order of `X0`.
 * Missing phenotypes (`nan`) are dropped by `LMM`; `X0` must be complete on the others.
 * `ll` is the REML log-likelihood including constants; compare log-likelihoods only between fits of the
@@ -57,8 +57,9 @@ Use REML (the default; it accounts for the fitted fixed effects, and published L
 REML). ML ignores the degrees of freedom used by the fixed effects, so its variance components are biased (in 10
 simulations of 300 unrelated people with true h² of 0.3 and 0.8, ML gave a higher h than REML every time, by
 0.03 to 0.2) and, for a centred K built from more SNPs than individuals
-(the usual outbred GRM), its optimum can run to the boundary: there is no MLE, and pylmm returns ~0.99
-(bug 17 in the simulation studies).
+(the usual outbred GRM), the ML likelihood has no maximum: it grows towards h = 1, held back only by
+pylmm's eigenvalue floor, so the ML h is unreliable, and `fit(reml=False)` warns (bug 17 in the simulation
+studies). Under ML `s2` is `Q / n` (REML: `Q / (n - p)`).
 
 ## 3. Making h2 comparable
 
@@ -152,10 +153,14 @@ When comparing with another tool or a paper, also check:
 
 ## 4. Boundaries and the h = 0 test
 
-The h search is a grid 0, 0.01, ..., 0.99 plus a bounded refinement (extending it to 1 is planned):
+The h search is a grid 0, 0.01, ..., 1 whose every local maximum (the ends included) is refined with a
+bounded search; the best is kept:
 
 * `h == 0`: no detectable genetic variance (common for small n or weak K).
-* `h == 0.99`: "0.98 or more", capped; true values ≥ 0.98 are all reported as 0.99.
+* `h == 1`: no detectable residual variance (a trait almost entirely explained by K, e.g. strain means
+  of an inbred panel); report it as "h² close to 1", with the profile interval below.
+* pylmm 1.0.0 (and `LMM(..., legacy_fit=True)`, `pylmm gwas --legacy-fit`) searched 0, ..., 0.99 only:
+  there `h == 0.99` means "0.98 or more", capped.
 
 Test h² = 0 by a likelihood ratio; under the null the statistic is (asymptotically) a 50:50 mixture of
 χ²₀ and χ²₁:
@@ -173,14 +178,14 @@ threshold, simulate the LRT under `h = 0`.
 
 ## 5. Standard errors and intervals
 
-**Profile likelihood** (preferred, and the one to use near the boundaries 0 and 0.99): evaluate the REML
+**Profile likelihood** (preferred, and the one to use near the boundaries 0 and 1): evaluate the REML
 log-likelihood on a fine grid of `h` and keep the values within `chi2(1, 0.95) / 2 = 1.92` of the
 maximum.
 
 ```python
 def profile_ci(model, level=0.95):
-    """Profile-likelihood interval for h (a fitted LMM), on a 1000-point grid of [0, 0.999]."""
-    grid = np.linspace(0, 0.999, 1000)
+    """Profile-likelihood interval for h (a fitted LMM), on a 1001-point grid of [0, 1]."""
+    grid = np.linspace(0, 1, 1001)
     prof = np.array([model.log_likelihood(g).ll for g in grid])
     inside = grid[prof >= prof.max() - stats.chi2.ppf(level, 1) / 2]
     return inside.min(), inside.max()
@@ -190,7 +195,7 @@ print("95%% profile CI: [%.3f, %.3f]" % (lo, hi))
 assert lo < h < hi
 ```
 
-An interval that reaches 0 or 0.999 is open on that side ("h² ≤ hi" or "h² ≥ lo").
+An interval that reaches 0 or 1 is open on that side ("h² ≤ hi" or "h² ≥ lo").
 
 **Curvature SE** (interior estimates only): `se = 1 / sqrt(-d²ll/dh²)` at `h`:
 
@@ -201,12 +206,12 @@ print("SE(h2) = %.3f" % (1 / np.sqrt(-d2)))
 ```
 
 **Grid posterior**: `model.mean_and_var()` returns the mean and variance of `h` under the normalised grid
-likelihood (a flat prior on the 100-point grid); `model.plot_fit()` draws it (needs matplotlib). Its SD is
+likelihood (a flat prior on the 101-point grid); `model.plot_fit()` draws it (needs matplotlib). Its SD is
 a quick summary, not a frequentist SE.
 
 **Parametric bootstrap SE** (slow): simulate from the fitted model, refit, and take the SD of the refitted
-`h`. It is an SE for interior estimates; it does not give intervals with honest coverage near 0 or the
-0.99 cap (use the profile interval there). Reuse the eigendecomposition:
+`h`. It is an SE for interior estimates; it does not give intervals with honest coverage near 0 or 1
+(use the profile interval there). Reuse the eigendecomposition:
 
 ```python
 b_hat = model.opt_beta[:, 0]
