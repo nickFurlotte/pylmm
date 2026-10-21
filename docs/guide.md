@@ -397,7 +397,8 @@ as above. Other options: `reml=False` (ML everywhere), `refit=True`, and `ids=` 
 one at a time. `batch=False` tests every SNP one at a time, the code path of pylmm 1.0.0: slower, and the
 same numbers up to rounding for well-conditioned covariates (see section 6 for badly scaled ones). A block
 takes about 6-8 arrays of `n * block_size` floats. `pylmm gwas --block-size N` and `--no-batch` do the same
-on the command line.
+on the command line, where the genotypes are also read a block at a time (`iter_blocks`, below), as in
+`pylmm kinship`.
 
 ```python
 ts_one, _ = gwas(Y, W[:, :200], K, kva, kve, batch=False)
@@ -510,7 +511,8 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
   eigendecomposition; `--refit` costs a likelihood search per SNP.
 * Process SNPs in blocks with `reader.iter_blocks(block_size)` rather than building a full genotype matrix;
   for a BED file it also decodes 2-6x faster than `iter_snps` (unstandardised; 1.0-1.6x standardised, where
-  the per-SNP standardisation dominates; `sims/bench/bed_blocks.py` measures it).
+  the per-SNP standardisation dominates; `sims/bench/bed_blocks.py` measures it). `pylmm gwas` and
+  `pylmm kinship` read their genotypes this way.
 
 ```bash
 pylmm kinship --bfile mini -o mini.kin --eigen-npz mini.eig.npz -v
