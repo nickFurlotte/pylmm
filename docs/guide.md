@@ -343,8 +343,13 @@ t_null, p_null = model.association(W[:, 1500])   # t and p only
 
 `association_batch` runs the same test on many complete SNPs at once: it rotates the whole block with
 one matrix product and fits each SNP in closed form against the null model, so it is many times faster
-than a loop over `association` and gives the same numbers up to rounding (about 1e-10 relative at
-worst). It returns arrays `t, p, beta, beta_var`. Like `association` it does not check estimability or
+than a loop over `association`. It returns arrays `t, p, beta, beta_var`. For well-conditioned covariates
+the numbers are those of `association` up to rounding (within about 1e-9 relative in the tests). With a
+badly scaled covariate next to the intercept (a raw date such as 20240131, or a year column) `association`,
+which inverts `X'SX`, loses precision, and the two can differ by up to a few 1e-6 relative; the batched
+values are then the more accurate ones (against a 40-digit reference: 3e-11 vs 3e-7 off). Centring or
+scaling such covariates (`(c - c.mean()) / c.std()`) changes neither the model nor the test statistics, and
+makes both paths accurate. Like `association` it does not check estimability or
 handle `nan`.
 
 ```python
@@ -387,10 +392,12 @@ but `X0` must be complete on the individuals with a phenotype, so drop or impute
 as above. Other options: `reml=False` (ML everywhere), `refit=True`, and `ids=` / `kinship_ids=` to have
 `gwas` check that Y and K list the same individuals in the same order.
 
-**Speed.** `gwas` tests the complete SNPs (no `nan`) in blocks of `block_size=1000` with
+**Speed.** `gwas` tests the complete SNPs (no `nan`) in blocks of `block_size=1024` with
 `LMM.association_batch` (section 6); SNPs with missing calls, and every SNP with `refit=True`, are tested
-one at a time. `batch=False` tests every SNP one at a time, the code path of pylmm 1.0.0: slower, same
-numbers up to rounding. `pylmm gwas --block-size N` and `--no-batch` do the same on the command line.
+one at a time. `batch=False` tests every SNP one at a time, the code path of pylmm 1.0.0: slower, and the
+same numbers up to rounding for well-conditioned covariates (see section 6 for badly scaled ones). A block
+takes about 6-8 arrays of `n * block_size` floats. `pylmm gwas --block-size N` and `--no-batch` do the same
+on the command line.
 
 ```python
 ts_one, _ = gwas(Y, W[:, :200], K, kva, kve, batch=False)

@@ -91,8 +91,8 @@ Options that matter:
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
 | `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; changes BETA's scale) |
 | `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`) |
-| `--block-size N` | 1000 | SNPs read and tested together (one matrix product per block); lower it if memory is tight (n × N floats) |
-| `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower; same numbers to ~1e-10 relative); `--refit` and SNPs with missing calls always run this way |
+| `--block-size N` | 1024 | SNPs read and tested together (one matrix product per block); lower it if memory is tight (about 6-8 × n × N floats) |
+| `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower); `--refit` and SNPs with missing calls always run this way. With well-conditioned covariates both give the same numbers up to rounding (within ~1e-9 relative); with a badly scaled covariate (a raw date or year column) they can differ by up to a few 1e-6 relative, and the batched default is the more accurate. Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are the same, and both paths are then accurate |
 
 The same scan in Python, when you need the arrays (subsets, loops, other covariates):
 
