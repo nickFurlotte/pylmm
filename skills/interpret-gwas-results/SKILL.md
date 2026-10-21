@@ -1,6 +1,6 @@
 ---
 name: interpret-gwas-results
-description: Interpret pylmm GWAS output - what SNP_ID, BETA, BETA_SD, F_STAT and P_VALUE mean, which allele and scale BETA refers to and how to convert it to per-allele effects comparable with plink2, GEMMA, GCTA, REGENIE or BOLT-LMM, genome-wide significance thresholds (Bonferroni, effective number of tests, a parametric-bootstrap threshold for related samples), genomic control lambda_GC and QQ plots, comparing hits with published loci, and when not to trust a result (near-singular kinship, h2 at the 0 or 0.99 boundary, small n, rare genotypes, inbred panels). Use when reading, summarising, thresholding or comparing pylmm association results.
+description: Interpret pylmm GWAS output - what SNP_ID, BETA, BETA_SD, F_STAT and P_VALUE mean, which allele and scale BETA refers to and how to convert it to per-allele effects comparable with plink2, GEMMA, GCTA, REGENIE or BOLT-LMM, genome-wide significance thresholds (Bonferroni, effective number of tests, a parametric-bootstrap threshold for related samples), genomic control lambda_GC and QQ plots, comparing hits with published loci, and when not to trust a result (near-singular kinship, h2 at the 0 or 1 boundary, small n, rare genotypes, inbred panels). Use when reading, summarising, thresholding or comparing pylmm association results.
 ---
 
 # Interpret pylmm GWAS results
@@ -158,9 +158,12 @@ assert 0.8 < lam_gc < 1.25
 
 ## 5. When to distrust a result
 
-* **h at a boundary**: `null model: heritability=0.990` (capped; true h² may be 1) or `0.000`. At 0 the
-  LMM reduces to OLS (K plays no role); at 0.99 small errors in h move p-values (up to 0.8 in −log10 p at
-  h² = 0.99 in the simulation studies).
+* **h at a boundary**: `null model: heritability=1.000` or `0.000` (with `--legacy-fit`, as in pylmm 1.0.0,
+  the upper end is a cap at `0.990`). At 0 the LMM reduces to OLS (K plays no role); near 1 small errors
+  in h move p-values (up to 0.8 in −log10 p at h² = 0.99 in the simulation studies). A log warning "h is
+  at its upper boundary" (h ≈ 1, i.e. ≥ 0.999 for a K of the usual scale, with a rank-deficient K, e.g. replicate animals of inbred strains)
+  means the test is anti-conservative: λ_GC was 3.6 in a simulation with true h² = 1 on 300 mice of about
+  100 strains. Test strain means instead.
 * **Near-singular K**: few distinct genotypes (inbred strains, replicates) give a K of low rank; pylmm
   floors eigenvalues at 1e-6. Fine for the LMM, but the effective sample size for a SNP is the number of
   distinct genotypes. Check `np.linalg.matrix_rank(K)` and the number of strains carrying the minor allele;
@@ -169,7 +172,8 @@ assert 0.8 < lam_gc < 1.25
 * **Small n** (< ~100) or **n close to the number of covariates**: few residual df, unstable h.
 * **Low minor-allele count**, high missingness (mean imputation pulls toward 0), SNPs with t far above
   their LD neighbours (genotyping error).
-* **ML fits** (`--ml`) of a centred K from more SNPs than individuals: unbounded likelihood, h at 0.99.
+* **ML fits** (`--ml`) of a centred K from more SNPs than individuals: unbounded likelihood (pylmm warns),
+  h near 1 or an arbitrary interior local maximum.
 * **Different allele coding** between runs or tools: check signs with the `.bim`.
 
 ## 6. Loci and comparing with published loci

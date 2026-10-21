@@ -123,12 +123,14 @@ use `skills/` directly, or copy it to `.claude/skills`.
   alone); `read_covariates` returns no intercept column: `X0 = np.column_stack([np.ones(n), cov])`.
   `pylmm gwas --covar` adds it (unless `--no-intercept`).
 * **REML is the default** everywhere (`reml=True`, `--reml`); ML (`--ml`) is ill-posed for a centred K built
-  from more SNPs than individuals (bug 17).
+  from more SNPs than individuals (bug 17; `fit` warns).
+* **The h search** covers [0, 1] and keeps the best local maximum (Phase 6.3, bugs 2, 3, 9 fixed).
+  `legacy_fit=True` (`LMM`, `gwas`, `misc.fit_two`) / `pylmm gwas --legacy-fit` restores pylmm 1.0.0's fit
+  (grid to 0.99, first optimum, ML sigma Q/(n-p)); the golden tests run with it, and
+  `--legacy-fit --no-batch` is 1.0.0's output byte for byte.
 * **Known, not yet fixed** (bug numbers: the table in
-  [sims/studies/s4_bug_confirmation.md](sims/studies/s4_bug_confirmation.md)): the h search grid stops at 0.99, so h = 1 is never returned
-  and h² ≥ 0.98 reads 0.99 (bugs 2, 3); the first grid optimum is kept, not the best; `fit()`'s ML
-  sigma is Q/(n-q) (bug 9); `tstat(log=True)` is wrong and unused (bug 5); genotypes are standardised over
-  individuals later dropped for a missing phenotype (|Δt| ≤ 0.024).
+  [sims/studies/s4_bug_confirmation.md](sims/studies/s4_bug_confirmation.md)): genotypes are
+  standardised over individuals later dropped for a missing phenotype (|Δt| ≤ 0.024).
 * **Kinship scale = h scale.** `calculate_kinship` and `pylmm kinship` give the same K (one missing-call
   convention; constant and all-missing SNPs not counted in `m`; bug 8 fixed after 1.0.0, `legacy=True` /
   `--legacy-kinship` reproduce 1.0.0). Its mean diagonal is about 1 − the missing rate; `kind="ibs"` (EMMA)

@@ -26,7 +26,13 @@ standardized and IBS kinships built without the tested chromosomes (what a LOCO 
 replicate and kinship: REML `h`; `pve = h c / (h c + 1 - h)` with `c` the centred mean diagonal; λ_GC and
 type-I error over the null SNPs (pylmm's default null-fit Wald test).
 
-## Results (full run, 1200 replicates, 156 s on 6 workers)
+## Results (full run, 1200 replicates, 92 s on 6 workers)
+
+Regenerated with the Phase 6.3 default fit (h searched on [0, 1], the best local maximum; PR #27). The
+first run used pylmm 1.0.0's fit; against it the mean h moved by at most 0.006 (HMDP, h2 = 0, the
+centred and IBS kinships, where many fits sit near the h = 0 boundary),
+the PVE by at most 0.002, λ_GC by at most 0.001 and the type-I error at 0.05 by at most 1e-4. No finding
+below changes.
 
 Heritability (means over 100 replicates; SE of a mean about 0.005-0.01):
 
@@ -38,12 +44,12 @@ Heritability (means over 100 replicates; SE of a mean about 0.005-0.01):
 | inbred_panel | 0.3 | per_allele | 0.300 | 0.290 | 0.287 | 0.661 | 0.285 | 0.546 | 0.291 | 0.293 | 0.297 |
 | inbred_panel | 0.6 | standardized | 0.611 | 0.588 | 0.584 | 0.877 | 0.582 | 0.814 | 0.593 | 0.590 | 0.600 |
 | inbred_panel | 0.6 | per_allele | 0.604 | 0.609 | 0.606 | 0.888 | 0.605 | 0.830 | 0.617 | 0.607 | 0.619 |
-| hmdp | 0 | standardized | 0 | 0.047 | 0.047 | 0.164 | 0.054 | 0.117 | 0.055 | 0.044 | 0.046 |
+| hmdp | 0 | standardized | 0 | 0.047 | 0.047 | 0.158 | 0.051 | 0.113 | 0.053 | 0.044 | 0.046 |
 | hmdp | 0 | per_allele | 0 | 0.041 | 0.040 | 0.137 | 0.043 | 0.097 | 0.044 | 0.033 | 0.036 |
-| hmdp | 0.3 | standardized | 0.305 | 0.268 | 0.266 | 0.603 | 0.279 | 0.490 | 0.285 | 0.259 | 0.268 |
-| hmdp | 0.3 | per_allele | 0.309 | 0.260 | 0.258 | 0.576 | 0.273 | 0.471 | 0.278 | 0.264 | 0.276 |
-| hmdp | 0.6 | standardized | 0.612 | 0.596 | 0.593 | 0.882 | 0.608 | 0.813 | 0.620 | 0.586 | 0.604 |
-| hmdp | 0.6 | per_allele | 0.603 | 0.588 | 0.585 | 0.876 | 0.614 | 0.809 | 0.623 | 0.577 | 0.605 |
+| hmdp | 0.3 | standardized | 0.305 | 0.267 | 0.265 | 0.603 | 0.279 | 0.490 | 0.285 | 0.258 | 0.268 |
+| hmdp | 0.3 | per_allele | 0.309 | 0.260 | 0.258 | 0.576 | 0.273 | 0.471 | 0.277 | 0.264 | 0.276 |
+| hmdp | 0.6 | standardized | 0.612 | 0.596 | 0.593 | 0.882 | 0.608 | 0.813 | 0.619 | 0.586 | 0.604 |
+| hmdp | 0.6 | per_allele | 0.603 | 0.590 | 0.587 | 0.876 | 0.613 | 0.810 | 0.625 | 0.577 | 0.605 |
 
 Null calibration (λ_GC, type-I error at 0.05 and 0.01):
 
@@ -55,12 +61,12 @@ Null calibration (λ_GC, type-I error at 0.05 and 0.01):
 | inbred_panel | 0.3 | per_allele | 0.802 | 0.803 | 0.803 | 1.000 | 1.001 | 0.027 / 0.027 / 0.048 | 0.004 / 0.004 / 0.009 |
 | inbred_panel | 0.6 | standardized | 0.684 | 0.686 | 0.686 | 1.009 | 1.009 | 0.017 / 0.018 / 0.048 | 0.002 / 0.002 / 0.009 |
 | inbred_panel | 0.6 | per_allele | 0.677 | 0.678 | 0.678 | 1.014 | 1.015 | 0.018 / 0.018 / 0.050 | 0.002 / 0.002 / 0.010 |
-| hmdp | 0 | standardized | 0.916 | 0.913 | 0.913 | 0.932 | 0.933 | 0.040 / 0.040 / 0.042 | 0.008 / 0.007 / 0.008 |
-| hmdp | 0 | per_allele | 0.926 | 0.922 | 0.922 | 0.946 | 0.946 | 0.039 / 0.038 / 0.041 | 0.007 / 0.007 / 0.008 |
+| hmdp | 0 | standardized | 0.916 | 0.913 | 0.912 | 0.932 | 0.933 | 0.040 / 0.040 / 0.042 | 0.008 / 0.007 / 0.008 |
+| hmdp | 0 | per_allele | 0.926 | 0.922 | 0.922 | 0.945 | 0.946 | 0.039 / 0.038 / 0.041 | 0.007 / 0.007 / 0.008 |
 | hmdp | 0.3 | standardized | 0.967 | 0.958 | 0.958 | 1.058 | 1.060 | 0.045 / 0.044 / 0.054 | 0.008 / 0.008 / 0.011 |
 | hmdp | 0.3 | per_allele | 0.934 | 0.924 | 0.924 | 1.000 | 1.003 | 0.041 / 0.040 / 0.049 | 0.007 / 0.007 / 0.009 |
-| hmdp | 0.6 | standardized | 0.880 | 0.881 | 0.879 | 1.038 | 1.043 | 0.036 / 0.037 / 0.050 | 0.006 / 0.006 / 0.010 |
-| hmdp | 0.6 | per_allele | 0.874 | 0.876 | 0.875 | 1.028 | 1.031 | 0.037 / 0.036 / 0.053 | 0.006 / 0.006 / 0.011 |
+| hmdp | 0.6 | standardized | 0.880 | 0.881 | 0.880 | 1.038 | 1.043 | 0.036 / 0.037 / 0.050 | 0.006 / 0.006 / 0.010 |
+| hmdp | 0.6 | per_allele | 0.873 | 0.876 | 0.875 | 1.028 | 1.031 | 0.037 / 0.036 / 0.053 | 0.006 / 0.006 / 0.011 |
 
 ## Findings
 

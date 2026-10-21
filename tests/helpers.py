@@ -146,6 +146,16 @@ BATCH_ATOL_SCALE = 2e-11
 BATCH_REF_RTOL = 1e-8
 BATCH_REF_ATOL_SCALE = 1e-10
 
+# Phase 6.3 review (B1): the fitted h of the default search must not depend on
+# an affine reparametrisation of a covariate (raw vs centred or scaled), since
+# the likelihood is invariant to X0 -> X0 A; only Brent's stopping (xatol 1e-10)
+# and rounding on a nearly flat profile separate the fits.  Measured: 150
+# datasets (n = 100, m = 500, h2 in {0.5, 0.9, 0.98}, an intercept and a date
+# 2e7 +- 1e3 raw vs centred, REML and ML) max |dh| = 1.5e-7; the seed-62
+# reproducer 1.4e-8.  (1.0.0's normal-equation fit, legacy_fit=True, differs by
+# up to 4e-4 on the same data; before the fix the default differed by 0.14.)
+H_REPARAM_ATOL = 1e-6
+
 # Kinship files (pylmm.kinship_io, tests/test_kinship_io.py).
 #
 # FLOAT32_ROUND_RTOL: a float64 value rounded to float32 (round to nearest, normal
