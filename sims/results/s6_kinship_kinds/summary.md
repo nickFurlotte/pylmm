@@ -1,6 +1,6 @@
 # S6: standardized vs centred vs IBS kinship on inbred panels
 
-_Last run: 2026-10-21T10:20:31, git 47db2ea-dirty, jobs=6, wall 156s; total task time over all runs 909s._
+_Last run: 2026-10-21T11:18:37, git e4ad398, jobs=6, wall 134s; total task time over all runs 790s._
 
 h_<kind>: REML h on that kinship's scale; pve_<kind> = h c / (h c + 1 - h) with c the centred mean diagonal (cmeandiag_<kind>); pve_true: the realised genetic share. lam / t1e: over null SNPs on chromosomes without causal SNPs.
 
