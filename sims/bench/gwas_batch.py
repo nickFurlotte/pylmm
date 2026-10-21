@@ -19,7 +19,7 @@ data and on the bundled 1219-mouse BED file:
 
 Run::
 
-    uv run --group sims python -m sims.bench.gwas_batch [--quick] [--cli-baseline DIR]
+    uv run --group sims python -m sims.bench.gwas_batch [--quick] [--cli-baseline DIR] [--cli-only]
     just bench gwas_batch [--quick]
 
 Timings are single-threaded BLAS by default (``python -m`` imports the
@@ -357,10 +357,12 @@ def run_all(args: argparse.Namespace, threads: int) -> list[dict[str, Any]]:
     sizes = QUICK_SIZES if args.quick else FULL_SIZES
     repeats = QUICK_REPEATS if args.quick else FULL_REPEATS
     print("## BLAS threads: %d\n" % threads)
-    rows = [run_synthetic(n, m, c, True, repeats) for n, m in sizes for c in COVARIATES]
-    n, m = sizes[0]
-    rows.append(run_synthetic(n, m, COVARIATES[-1], False, repeats))  # ML
-    print_synthetic(rows)
+    rows = []
+    if not args.cli_only:
+        rows = [run_synthetic(n, m, c, True, repeats) for n, m in sizes for c in COVARIATES]
+        n, m = sizes[0]
+        rows.append(run_synthetic(n, m, COVARIATES[-1], False, repeats))  # ML
+        print_synthetic(rows)
     if not args.no_cli:
         with tempfile.TemporaryDirectory() as workdir:
             print_cli(
@@ -379,6 +381,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="python -m sims.bench.gwas_batch", description=__doc__)
     ap.add_argument("--quick", action="store_true", help="small sizes (well under a minute)")
     ap.add_argument("--no-cli", action="store_true", help="skip the pylmm gwas timing")
+    ap.add_argument(
+        "--cli-only", action="store_true", help="only the pylmm gwas timing (no synthetic gwas())"
+    )
     ap.add_argument(
         "--cli-baseline",
         metavar="DIR",
@@ -414,6 +419,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             run_all(args, k)
         else:  # the thread count is fixed when numpy loads: run it in a child process
             flags = ["--quick"] * args.quick + ["--no-cli"] * args.no_cli
+            flags += ["--cli-only"] * args.cli_only
             if args.cli_baseline:
                 flags += ["--cli-baseline", args.cli_baseline]
             if args.cli_repeats:

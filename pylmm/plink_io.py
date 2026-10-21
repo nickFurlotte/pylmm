@@ -165,6 +165,7 @@ from pylmm.genotypes import (
     DEFAULT_BLOCK_SIZE,
     GenotypeSource,
     Variants,
+    _normalize_rows,
     check_block_size,
     normalize_genotype,
 )
@@ -768,7 +769,10 @@ class PlinkReader:
         A BED file is decoded a block at a time (one vectorised pass over the
         block's bytes), which is several times faster than `iter_snps` when
         the genotypes are not standardised; TPED and EMMA blocks are
-        stacked from the per-SNP reader.  The iteration is independent of
+        stacked from the per-SNP reader.  A block is standardised at once,
+        with the values `pylmm.genotypes.normalize_genotype` gives each SNP;
+        blocks do not call the `normalize_genotype` method, so a subclass
+        that overrides it changes `iter_snps` only.  The iteration is independent of
         `iter_snps` (it opens its own file handle, closed when the iteration
         ends or the iterator is discarded).  A block holds
         ``8 * len(indivs) * block_size`` bytes, and the decoding about as
@@ -876,8 +880,7 @@ class PlinkReader:
                 if index is not None:
                     R = R[:, index]
                 if norm:
-                    for j in range(b):
-                        R[j] = normalize_genotype(R[j])
+                    _normalize_rows(R)  # each row (SNP) as normalize_genotype(R[j])
                 yield R.T, variants[start : start + b]
                 del R  # before the next block is decoded
 
@@ -899,8 +902,11 @@ class PlinkReader:
         """`iter_blocks` for TPED and EMMA input: stack the vectors of `reader`'s per-SNP path.
 
         `reader` is a shallow copy made by `iter_blocks`; `variants` is None for
-        EMMA, whose block variants are made from the SNP names read.
+        EMMA, whose block variants are made from the SNP names read.  The
+        vectors are read raw and a block is standardised at once.
         """
+        norm = reader.norm_genotype
+        reader.norm_genotype = False
         reader.iter_snps()
         # Call __next__ directly: iter(reader) (as in islice) would restart the iteration.
         try:
@@ -918,13 +924,22 @@ class PlinkReader:
                     cols.append(g)
                     names.append(name)
                 if cols:
+                    k = len(cols)
                     v = (
                         Variants.from_names(names)
                         if variants is None
-                        else variants[start : start + len(cols)]
+                        else variants[start : start + k]
                     )
-                    yield np.column_stack(cols), v
-                    start += len(cols)
+                    if norm:
+                        R = np.vstack(cols)  # (b, n), one SNP per row
+                        cols.clear()  # at most two copies of the block alive
+                        _normalize_rows(R)  # each row as normalize_genotype(row)
+                        G = np.ascontiguousarray(R.T)  # the layout of np.column_stack(cols)
+                        del R
+                    else:
+                        G = np.column_stack(cols)
+                    yield G, v
+                    start += k
         finally:
             reader.close()
 
