@@ -391,7 +391,9 @@ def _inprocess(tmp_path, tag, flags, patch=None):
     """Run pylmm gwas in this process on FAIL_NSNPS HMDP SNPs; (rc, output lines).
 
     ``patch`` is (monkeypatch, object, attribute, k, exception): the k-th
-    call of ``object.attribute`` raises ``exception`` instead.
+    call of ``object.attribute`` raises ``exception`` instead.  ``k`` can
+    also be a function of the call's arguments: the calls for which it is
+    true raise.
     """
     from pylmm.cli import main
 
@@ -410,7 +412,7 @@ def _inprocess(tmp_path, tag, flags, patch=None):
 
             def fail_on_kth_call(*a, **kw):
                 calls[0] += 1
-                if calls[0] == k:
+                if k(*a, **kw) if callable(k) else calls[0] == k:
                     raise exc
                 return orig(*a, **kw)
 
@@ -461,15 +463,25 @@ def test_cli_interrupt_and_write_failure_do_not_duplicate_lines(tmp_path, monkey
     assert rc == 2 and calls == 5 and lines == clean[:5]
 
 
+def _reading_snp(k):
+    """For a `PlinkReader.__next__` patch: true when the call would read the k-th SNP."""
+    return lambda reader: reader.have_read == k - 1
+
+
 @pytest.mark.parametrize(
     "flags", [[], ["--no-batch"], ["--block-size", "3"]], ids=["default", "no-batch", "bs3"]
 )
 def test_cli_reader_error_mid_file(tmp_path, monkeypatch, flags):
-    """The reader fails on SNP 7: SNPs 1-6 are tested and written, then the error is reported."""
+    """The reader fails on SNP 7: SNPs 1-6 are tested and written, then the error is reported.
+
+    The failure is tied to SNP 7, however often it is read: a block is read whole, so after
+    a failed block `scan` reads it again one SNP at a time.  (A failure on the 7th read only
+    is the transient case of `test_cli_transient_reader_error_is_recovered`.)
+    """
     from pylmm import plink_io
 
     rc, clean, _ = _inprocess(tmp_path, "clean", flags)
-    patch = (monkeypatch, plink_io.PlinkReader, "__next__", 7, RuntimeError("disk gone"))
+    patch = (monkeypatch, plink_io.PlinkReader, "__next__", _reading_snp(7), RuntimeError("gone"))
     rc, lines, _ = _inprocess(tmp_path, "fail", flags, patch)
     assert rc == 1 and len(lines) == 7
     if flags:  # the same blocks (or none) as the clean run: the same bytes
@@ -482,6 +494,23 @@ def test_cli_reader_error_mid_file(tmp_path, monkeypatch, flags):
             h.assert_batch_close(
                 [float(g[j]) for g in got], [float(r[j]) for r in ref], what="column %d" % j
             )
+
+
+@pytest.mark.parametrize("flags", [[], ["--block-size", "3"]], ids=["default", "bs3"])
+def test_cli_transient_reader_error_is_recovered(tmp_path, monkeypatch, flags):
+    """The 7th read fails once (inside a block): the block is read again one SNP at a time,
+    every SNP gets its line, once, the output is the clean run's, and a warning says so."""
+    from pylmm import plink_io
+
+    rc, clean, _ = _inprocess(tmp_path, "clean", flags)
+    patch = (monkeypatch, plink_io.PlinkReader, "__next__", 7, RuntimeError("disk gone"))
+    log_file = str(tmp_path / "fail.log")
+    rc, lines, _ = _inprocess(tmp_path, "fail", [*flags, "--log-file", log_file], patch)
+    # Read again in blocks of the same size (one block of 20 by default): the same bytes.
+    assert rc == 0 and lines == clean
+    first = 1 if not flags else 7  # the first SNP of the failed block
+    with open(log_file) as f:
+        assert "failed from SNP %d (disk gone)" % first in f.read()
 
 
 @pytest.mark.parametrize("flags", [[], ["--no-batch"]], ids=["default", "no-batch"])
@@ -501,3 +530,54 @@ def test_cli_input_error_mid_block_writes_the_snps_before_it(tmp_path, flags):
     ids, _ = h.load_gwas_out(out)
     assert ids == ["SNP_%d" % k for k in range(1, 7)]
     assert os.path.getsize(out) > 0
+
+
+def _bed_run(tmp_path, tag, base, flags, expect_rc=0):
+    """`pylmm gwas` on the BED file set ``base`` (README phenotypes, kinship); (log, lines)."""
+    out = str(tmp_path / ("%s.tsv" % tag))
+    args = ["gwas", "--bfile", base, "--kinship", h.README_KIN, "--pheno", h.FAKE_PHENOS]
+    log = h.run_cli([*args, "-o", out, *flags], cwd=tmp_path, expect_rc=expect_rc)
+    with open(out) as f:
+        return log, f.read().splitlines()
+
+
+@pytest.mark.parametrize(
+    "flags", [[], ["--no-batch"], ["--block-size", "4"]], ids=["default", "no-batch", "bs4"]
+)
+def test_cli_truncated_bed_writes_the_snps_before_it(tmp_path, flags):
+    """A BED file that ends inside SNP 7: SNPs 1-6 are written, then the error (exit 2).
+
+    The block reader fails on the whole block; `scan` reads it again one SNP at a time."""
+    base = h.write_bed_subset(tmp_path, h.BED_GWAS_SMALL_NSNPS)
+    _, clean = _bed_run(tmp_path, "clean", base, flags)
+    with open(base + ".fam") as f:
+        nbytes = (sum(1 for _ in f) + 3) // 4
+    with open(base + ".bed", "r+b") as f:
+        f.truncate(3 + 6 * nbytes + 10)
+    log, lines = _bed_run(tmp_path, "fail", base, flags, expect_rc=2)
+    assert "Truncated BED file" in log and "SNP 7" in log
+    assert len(lines) == 7
+    if flags == ["--no-batch"]:
+        assert lines == clean[:7]
+    else:  # a shorter last block than the clean run's: the same numbers to rounding
+        got = [line.split("\t") for line in lines[1:]]
+        ref = [line.split("\t") for line in clean[1:7]]
+        assert [g[0] for g in got] == [r[0] for r in ref]
+        for j in range(1, 5):
+            h.assert_batch_close(
+                [float(g[j]) for g in got], [float(r[j]) for r in ref], what="column %d" % j
+            )
+
+
+def test_cli_bim_the_block_reader_rejects_is_read_one_snp_at_a_time(tmp_path):
+    """A 5-column .bim (no A2): `iter_snps` reads it, `variants` (so `iter_blocks`) does not;
+    the scan reads it one SNP at a time, with a warning, and writes the same bytes."""
+    base = h.write_bed_subset(tmp_path, h.BED_GWAS_SMALL_NSNPS)
+    _, clean = _bed_run(tmp_path, "clean", base, [])
+    with open(base + ".bim") as f:
+        rows = [line.split()[:5] for line in f]
+    with open(base + ".bim", "w") as f:
+        f.writelines(" ".join(r) + "\n" for r in rows)
+    log, lines = _bed_run(tmp_path, "five", base, [])
+    assert lines == clean
+    assert "reading SNPs in blocks failed from SNP 1" in log and "line 1" in log
