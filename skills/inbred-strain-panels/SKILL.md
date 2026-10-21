@@ -23,8 +23,10 @@ files are not in the repository.
 **Planned, not yet in pylmm**: a strain-aware option that expands strain genotypes to animals
 and imputes over strains, and marker metadata (position, counted allele) carried through the EMMA path.
 Until then, use the recipes here. Available: EMMA's IBS kinship (`calculate_kinship(G, kind="ibs")`,
-`pylmm kinship --kinship-type ibs`, section 3) and leave-one-chromosome-out scans, the remedy for the
-deflated scans of a K from all SNPs in these panels (`pylmm gwas --loco [--kinship-type ibs]`; for EMMA
+`pylmm kinship --kinship-type ibs`, section 3) and leave-one-chromosome-out scans, **recommended for these
+panels**: a K from all SNPs absorbs much of a causal SNP's signal here, and LOCO roughly doubled QTL power
+in S8 (`pylmm gwas --loco [--kinship-type ibs]`; expect λ_GC well above 1 for a polygenic trait under LOCO,
+linked signal rather than inflation: never genomic-control it; for EMMA
 input give the chromosomes with `--emma-map data/hmdp.liver.snps.map.tsv`, whose rows are the bundled
 matrix's; `pylmm.loco` in the library). On a per-animal BED, `--loco` builds its kinships over the animals,
 as `pylmm kinship` does.

@@ -151,6 +151,13 @@ assert 0.8 < lam_gc < 1.25
   polygenicity is the linear-regression, no-LMM result. Under an LMM whose K includes the tested SNPs,
   polygenic signal tends to *deflate* the test statistics instead, because K absorbs it; LOCO is the
   remedy: `pylmm gwas --loco`, or `pylmm.loco` in the library.)
+* **A LOCO scan** (`pylmm gwas --loco`, `pylmm.loco`): λ_GC of a polygenic trait is above 1 with no
+  confounding at all, because the SNPs linked to the tested chromosome's own causal variants are not
+  explained by `K_{-c}`: S8 measured 1.1-1.5 on the HMDP strains and up to 2.8 on a synthetic inbred
+  panel, and the README mice give ~1.5 at h² = 0.5, while a null phenotype gives ~1.0. So under LOCO
+  λ_GC is not a calibration check (an LD-score-style intercept would be; pylmm has none), and **never
+  apply genomic control to a LOCO scan**: it would remove the linked signal LOCO recovers. Check
+  calibration with a permuted or simulated null phenotype, or on chromosomes without signal.
 * λ < 1: K built from the tested SNPs absorbing signal (proximal contamination; LOCO, `--loco`, helps), or h² = 0 fits
   (mildly conservative in the simulation studies).
 * **Few effective tests** (inbred panels, small scans, one chromosome): λ from one scan is noise (simulation studies:

@@ -104,7 +104,12 @@ A SNP in K partly explains itself (proximal contamination): power drops and, wit
 the statistics are deflated (λ_GC well below 1 in inbred panels; `sims/studies/s8_loco.md`). LOCO
 tests the SNPs of chromosome c with `K_{-c}`, the kinship of the other chromosomes. On the command line
 it is `pylmm gwas --loco` (`run-gwas`). In the library, `pylmm.loco.LocoKinship` builds every `K_{-c}`
-in one pass over the **raw** genotypes, and `gwas_loco` scans with them (a null fit per chromosome):
+in one pass over the **raw** genotypes, and `gwas_loco` scans with them (a null fit per chromosome).
+Under LOCO, λ_GC of a polygenic trait is above 1 without any confounding: the SNPs linked to the tested
+chromosome's own causal variants are no longer explained by K (S8: 1.1-1.5 on the HMDP strains, up to 2.8
+on a synthetic inbred panel, 1.5 on the README mice at h² = 0.5). It is not a calibration check there,
+and **genomic control must never be applied to a LOCO scan**; check calibration on a null (permuted or
+simulated) phenotype instead.
 
 ```python
 from pylmm.loco import LocoKinship, gwas_loco

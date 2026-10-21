@@ -65,8 +65,10 @@ match the text K's to about 1e-7).
 
 **Inbred panels** (strains with replicate animals, few distinct genotypes): a K built from the tested
 SNPs absorbs much of a causal SNP's signal, so power is low, and a polygenic trait deflates the whole
-scan (S8, synthetic inbred panel: λ_GC 0.56-0.66 at h² 0.6-0.9 with K from all SNPs, 1.03-1.04 with LOCO). Prefer LOCO
-(`--loco`) for the scan; `simulate-lmm-data` section 6 shows the size of the effect and the disjoint-K check, and
+scan on chromosomes without causal variants (S8, synthetic inbred panel: λ_GC 0.57-0.66 at h² 0.6-0.9
+with K from all SNPs, 1.03 with LOCO). **For inbred panels, use `pylmm gwas --loco`** (section 2): power
+at a q² = 0.05 QTL roughly doubled in S8. Expect its λ_GC to be well above 1 for a polygenic trait, which
+is linked signal, not inflation (section 3); never genomic-control it. `simulate-lmm-data` section 6 shows the size of the effect and the disjoint-K check, and
 `estimate-heritability` section 7 the individual vs strain-mean set-up. Preparing such data (strain
 aliases, expanding strains to animals, IDs with spaces, imputing over strains rather than animals): the
 `inbred-strain-panels` skill.
@@ -102,7 +104,7 @@ Options that matter:
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
 | `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; changes BETA's scale) |
-| `--loco` | off (`--kinship` K for every SNP) | test each chromosome's SNPs with a K built from the other chromosomes (below); recommended for polygenic traits and inbred panels |
+| `--loco` | off (`--kinship` K for every SNP) | test each chromosome's SNPs with a K built from the other chromosomes (below); **recommended for inbred panels**; costs one eigendecomposition per chromosome |
 | `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`; the file carries the sample IDs, which must be the tested individuals: an error otherwise) |
 | `--block-size N` | 1024 | SNPs read (a BED file is decoded a block at a time) and tested together (one matrix product per block); lower it if memory is tight (about 6-8 × n × N floats) |
 | `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower); `--refit` and SNPs with missing calls always run this way. With well-conditioned covariates both give the same numbers up to rounding (within ~1e-9 relative); with a badly scaled covariate (a raw date or year column) they can differ by up to a few 1e-6 relative, and the batched default is the more accurate. Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are the same, and both paths are then accurate |
@@ -126,8 +128,15 @@ pylmm gwas --bfile geno3 --loco --pheno geno.pheno --pheno-name trait -o trait_l
 grep "chromosome\|null model" trait_loco.log
 ```
 
-Memory: one n × n matrix per chromosome. Per-chromosome kinship files for `--loco` are not supported:
-with your own kinships, loop over chromosomes in Python (`custom-association-analysis`).
+Cost: one eigendecomposition and null fit per chromosome. That is about the standard run at n ≈ 1200
+(the README mice, 19 chromosomes) but 7 times it at n = 3000 (10 chromosomes), and it grows as n³ ×
+chromosomes. Memory is about (chromosomes + 6) × n² × 8 bytes, logged before the kinship pass. More than
+`--loco-max-chroms` (default 100) chromosomes is an error (usually contigs, or a misread map), and labels
+such as `chr1`, `01` and `1` are one chromosome. The genotypes are read in full for the kinships first,
+so a genotype read error stops the run before any output. Per-chromosome kinship files for `--loco` are
+not supported: with your own kinships, loop over chromosomes in Python (`custom-association-analysis`).
+LOCO is opt-in: without `--kinship`, `--grm` or `--loco` the command stops with a usage error that names
+all three.
 
 The same scan in Python, when you need the arrays (subsets, loops, other covariates):
 
@@ -170,7 +179,9 @@ Checklist:
 3. **λ_GC** near 1 for a polygenic trait. Inflation (> 1.1) with an LMM suggests a missing covariate or a
    K that does not match the samples. (λ growing with n·h²/M is the linear-regression, no-LMM result; with
    an LMM whose K includes the tested SNPs, polygenic signal tends to deflate λ, and LOCO (`--loco`) is
-   the remedy.)
+   the remedy.) **Under `--loco`, λ_GC of a polygenic trait is above 1 by design** (linked signal on the
+   tested chromosome; ~1.5 on the README mice at h² = 0.5): not a calibration check, and never apply
+   genomic control to it (`interpret-gwas-results`).
    In inbred panels
    with few effective tests, λ from one scan is noisy (simulation studies: 5–95% range 0.7–1.5 under the null). The
    example above prints λ ≈ 0.4: 3000 SNPs of one chromosome of an inbred panel are a handful of

@@ -108,18 +108,26 @@ maps them).
   --loco` (instead of `--kinship`/`--grm`/`--eigen`) reads the genotypes once for the kinships and once to
   scan, one null fit per chromosome (logged with each `K_{-c}`'s SNP count and scale); `--kinship-type`
   picks the kind, `--emma-map FILE` gives EMMA rows their chromosomes (e.g. `data/hmdp.liver.snps.map.tsv`).
-  Same output columns, file order. Each chromosome's SNPs must be together in the file. Off by default:
-  the default scan is unchanged. Evidence (`sims/studies/s8_loco.md`): with K from all SNPs, null λ_GC
-  0.56-0.85 on inbred panels at h2 0.6-0.9 (type-I at 0.05 down to 0.009); with LOCO 0.98-1.04 everywhere,
-  and the power of a q2 = 0.05 QTL at 1e-3 up from 0.30 to 0.55 (synthetic inbred panel, h2 = 0.6).
-  `pylmm gwas --loco` on the README data: 16.5-20.1 s vs 13.9-20.6 s for `pylmm kinship` + `pylmm gwas`
-  (`just bench loco`).
+  Same output columns, file order. Each chromosome's SNPs must be together in the file; labels are
+  normalised (`chr1`, `01`, `1` are one chromosome; `pylmm.loco.normalize_chrom`); more than
+  `--loco-max-chroms` (default 100) chromosomes, or one chromosome per SNP, is an error; the memory
+  estimate, about (chromosomes + 6) n² × 8 bytes, is logged first. A genotype read error stops `--loco`
+  before any output. Opt-in: the default scan is unchanged, and without `--kinship`/`--grm`/`--loco` the
+  usage error names `--loco`. Evidence (`sims/studies/s8_loco.md`): on a null phenotype both kinships are
+  calibrated (LOCO λ_GC 0.94-1.02); on chromosomes without causal variants K from all SNPs is
+  conservative (λ_GC down to 0.57 on an inbred panel) and LOCO is not (0.97-1.06); the power of a q2 =
+  0.05 QTL at 1e-3 roughly doubles on inbred panels. With causal variants on every chromosome, LOCO's
+  λ_GC of a polygenic trait is above 1 (1.1-2.8; linked signal, not confounding): do not use it as a
+  calibration check and never apply genomic control to a LOCO scan. Cost: one eigendecomposition per
+  chromosome; 14 s vs 11 s on the README data (n = 1219), 199 s vs 27 s at n = 3000 with 10
+  chromosomes.
 - `pylmm.kinship.snp_columns` and `finish_kinship`: the per-SNP step and the final scaling of
   `KinshipAccumulator`, factored out (K unchanged, bit for bit).
 
 ### Changed
 - `pylmm gwas` without `--kinship` or `--grm`: argparse's "one of the arguments --kinship --grm is
-  required" -> the same message from `check_args` with "(or --loco)"; exit code 2 as before.
+  required" -> the same message from `check_args`, which also suggests `--loco`; exit code 2 as before.
+- `pylmm.kinship.finish_kinship` with no SNP used raises `ValueError` (it divided by zero).
 - `pylmm kinship --eigen-npz`: arrays `Kva`, `Kve` -> also `fid`, `iid` (the samples of Kve's rows; not for
   EMMA input) and `kinship_type` (plain arrays, no pickle; 1.0.0 readers still find `Kva` and `Kve`).
 - `pylmm gwas --eigen`: the decomposition was used only if no individual was dropped or reordered, its rows

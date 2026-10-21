@@ -471,7 +471,8 @@ contamination): the polygenic term absorbs some of a causal SNP's effect, and wi
 whole scan is deflated (λ_GC well below 1 in inbred panels). `pylmm.loco` tests the SNPs of chromosome
 `c` with `K_{-c}`, the kinship of the other chromosomes (GCTA `--mlma-loco`; `pylmm gwas --loco` on the
 command line). `LocoKinship` builds every `K_{-c}` in one pass over the **raw** genotypes, for any
-`kind`, keeping one n × n sum per chromosome (memory: one n × n matrix per chromosome); each `K_{-c}` is
+`kind`, keeping one n × n sum per chromosome (memory: about (chromosomes + 6) × n² × 8 bytes,
+`pylmm.loco.loco_memory_bytes`); each `K_{-c}` is
 `calculate_kinship` of the other chromosomes' SNPs, up to rounding. `gwas_loco(Y, X, chroms)` fits the
 null model on each `K_{-c}` (its own `h`) and tests that chromosome's columns with `gwas`:
 
@@ -491,10 +492,16 @@ print("causal SNP: p = %.1e (all-SNP K), %.1e (LOCO)" % (ps[100], res.p_values[1
 assert res.p_values[100] < ps[100]
 ```
 
-Each `K_{-c}` has its own eigendecomposition and null fit, so a scan over c chromosomes costs c of them.
-`loco.kinship(c)` returns `K_{-c}` for your own loops (`loco.kinship()`: all SNPs). The
-`custom-association-analysis` skill shows the by-hand equivalent, and `sims/studies/s8_loco.md` the
-calibration and power LOCO buys.
+Each `K_{-c}` has its own eigendecomposition and null fit, so a scan over c chromosomes costs c of them,
+and that dominates as n grows (an O(n³) eigendecomposition each): about the cost of the all-SNP scan at
+n ≈ 1200 (19 chromosomes), 7 times it at n = 3000 (10 chromosomes). Chromosome labels are normalised
+(`normalize_chrom`: `chr1`, `01` and `1` are one chromosome), and with `kinships=` every chromosome of
+`chroms` must be in them (an error otherwise). `loco.kinship(c)` returns `K_{-c}` for your own loops
+(`loco.kinship()`: all SNPs). The `custom-association-analysis` skill shows the by-hand equivalent.
+
+Under LOCO, λ_GC of a polygenic trait is above 1 without any confounding: the SNPs linked to the tested chromosome's own causal variants are no longer explained by K (S8: 1.1-1.5 on the HMDP strains, up to 2.8 on a synthetic inbred panel, 1.5 on the README mice at h² = 0.5). It is not a calibration check there, and **genomic control must never be applied to a LOCO scan**; check calibration on a null (permuted or simulated) phenotype instead. `sims/studies/s8_loco.md` has the calibration (on chromosomes without causal
+variants and on null phenotypes) and the power LOCO buys: large in inbred panels, small for unlinked
+outbred SNPs.
 
 ## 8. Missing genotypes
 
@@ -540,8 +547,13 @@ head -3 trait.tsv
   tests each chromosome's SNPs with its own (section 7): one extra pass over the genotypes, one
   eigendecomposition and null fit per chromosome (logged with `-v`). It needs the chromosomes (the `.bim`
   or `.map`; for `--emma-geno`, a marker map with `--emma-map`, e.g. `data/hmdp.liver.snps.map.tsv`), each
-  chromosome's SNPs together in the file, and at least two chromosomes; `--kinship-type` picks the kind.
-  The output columns and order are the usual ones.
+  chromosome's SNPs together in the file, and at least two and at most `--loco-max-chroms` (default 100)
+  chromosomes; `--kinship-type` picks the kind. The output columns and order are the usual ones. It logs
+  its memory estimate first, about (chromosomes + 6) × n² × 8 bytes. The genotypes are read in full for
+  the kinships before the scan, so a genotype read error (a truncated BED, a malformed `.bim` line) stops
+  the run before any output, where the standard scan writes the SNPs before the error. Do not apply
+  genomic control to its output (λ_GC of a polygenic trait is above 1 by design; section 7). LOCO is
+  opt-in: without `--kinship`, `--grm` or `--loco` the command is a usage error that names all three.
 * The intercept is added unless `--no-intercept`; individuals with a missing phenotype or covariate are
   dropped (with a warning).
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
