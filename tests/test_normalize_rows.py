@@ -241,3 +241,26 @@ def test_iter_blocks_bits_and_layout(tmp_path, fmt):
     assert np.array_equal(_bits(B), _bits(want))
     for (G, _), (G0, _) in zip(blocks, raw_blocks, strict=True):
         assert G.strides == G0.strides and G.shape == G0.shape
+
+
+def test_normalize_rows_in_parts_and_chunks(monkeypatch):
+    """A block larger than one part (and one chunk) is done part by part, same bits."""
+    monkeypatch.setattr(genotypes, "_PART_BYTES", 8 * 37 * 5)  # 5 rows per part
+    monkeypatch.setattr(genotypes, "_CHUNK_BYTES", 8 * 37 * 2)  # 2 rows per chunk
+    rng = np.random.default_rng(8)
+    R = _adversarial_block(rng, 37, 23, "bed", "rows")
+    got = R.copy()
+    _normalize_rows(got)
+    assert np.array_equal(_bits(got), _bits(_per_snp(R)))
+
+
+@pytest.mark.parametrize("missing", ["none", "sparse", "rows"])
+def test_normalize_rows_long_rows_with_missing_calls_one_by_one(monkeypatch, missing):
+    """Above _GROUP_MAX_N, SNPs with missing calls go through normalize_genotype and the
+    others through the block code: same bits."""
+    monkeypatch.setattr(genotypes, "_GROUP_MAX_N", 16)
+    rng = np.random.default_rng(9)
+    R = _adversarial_block(rng, 41, 30, "dosage", missing)
+    got = R.copy()
+    _normalize_rows(got)
+    assert np.array_equal(_bits(got), _bits(_per_snp(R)))

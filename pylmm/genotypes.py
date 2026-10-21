@@ -401,9 +401,16 @@ def normalize_genotype(G: NDArray[np.float64]) -> NDArray[np.float64]:
 # one at a time with `normalize_genotype` instead.  tests/test_normalize_rows.py fuzzes
 # the two paths against each other on every CI job (numpy 1.23.2 to current, x86-64).
 
-# Rows per chunk of the elementwise passes of `_normalize_rows`: about 1 MiB of
-# float64, so that a chunk and its scratch array stay in cache.
+# `_normalize_rows` works on a block in parts of about 8 MiB of float64 (whole rows),
+# which bounds its temporaries (the compacted called values, masks) for any block size,
+# and does its elementwise passes in chunks of about 1 MiB, which stay in cache.
+_PART_BYTES = 8 << 20
 _CHUNK_BYTES = 1 << 20
+# SNPs longer than this with missing calls are standardised one by one (with
+# normalize_genotype: the same bits).  For long rows the per-SNP overhead is small,
+# while compacting the called values costs more than it saves (measured: 0.8-0.9x at
+# n = 5003 and 100,000 with 2% missing calls, 2x at n = 1001 and 1219).
+_GROUP_MAX_N = 2048
 
 # Row length n -> whether `_normalize_rows` matches `normalize_genotype` (the probe).
 _ROWS_MATCH: dict[int, bool] = {}
@@ -430,7 +437,21 @@ def _normalize_rows(R: NDArray[np.float64]) -> None:
         return
     rows_contiguous = R.strides[1] == R.itemsize and R.strides[0] >= R.itemsize * n
     X = R if rows_contiguous else np.ascontiguousarray(R)
-    _normalize_c_rows(X)
+    step = max(1, _PART_BYTES // (8 * n))
+    for r0 in range(0, b, step):
+        P = X[r0 : r0 + step]
+        if n > _GROUP_MAX_N:
+            some = np.flatnonzero(np.isnan(P).any(axis=1))  # SNPs with a missing call
+            if len(some):
+                for j in some.tolist():
+                    P[j] = normalize_genotype(P[j])
+                if len(some) < len(P):
+                    rest = np.flatnonzero(~np.isin(np.arange(len(P)), some))
+                    Y = P[rest]
+                    _normalize_c_rows(Y)
+                    P[rest] = Y
+                continue
+        _normalize_c_rows(P)
     if X is not R:
         R[...] = X
 
