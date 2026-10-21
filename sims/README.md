@@ -113,6 +113,13 @@ def report(df, outdir):      # optional; the default is a mean/SE table per cell
   Running with a larger `--reps` adds only the new replicates. `--force`
   discards that mode's raw results.
 
+**Results that predate the Phase 6.6 kinship.** The committed S1-S5 summaries were computed with
+pylmm 1.0.0's `calculate_kinship` (`sims.kinship` calls the library's default). Since Phase 6.6 the default
+standardises with the called genotypes' SD and does not count constant or all-missing SNPs in `m` (bug 8;
+`legacy=True` keeps the old K), so rerunning S1-S5 on sources with missing calls or constant SNPs (`bed`,
+`hmdp`) moves K's scale, and with it h, a little; t and p hardly move. Sources without either (the
+synthetic ones) give the same K. S4's bug-8 scenario uses `legacy=True` on purpose.
+
 ## Where results go, and what to commit
 
 ```

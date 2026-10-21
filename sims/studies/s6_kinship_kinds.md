@@ -79,8 +79,21 @@ Null calibration (λ_GC, type-I error at 0.05 and 0.01):
    variance the phenotype does not have along them. Without the tested chromosomes in K (`*_loco`), λ is
    0.99-1.06 and t1e 0.048-0.054. LOCO, not the kinship kind, is the calibration lever (the CLI has no
    LOCO flag yet; see `custom-association-analysis`).
+   Context: in this design the LOCO kinship is built from exactly the chromosomes that carry the causal
+   SNPs, so it is close to the generating covariance and λ ≈ 1 is expected by construction; the
+   all-SNP deflation is the finding. It is not an artefact of the half/half split: the PR #26 review
+   re-ran inbred_panel, h2 = 0.6 (30 replicates) with the causal SNPs on chromosomes 1-9 and the tests on
+   chromosome 10, and got λ 0.703 with K from all SNPs and 1.075 with LOCO (half/half: 0.691 / 1.018).
+   It is proximal contamination, strong in an 8-founder RI-like panel, where each chromosome's SNPs are
+   a large share of the strain relatedness in K.
 4. **h2 = 0 bias**: REML `h` at h2 = 0 is 0.04-0.05 (standardized), larger on the other kinds' scales, a
    boundary effect (h ≥ 0); PVE 0.03-0.06 for all.
+5. **HMDP at h2 = 0 is mildly conservative for every kinship, LOCO included** (λ 0.91-0.95, t1e at 0.05
+   0.038-0.042; synthetic panel at h2 = 0: λ 0.97-1.04). Not investigated further; a likely reading is
+   that with 94 strains the null SNPs lie largely along the leading eigenvectors of K, which the fitted
+   h (0.03-0.16 on the kinships' scales, from the h ≥ 0 boundary) down-weights, and that the median of
+   7,416 strongly linked SNPs per replicate is noisy. S1 also found the test mildly conservative
+   at h2 = 0. The kind makes no difference here either.
 
 Interpretation for users of EMMA-era inbred-panel studies: `kind="ibs"` reproduces their kinship; it does
 not change calibration, and its `h` must be converted to PVE (or to the other kinship's scale) before it
