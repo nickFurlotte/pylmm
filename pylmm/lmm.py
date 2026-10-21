@@ -1390,7 +1390,10 @@ class LMM:
             Heritability in [0, 1].  Above 1, ``h * kva + 1 - h`` can be
             negative and the result is nan.
         X : array, optional
-            If None, the covariates ``x0t`` are used.  If given and
+            If None, the covariates ``x0t`` are used (the likelihood is
+            computed on an orthonormal basis of them, which leaves it
+            unchanged and keeps it accurate for badly scaled covariates;
+            ``beta`` and ``xx_inv`` are for ``x0t``).  If given and
             ``stack=True``, ``X`` is a **raw** SNP, shape (N,) or (N, 1), in
             the original individual order; it is rotated and appended to
             ``x0t`` (this overwrites ``x0t_stack``).  If given and
@@ -1431,8 +1434,10 @@ class LMM:
         True
         """
 
+        in_basis = False  # the covariates' orthonormal basis stands in for x0t
         if X is None:
-            X = self.x0t if self.legacy_fit else self._x0t_ortho
+            in_basis = not self.legacy_fit and self.q > 0
+            X = self._x0t_ortho if in_basis else self.x0t
         elif stack:
             self.x0t_stack[:, (self.q)] = _matrix_mult(self.kve.T, _snp_column(X, self.N))[:, 0]
             X = self.x0t_stack
@@ -1468,6 +1473,8 @@ class LMM:
                 )
             ll = ll + 0.5 * ll_reml_part
 
+        if in_basis:  # report beta and (X'SX)^-1 for the covariates as given
+            beta, sigma, _, xx_inv, _ = self.ml_solution(h, self.x0t)
         return LogLikResult(float(ll), beta, sigma, xx_inv)
 
     def _get_best(self, H: FloatArray, X: FloatArray | None = None, reml: bool = True) -> Any:
