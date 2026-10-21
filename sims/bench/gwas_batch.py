@@ -12,11 +12,14 @@ data and on the bundled 1219-mouse BED file:
   standard error (beta and se from `LMM.association` vs
   `LMM.association_batch` on the estimable SNPs);
 * end-to-end ``pylmm gwas`` on a SNP slice of ``data/snps.132k.clean.noX``,
-  default vs ``--no-batch``, and a diff of the two output files.
+  default vs ``--no-batch``, and a diff of the two output files.  With
+  ``--cli-baseline DIR`` (a checkout of another revision, e.g. ``git worktree
+  add /tmp/base origin/phase6``) the default command of DIR's ``pylmm`` is
+  timed too (``PYTHONPATH=DIR``) and its output compared byte for byte.
 
 Run::
 
-    uv run --group sims python -m sims.bench.gwas_batch [--quick]
+    uv run --group sims python -m sims.bench.gwas_batch [--quick] [--cli-baseline DIR]
     just bench gwas_batch [--quick]
 
 Timings are single-threaded BLAS by default (``python -m`` imports the
@@ -172,8 +175,14 @@ def read_output(fn: str) -> tuple[list[str], list[str], np.ndarray]:
     return lines, [r[0] for r in rows], np.array([[float(v) for v in r[1:]] for r in rows])
 
 
-def run_cli(m: int, repeats: int, workdir: str) -> dict[str, Any] | None:
-    """Time ``pylmm gwas`` on the first ``m`` SNPs, default vs ``--no-batch``; diff the outputs."""
+def run_cli(
+    m: int, repeats: int, workdir: str, baseline: str | None = None
+) -> dict[str, Any] | None:
+    """Time ``pylmm gwas`` on the first ``m`` SNPs, default vs ``--no-batch``; diff the outputs.
+
+    With ``baseline`` (the root of another pylmm checkout), also time its default
+    command (``PYTHONPATH=baseline``) and compare its output with this one's.
+    """
     if not all(
         os.path.exists(BED_BASE + ext)
         for ext in (".bed", ".bim", ".fam", ".pylmm.kin", ".fake.phenos")
@@ -182,8 +191,27 @@ def run_cli(m: int, repeats: int, workdir: str) -> dict[str, Any] | None:
     base = os.path.join(workdir, "slice")
     m = write_bed_slice(base, m)
     timings = {}
-    for tag, extra in (("batched", []), ("per_snp", ["--no-batch"])):
+    runs: list[tuple[str, list[str], str | None]] = [
+        ("batched", [], None),
+        ("per_snp", ["--no-batch"], None),
+    ]
+    if baseline:
+        runs.append(("baseline", [], os.path.abspath(baseline)))
+    for tag, extra, path in runs:
         out = os.path.join(workdir, "%s.tsv" % tag)
+        env = dict(os.environ)
+        if path:
+            env["PYTHONPATH"] = path + os.pathsep + env.get("PYTHONPATH", "")
+            # (run in workdir: `python -m` puts the working directory first on sys.path)
+            where = subprocess.run(
+                [sys.executable, "-c", "import pylmm; print(pylmm.__file__)"],
+                env=env,
+                cwd=workdir,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            assert where.startswith(path), "the baseline imports pylmm from %s" % where
         cmd = [
             sys.executable,
             "-m",
@@ -201,12 +229,23 @@ def run_cli(m: int, repeats: int, workdir: str) -> dict[str, Any] | None:
             *extra,
         ]
         timings[tag] = median_time(
-            lambda cmd=cmd: subprocess.run(cmd, check=True, capture_output=True), repeats
+            lambda cmd=cmd, env=env: subprocess.run(
+                cmd, check=True, capture_output=True, env=env, cwd=workdir
+            ),
+            repeats,
         )[0]
     lines_b, ids_b, vals_b = read_output(os.path.join(workdir, "batched.tsv"))
     lines_o, ids_o, vals_o = read_output(os.path.join(workdir, "per_snp.tsv"))
     assert ids_b == ids_o, "SNP order differs"
+    baseline_result = None
+    if baseline:
+        with (
+            open(os.path.join(workdir, "baseline.tsv"), "rb") as f1,
+            open(os.path.join(workdir, "batched.tsv"), "rb") as f2,
+        ):
+            baseline_result = {"s": timings["baseline"], "identical": f1.read() == f2.read()}
     return {
+        "baseline": baseline_result,
         "m": m,
         "n": sum(1 for _ in open(BED_BASE + ".fam")),
         "batched_s": timings["batched"],
@@ -285,6 +324,14 @@ def print_cli(r: dict[str, Any] | None) -> None:
             r["m"],
         )
     )
+    if r["baseline"] is not None:
+        b = r["baseline"]
+        print("\n| --cli-baseline default (s) | default (s) | speedup | output byte-identical |")
+        print("|---|---|---|---|")
+        print(
+            "| %.2f | %.2f | %.2fx | %s |"
+            % (b["s"], r["batched_s"], b["s"] / r["batched_s"], "yes" if b["identical"] else "NO")
+        )
     print("\n| column | max abs diff | max rel diff | nan positions equal |")
     print("|---|---|---|---|")
     for name, (a, rel, same) in r["cols"].items():
@@ -309,8 +356,9 @@ def run_all(args: argparse.Namespace, threads: int) -> list[dict[str, Any]]:
             print_cli(
                 run_cli(
                     QUICK_CLI_SNPS if args.quick else FULL_CLI_SNPS,
-                    QUICK_CLI_REPEATS if args.quick else FULL_CLI_REPEATS,
+                    args.cli_repeats or (QUICK_CLI_REPEATS if args.quick else FULL_CLI_REPEATS),
                     workdir,
+                    args.cli_baseline,
                 )
             )
     sys.stdout.flush()
@@ -321,6 +369,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="python -m sims.bench.gwas_batch", description=__doc__)
     ap.add_argument("--quick", action="store_true", help="small sizes (well under a minute)")
     ap.add_argument("--no-cli", action="store_true", help="skip the pylmm gwas timing")
+    ap.add_argument(
+        "--cli-baseline",
+        metavar="DIR",
+        help="also time the default pylmm gwas of the pylmm checkout DIR (another revision)",
+    )
+    ap.add_argument("--cli-repeats", type=int, help="repeats of each pylmm gwas timing")
     ap.add_argument(
         "--threads",
         type=int,
@@ -350,6 +404,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             run_all(args, k)
         else:  # the thread count is fixed when numpy loads: run it in a child process
             flags = ["--quick"] * args.quick + ["--no-cli"] * args.no_cli
+            if args.cli_baseline:
+                flags += ["--cli-baseline", args.cli_baseline]
+            if args.cli_repeats:
+                flags += ["--cli-repeats", str(args.cli_repeats)]
             env = dict(os.environ, SIMS_BLAS_THREADS=str(k), PYLMM_BENCH_CHILD="1")
             subprocess.run(
                 [sys.executable, "-m", "sims.bench.gwas_batch", *flags, "--threads", str(k)],
