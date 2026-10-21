@@ -63,3 +63,12 @@ def test_bench_subset_copy_reads_the_first_snps(tmp_path):
 def test_bench_bed_blocks_quick(capsys):
     assert bed_blocks.main(["--quick", "--repeats", "1"]) == 0
     assert "bit-identical to iter_snps: yes" in capsys.readouterr().out
+
+
+def test_bench_reports_the_probe(monkeypatch):
+    from pylmm import genotypes
+
+    monkeypatch.setattr(genotypes, "_ROWS_MATCH", {})
+    assert bed_blocks.probe_report() == "block standardisation probe: not run"
+    monkeypatch.setattr(genotypes, "_ROWS_MATCH", {1219: True, 7: False})
+    assert bed_blocks.probe_report().endswith("n=7: NO, per-SNP fallback, n=1219: yes")

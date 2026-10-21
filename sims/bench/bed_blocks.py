@@ -146,6 +146,16 @@ def per_snp_standardisation() -> Iterator[None]:
         genotypes._ROWS_MATCH = saved
 
 
+def probe_report() -> str:
+    """Which row lengths the block standardisation's probe accepted (or rejected)."""
+    seen = genotypes._ROWS_MATCH
+    if not seen:
+        return "block standardisation probe: not run"
+    return "block standardisation probe (row length: accepted): " + ", ".join(
+        "n=%d: %s" % (n, "yes" if ok else "NO, per-SNP fallback") for n, ok in sorted(seen.items())
+    )
+
+
 def _same_bits(a: np.ndarray, b: np.ndarray) -> bool:
     return a.shape == b.shape and np.array_equal(
         np.ascontiguousarray(a).view(np.int64), np.ascontiguousarray(b).view(np.int64)
@@ -290,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     print(format_table(rows))
+    print("\n" + probe_report())
     ok = all(r["identical"] for r in rows)
     print("\nblock columns bit-identical to iter_snps: %s" % ("yes" if ok else "NO"))
     return 0 if ok else 1
