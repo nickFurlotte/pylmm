@@ -25,6 +25,17 @@ def test_quick_main_without_cli():
     assert "### gwas(): batched vs per SNP" in text and "| 300 | 2000 | 4 | ML |" in text
 
 
+def test_cli_only_skips_the_synthetic_runs(monkeypatch):
+    calls = []
+    monkeypatch.setattr(gwas_batch, "run_synthetic", lambda *a: calls.append(a))
+    monkeypatch.setattr(gwas_batch, "run_cli", lambda *a: None)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        gwas_batch.main(["--quick", "--cli-only", "--threads", "1"])
+    assert not calls and "### gwas(): batched" not in out.getvalue()
+    assert "### pylmm gwas on" in out.getvalue()
+
+
 @pytest.mark.skipif(
     not gwas_batch.os.path.exists(gwas_batch.BED_BASE + ".bed"), reason="no bundled data"
 )

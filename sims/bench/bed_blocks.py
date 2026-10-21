@@ -1,8 +1,8 @@
 """Benchmark: BED decoding SNP by SNP (``PlinkReader.iter_snps``) vs in blocks (``iter_blocks``).
 
-Phase 6.2.  Measures the decode throughput (SNPs per second) of the per-SNP
-iterator and of ``iter_blocks`` at a few block sizes, with and without
-standardisation (``norm_genotype``), on
+Phase 6.2 (6.1c: standardisation of whole blocks).  Measures the decode
+throughput (SNPs per second) of the per-SNP iterator and of ``iter_blocks`` at
+a few block sizes, with and without standardisation (``norm_genotype``), on
 
 * the bundled 1219-mouse BED file ``data/snps.132k.clean.noX`` (98,740 SNPs;
   with ``--quick``, a copy of its first 8,192 SNPs written to a temporary
@@ -10,9 +10,15 @@ standardisation (``norm_genotype``), on
 * a seeded synthetic BED file (written to a temporary directory) with an
   individual count that is not a multiple of 4 and 2% missing calls.
 
+With standardisation, ``iter_blocks`` is timed twice: as it is (a block
+standardised at once, ``pylmm.genotypes._normalize_rows``) and with the
+per-SNP standardisation it used before 6.1c (``normalize_genotype`` called on
+each column in a Python loop, the fallback of ``_normalize_rows``); the
+"vs per-SNP std" column is the speedup of the first over the second.
+
 It also checks, outside the timed runs, that every block column is bit for bit
-the per-SNP vector (``numpy.array_equal(..., equal_nan=True)``), and that the
-block variants are the ``.bim`` lines.  Times are the median of ``--repeats``
+the per-SNP vector (the raw float64 bits compared, so nan payloads and the sign
+of zero count too), and that the block variants are the ``.bim`` lines.  Times are the median of ``--repeats``
 runs (default 5 with ``--quick``, 3 otherwise).  Each timed run opens a new
 ``PlinkReader`` and reads the whole file, so both methods pay for reading the
 ``.fam`` and ``.bim`` (``iter_snps`` a ``.bim`` line per SNP, ``iter_blocks``
@@ -31,6 +37,7 @@ Run::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import itertools
 import os
 import platform
@@ -44,6 +51,7 @@ from collections.abc import Callable, Iterator
 import numpy as np
 
 import pylmm
+from pylmm import genotypes
 from pylmm.plink_io import PlinkReader
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -118,6 +126,42 @@ def copy_first_snps(src: str, dst: str, m: int) -> None:
     shutil.copyfile(src + ".fam", dst + ".fam")
 
 
+class _AlwaysPerSnp(dict):  # type: ignore[type-arg]
+    def get(self, key: object, default: object = None) -> bool:
+        return False
+
+
+@contextlib.contextmanager
+def per_snp_standardisation() -> Iterator[None]:
+    """Within the block, ``iter_blocks`` standardises SNP by SNP (the code before 6.1c).
+
+    ``_normalize_rows`` then takes its fallback, ``R[j] = normalize_genotype(R[j])``
+    for each SNP ``j`` of the block, as ``iter_blocks`` did before.
+    """
+    saved = genotypes._ROWS_MATCH
+    genotypes._ROWS_MATCH = _AlwaysPerSnp()
+    try:
+        yield
+    finally:
+        genotypes._ROWS_MATCH = saved
+
+
+def probe_report() -> str:
+    """Which row lengths the block standardisation's probe accepted (or rejected)."""
+    seen = genotypes._ROWS_MATCH
+    if not seen:
+        return "block standardisation probe: not run"
+    return "block standardisation probe (row length: accepted): " + ", ".join(
+        "n=%d: %s" % (n, "yes" if ok else "NO, per-SNP fallback") for n, ok in sorted(seen.items())
+    )
+
+
+def _same_bits(a: np.ndarray, b: np.ndarray) -> bool:
+    return a.shape == b.shape and np.array_equal(
+        np.ascontiguousarray(a).view(np.int64), np.ascontiguousarray(b).view(np.int64)
+    )
+
+
 def check_identity(prefix: str, norm: bool, block_size: int) -> bool:
     """Every block column equals the per-SNP vector bit for bit, with the same SNP name."""
     snps = PlinkReader(prefix, norm_genotype=norm).iter_snps()
@@ -127,7 +171,7 @@ def check_identity(prefix: str, norm: bool, block_size: int) -> bool:
     for G, v in blocks.iter_blocks(block_size):
         for j in range(G.shape[1]):
             g, name = next(snps)
-            if not (np.array_equal(g, G[:, j], equal_nan=True) and name == v.snp[j] == names[k]):
+            if not (_same_bits(g, G[:, j]) and name == v.snp[j] == names[k]):
                 return False
             k += 1
     return k == len(names) and next(snps, None) is None
@@ -159,21 +203,35 @@ def bench_file(label: str, prefix: str, repeats: int) -> list[dict[str, object]]
                 ),
                 repeats,
             )
-            rows.append(
-                {**common, "method": "iter_blocks(%d)" % b, "sec": sec, "speedup": base / sec}
-            )
+            row = {**common, "method": "iter_blocks(%d)" % b, "sec": sec, "speedup": base / sec}
+            if norm:
+                with per_snp_standardisation():
+                    before = _median_time(
+                        lambda b=b: _consume(PlinkReader(prefix).iter_blocks(b)), repeats
+                    )
+                rows.append(
+                    {
+                        **common,
+                        "method": "iter_blocks(%d), per-SNP std" % b,
+                        "sec": before,
+                        "speedup": base / before,
+                    }
+                )
+                row["std_speedup"] = before / sec
+            rows.append(row)
     return rows
 
 
 def format_table(rows: list[dict[str, object]]) -> str:
     out = [
-        "| data | n | SNPs | norm | method | median s | SNPs/s | speedup | bit-identical |",
-        "|---|---:|---:|---|---|---:|---:|---:|---|",
+        "| data | n | SNPs | norm | method | median s | SNPs/s | speedup | vs per-SNP std "
+        "| bit-identical |",
+        "|---|---:|---:|---|---|---:|---:|---:|---:|---|",
     ]
     for r in rows:
         sec = float(r["sec"])  # type: ignore[arg-type]
         out.append(
-            "| %s | %d | %d | %s | %s | %.3f | %s | %.1fx | %s |"
+            "| %s | %d | %d | %s | %s | %.3f | %s | %.1fx | %s | %s |"
             % (
                 r["data"],
                 r["n"],
@@ -183,6 +241,7 @@ def format_table(rows: list[dict[str, object]]) -> str:
                 sec,
                 format(round(int(r["snps"]) / sec), ","),  # type: ignore[call-overload]
                 r["speedup"],
+                "%.1fx" % r["std_speedup"] if "std_speedup" in r else "",  # type: ignore[str-format]
                 "yes" if r["identical"] else "NO",
             )
         )
@@ -241,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     print(format_table(rows))
+    print("\n" + probe_report())
     ok = all(r["identical"] for r in rows)
     print("\nblock columns bit-identical to iter_snps: %s" % ("yes" if ok else "NO"))
     return 0 if ok else 1
