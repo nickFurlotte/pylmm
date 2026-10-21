@@ -48,8 +48,9 @@ plink_tools.write_pheno("geno.pheno", ids, y, ["trait"])
 pylmm kinship --bfile geno -o geno.kin -v      # writes geno.kin and geno.kin.id
 ```
 
-Build K from the SNPs you trust (QC'd, autosomal). With many SNPs, K from all of them is standard; for
-LOCO (leave the tested chromosome out of K) see `custom-association-analysis`. The default
+Build K from the SNPs you trust (QC'd, autosomal). With many SNPs, K from all of them is standard; to
+leave the tested chromosome out of K (LOCO) use `pylmm gwas --loco` instead of a kinship file (section
+2). The default
 `--kinship-type standardized` is the GRM (GEMMA `-gk 2`'s formula on complete genotypes; GEMMA
 standardises after mean imputation and drops MAF < 0.01 / missingness > 0.05 SNPs by default);
 `--kinship-type ibs` is EMMA's IBS kinship (to match an EMMA-era inbred-panel paper); `centered` is GEMMA
@@ -63,8 +64,9 @@ IDs; a plain n × n text matrix (GEMMA) needs its `.id` file (`pylmm.samples.wri
 match the text K's to about 1e-7).
 
 **Inbred panels** (strains with replicate animals, few distinct genotypes): a K built from the tested
-SNPs absorbs much of a causal SNP's signal, so power is low and λ_GC from one scan is noisy. Prefer LOCO
-for the scan; `simulate-lmm-data` section 6 shows the size of the effect and the disjoint-K check, and
+SNPs absorbs much of a causal SNP's signal, so power is low, and a polygenic trait deflates the whole
+scan (S8, synthetic inbred panel: λ_GC 0.56-0.66 at h² 0.6-0.9 with K from all SNPs, 1.03-1.04 with LOCO). Prefer LOCO
+(`--loco`) for the scan; `simulate-lmm-data` section 6 shows the size of the effect and the disjoint-K check, and
 `estimate-heritability` section 7 the individual vs strain-mean set-up. Preparing such data (strain
 aliases, expanding strains to animals, IDs with spaces, imputing over strains rather than animals): the
 `inbred-strain-panels` skill.
@@ -100,9 +102,32 @@ Options that matter:
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
 | `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; changes BETA's scale) |
+| `--loco` | off (`--kinship` K for every SNP) | test each chromosome's SNPs with a K built from the other chromosomes (below); recommended for polygenic traits and inbred panels |
 | `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`; the file carries the sample IDs, which must be the tested individuals: an error otherwise) |
 | `--block-size N` | 1024 | SNPs read (a BED file is decoded a block at a time) and tested together (one matrix product per block); lower it if memory is tight (about 6-8 × n × N floats) |
 | `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower); `--refit` and SNPs with missing calls always run this way. With well-conditioned covariates both give the same numbers up to rounding (within ~1e-9 relative); with a badly scaled covariate (a raw date or year column) they can differ by up to a few 1e-6 relative, and the batched default is the more accurate. Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are the same, and both paths are then accurate |
+
+**Leave one chromosome out.** `--loco` replaces `--kinship`: pylmm reads the genotypes once to build
+`K_{-c}` (the kinship of every chromosome but `c`, `--kinship-type` as in `pylmm kinship`) for each
+chromosome, then scans, fitting the null model once per chromosome (`-v` logs each chromosome's K and h).
+It needs the chromosome of each SNP (the `.bim`; `--emma-map FILE` for EMMA input) with each chromosome's
+SNPs together, and at least two chromosomes. The example `geno` has chromosome 1 only, so make a file
+set with SNPs from three chromosomes:
+
+```python
+with PlinkReader(SRC) as r:
+    chrom = r.variants.chrom
+three = np.flatnonzero(np.isin(chrom, ["1", "2", "3"]))[::10]    # every 10th SNP of chromosomes 1-3
+plink_tools.subset_bed(SRC, "geno3", three)
+```
+
+```bash
+pylmm gwas --bfile geno3 --loco --pheno geno.pheno --pheno-name trait -o trait_loco.tsv -v 2> trait_loco.log
+grep "chromosome\|null model" trait_loco.log
+```
+
+Memory: one n × n matrix per chromosome. Per-chromosome kinship files for `--loco` are not supported:
+with your own kinships, loop over chromosomes in Python (`custom-association-analysis`).
 
 The same scan in Python, when you need the arrays (subsets, loops, other covariates):
 
@@ -144,7 +169,8 @@ Checklist:
    (see `estimate-heritability`).
 3. **λ_GC** near 1 for a polygenic trait. Inflation (> 1.1) with an LMM suggests a missing covariate or a
    K that does not match the samples. (λ growing with n·h²/M is the linear-regression, no-LMM result; with
-   an LMM whose K includes the tested SNPs, polygenic signal tends to deflate λ, and LOCO is the remedy.)
+   an LMM whose K includes the tested SNPs, polygenic signal tends to deflate λ, and LOCO (`--loco`) is
+   the remedy.)
    In inbred panels
    with few effective tests, λ from one scan is noisy (simulation studies: 5–95% range 0.7–1.5 under the null). The
    example above prints λ ≈ 0.4: 3000 SNPs of one chromosome of an inbred panel are a handful of

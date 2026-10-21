@@ -90,8 +90,27 @@ maps them).
   `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
   matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
 - `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
+- Leave-one-chromosome-out (LOCO) scans. Library: `pylmm.loco.LocoKinship` builds every `K_{-c}` (the
+  kinship of all chromosomes but `c`) in one pass over the raw genotypes, for each kind (standardized,
+  centered, ibs; not `legacy`), keeping one n × n sum per chromosome; `K_{-c}` equals `calculate_kinship`
+  of the other chromosomes' SNPs up to summation order (measured ≤ 2.6e-15 of max |K|).
+  `pylmm.loco.gwas_loco(Y, X, chroms, kinships=None, ...)` fits the null model on each `K_{-c}` and tests
+  that chromosome's SNPs with `gwas` -> `LocoResult(t_stats, p_values, h)`. Command line: `pylmm gwas
+  --loco` (instead of `--kinship`/`--grm`/`--eigen`) reads the genotypes once for the kinships and once to
+  scan, one null fit per chromosome (logged with each `K_{-c}`'s SNP count and scale); `--kinship-type`
+  picks the kind, `--emma-map FILE` gives EMMA rows their chromosomes (e.g. `data/hmdp.liver.snps.map.tsv`).
+  Same output columns, file order. Each chromosome's SNPs must be together in the file. Off by default:
+  the default scan is unchanged. Evidence (`sims/studies/s8_loco.md`): with K from all SNPs, null λ_GC
+  0.56-0.85 on inbred panels at h2 0.6-0.9 (type-I at 0.05 down to 0.009); with LOCO 0.98-1.04 everywhere,
+  and the power of a q2 = 0.05 QTL at 1e-3 up from 0.30 to 0.55 (synthetic inbred panel, h2 = 0.6).
+  `pylmm gwas --loco` on the README data: 16.5 s vs 13.9 s for `pylmm kinship` + `pylmm gwas`
+  (`just bench loco`).
+- `pylmm.kinship.snp_columns` and `finish_kinship`: the per-SNP step and the final scaling of
+  `KinshipAccumulator`, factored out (K unchanged, bit for bit).
 
 ### Changed
+- `pylmm gwas` without `--kinship` or `--grm`: argparse's "one of the arguments --kinship --grm is
+  required" -> the same message from `check_args` with "(or --loco)"; exit code 2 as before.
 - `pylmm kinship --eigen-npz`: arrays `Kva`, `Kve` -> also `fid`, `iid` (the samples of Kve's rows; not for
   EMMA input) and `kinship_type` (plain arrays, no pickle; 1.0.0 readers still find `Kva` and `Kve`).
 - `pylmm gwas --eigen`: the decomposition was used only if no individual was dropped or reordered, its rows

@@ -174,7 +174,7 @@ print("beta per unit of G (fraction) %s, per copy of A2 %s" % (np.round(ph_m.bet
 tested SNPs (and the SNPs in LD with them, which in inbred panels span megabases) absorbs much of a causal
 SNP's signal: its p-value is far weaker than the effect deserves (proximal contamination). For a pipeline
 check, build K from SNPs that are not tested (a **disjoint K**); for a real analysis use **LOCO** (K
-without the tested chromosome; `custom-association-analysis`):
+without the tested chromosome; `pylmm gwas --loco`, `pylmm.loco`):
 
 ```python
 def causal_p(kin):

@@ -28,6 +28,9 @@ Module map
     centred or EMMA's IBS; also importable from ``pylmm.lmm``),
     :func:`~pylmm.kinship.kinship_scale` (the scale of h) and
     :class:`~pylmm.kinship.KinshipAccumulator`.
+``pylmm.loco``
+    Leave-one-chromosome-out scans: :class:`~pylmm.loco.LocoKinship` (every
+    ``K_{-c}`` from one pass over the SNPs) and :func:`~pylmm.loco.gwas_loco`.
 ``pylmm.kinship_io``
     Kinship files of other tools: GCTA binary GRMs
     (:func:`~pylmm.kinship_io.read_grm`, :func:`~pylmm.kinship_io.write_grm`) and

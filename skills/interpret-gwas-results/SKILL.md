@@ -150,8 +150,8 @@ assert 0.8 < lam_gc < 1.25
   curve is inflation, a tail-only departure is signal. (The rule that λ grows with n·h²/M under
   polygenicity is the linear-regression, no-LMM result. Under an LMM whose K includes the tested SNPs,
   polygenic signal tends to *deflate* the test statistics instead, because K absorbs it; LOCO is the
-  remedy, see `custom-association-analysis`.)
-* λ < 1: K built from the tested SNPs absorbing signal (proximal contamination; LOCO helps), or h² = 0 fits
+  remedy: `pylmm gwas --loco`, or `pylmm.loco` in the library.)
+* λ < 1: K built from the tested SNPs absorbing signal (proximal contamination; LOCO, `--loco`, helps), or h² = 0 fits
   (mildly conservative in the simulation studies).
 * **Few effective tests** (inbred panels, small scans, one chromosome): λ from one scan is noise (simulation studies:
   5–95% range 0.7–1.5 under the null on the bundled mice). Do not GC-correct LMM results by default.

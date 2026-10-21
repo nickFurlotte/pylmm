@@ -1,6 +1,6 @@
 ---
 name: custom-association-analysis
-description: Write custom association analyses with the pylmm Python library (LMM, gwas, calculate_kinship, PlinkReader) when the pylmm gwas command line is not enough - scans on a subset of individuals, conditional analysis on a lead SNP, leave-one-chromosome-out (LOCO) kinship built by hand, many phenotypes sharing one eigendecomposition, SNP-by-covariate interaction, and scans of inbred-strain panels with replicate animals. Use when asked for an ad-hoc or non-standard mixed-model analysis, a loop over phenotypes or chromosomes, or anything the CLI flags do not cover.
+description: Write custom association analyses with the pylmm Python library (LMM, gwas, calculate_kinship, PlinkReader) when the pylmm gwas command line is not enough - scans on a subset of individuals, conditional analysis on a lead SNP, leave-one-chromosome-out (LOCO) scans with pylmm.loco (and how they work by hand), many phenotypes sharing one eigendecomposition, SNP-by-covariate interaction, and scans of inbred-strain panels with replicate animals. Use when asked for an ad-hoc or non-standard mixed-model analysis, a loop over phenotypes or chromosomes, or anything the CLI flags do not cover.
 ---
 
 # Custom association analyses with the pylmm library
@@ -100,41 +100,43 @@ assert np.isnan(ps_c[lead])                # collinear with X0: untestable, as i
 
 ## LOCO: leave the tested chromosome out of K
 
-A SNP in K partly explains itself (proximal contamination), which costs power. LOCO tests the SNPs of
-chromosome c with a K built from the other chromosomes. Build the per-chromosome cross-products once:
-`K_loco(c) = (Z Z' - Z_c Z_c') / (m - m_c)` with `Z` the standardised SNPs (here pylmm's `W`):
+A SNP in K partly explains itself (proximal contamination): power drops and, with a polygenic trait,
+the statistics are deflated (λ_GC well below 1 in inbred panels; `sims/studies/s8_loco.md`). LOCO
+tests the SNPs of chromosome c with `K_{-c}`, the kinship of the other chromosomes. On the command line
+it is `pylmm gwas --loco` (`run-gwas`). In the library, `pylmm.loco.LocoKinship` builds every `K_{-c}`
+in one pass over the **raw** genotypes, and `gwas_loco` scans with them (a null fit per chromosome):
 
 ```python
-ZZ = {c: W[:, chrom == c] @ W[:, chrom == c].T for c in np.unique(bim.chrom)}
-total, m_all = sum(ZZ.values()), W.shape[1]
-p_loco = np.full(m_all, np.nan)
-for c in ZZ:
-    on_c = bim.chrom == c
-    K_c = (total - ZZ[c]) / (m_all - on_c.sum())
-    _, ps_c_loco = gwas(Y, W[:, on_c], K_c, X0=X0)
-    p_loco[on_c] = ps_c_loco
+from pylmm.loco import LocoKinship, gwas_loco
+
+loco = LocoKinship.from_genotypes(G_raw, bim.chrom)          # reuse it for every phenotype
+res = gwas_loco(Y, W, bim.chrom, kinships=loco, X0=X0)       # (t_stats, p_values, h per chromosome)
+p_loco = np.asarray(res.p_values)
+print("null h per chromosome:", {c: round(v, 3) for c, v in res.h.items()})
 print("lead SNP: p=%.1e with K from all SNPs, %.1e with LOCO" % (results["trait"][lead], p_loco[lead]))
 ```
 
-This `K_loco` is `calculate_kinship` of the other chromosomes' raw genotypes (`norm_genotype=False`; the same
-missing-call convention as the reader's `W`), to rounding, unless some SNPs are constant: they are zeros in
-`W` and count in `m_all` here, but not in `calculate_kinship`'s `m`. For a file too large for memory, accumulate `ZZ[c]` while
-streaming SNP blocks; each block carries its SNPs' chromosomes:
+`gwas_loco(Y, X, chroms)` without `kinships` builds them from `X` itself (then pass raw genotypes);
+`kind=` picks `"centered"` or `"ibs"` as for `calculate_kinship`. `loco.kinship(c)` returns `K_{-c}`
+(`loco.kinship()`: all SNPs) for your own loops, e.g. with `LMM` and `association_batch`.
+
+What it computes, by hand: each kinship is a sum of per-SNP terms divided by the number of SNPs used,
+so `K_{-c} = (S - S_c) / (m - m_c)` with `S_c = Z_c Z_c'` over chromosome c's standardised SNPs. The
+library keeps one `S_c` per chromosome (memory: one n × n matrix per chromosome) and gives the same K as
+`calculate_kinship` of the complementary SNPs, to rounding:
 
 ```python
-ZZ_stream = {}
-with PlinkReader("cohort") as r:
-    for G_block, v in r.iter_blocks(256):
-        for c in np.unique(v.chrom):
-            Z = G_block[:, v.chrom == c]
-            ZZ_stream[c] = ZZ_stream.get(c, 0) + Z @ Z.T
-assert all(np.allclose(ZZ_stream[c], ZZ[c]) for c in ZZ)   # same sums, another order
+c = bim.chrom[lead]
+on_c = bim.chrom == c
+K_c = calculate_kinship(G_raw[:, ~on_c])                     # the direct way, one chromosome
+assert np.allclose(loco.kinship(c), K_c, rtol=0, atol=1e-12)
+_, ps_c = gwas(Y, W[:, on_c], K_c, X0=X0)
+assert np.allclose(ps_c, p_loco[on_c], rtol=1e-6)
 ```
 
-Alternatively split the BED per chromosome
-(`plink_tools.subset_bed(prefix, out, bim.chrom != c)`), run `pylmm kinship` on each complement and
-`pylmm gwas` on each chromosome. Each LOCO K needs its own eigendecomposition and gives its own null
-`h` (slightly lower than with all SNPs). The CLI has no LOCO option yet (planned).
+Each `K_{-c}` needs its own eigendecomposition and gives its own null `h` (slightly lower than with all
+SNPs when the trait is polygenic). For files too large for memory, feed `LocoKinship.add_block(G,
+v.chrom)` from `PlinkReader(..., norm_genotype=False).iter_blocks()`.
 
 ## SNP × covariate interaction
 

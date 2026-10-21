@@ -459,6 +459,36 @@ ts_one, _ = gwas(Y, W[:, :200], K, kva, kve, batch=False)
 assert np.allclose(ts[:200], ts_one, rtol=1e-9, equal_nan=True)
 ```
 
+**Leave one chromosome out (LOCO).** A K built from the tested SNPs partly explains them (proximal
+contamination): the polygenic term absorbs some of a causal SNP's effect, and with a polygenic trait the
+whole scan is deflated (λ_GC well below 1 in inbred panels). `pylmm.loco` tests the SNPs of chromosome
+`c` with `K_{-c}`, the kinship of the other chromosomes (GCTA `--mlma-loco`; `pylmm gwas --loco` on the
+command line). `LocoKinship` builds every `K_{-c}` in one pass over the **raw** genotypes, for any
+`kind`, keeping one n × n sum per chromosome (memory: one n × n matrix per chromosome); each `K_{-c}` is
+`calculate_kinship` of the other chromosomes' SNPs, up to rounding. `gwas_loco(Y, X, chroms)` fits the
+null model on each `K_{-c}` (its own `h`) and tests that chromosome's columns with `gwas`:
+
+```python
+from pylmm.loco import LocoKinship, gwas_loco
+
+loco = LocoKinship(n)                                    # standardized, as calculate_kinship
+with PlinkReader(BED, norm_genotype=False) as reader:    # raw genotypes, as for calculate_kinship
+    chrom = reader.variants.chrom
+    for G_block, v in reader.iter_blocks(5000):
+        loco.add_block(G_block[:, ::20], v.chrom[::20])  # every 20th SNP, to keep the example fast
+print(len(loco.chromosomes), "chromosomes;", loco.snps_used(), "SNPs;",
+      loco.snps_used(leave_out="1"), "without chromosome 1")
+res = gwas_loco(Y, W, chrom[: W.shape[1]], kinships=loco)   # W: the first 2000 SNPs, chromosome 1
+print("null h: %.3f with K of all SNPs, %.3f without chromosome 1" % (h, res.h["1"]))
+print("causal SNP: p = %.1e (all-SNP K), %.1e (LOCO)" % (ps[100], res.p_values[100]))
+assert res.p_values[100] < ps[100]
+```
+
+Each `K_{-c}` has its own eigendecomposition and null fit, so a scan over c chromosomes costs c of them.
+`loco.kinship(c)` returns `K_{-c}` for your own loops (`loco.kinship()`: all SNPs). The
+`custom-association-analysis` skill shows the by-hand equivalent, and `sims/studies/s8_loco.md` the
+calibration and power LOCO buys.
+
 ## 8. Missing genotypes
 
 * `gwas` handles a SNP with missing calls (`nan`) by testing it on the called individuals only (a new LMM
@@ -499,6 +529,12 @@ head -3 trait.tsv
   order. With `--emma-geno` there are no IDs: K is in genotype order, with no warning (and `K.id`, if
   present, is ignored with a warning). `--grm P` reads a GCTA GRM instead, and `--kinship P.rel` a plink2
   one, both with their IDs (section 4).
+* `--loco` (instead of `--kinship`/`--grm`) builds `K_{-c}` for every chromosome from the genotypes and
+  tests each chromosome's SNPs with its own (section 7): one extra pass over the genotypes, one
+  eigendecomposition and null fit per chromosome (logged with `-v`). It needs the chromosomes (the `.bim`
+  or `.map`; for `--emma-geno`, a marker map with `--emma-map`, e.g. `data/hmdp.liver.snps.map.tsv`), each
+  chromosome's SNPs together in the file, and at least two chromosomes; `--kinship-type` picks the kind.
+  The output columns and order are the usual ones.
 * The intercept is added unless `--no-intercept`; individuals with a missing phenotype or covariate are
   dropped (with a warning).
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
