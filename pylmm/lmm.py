@@ -781,7 +781,7 @@ def gwas(
         Refit ``h`` and ``sigma2`` with each SNP in the model, for the Wald
         test.  With ``batch=True`` (the default) the exact per-SNP fit of
         `LMM.fit_snps`, a block of SNPs at a time (Newton-Raphson on the
-        analytic derivatives; the maximum ``fit(X=x)`` finds, about 10-20
+        analytic derivatives; the maximum ``fit(X=x)`` finds, 8-46
         times faster); with ``batch=False`` or ``legacy_fit=True``,
         ``LMM.fit(X=x)`` for each SNP (with ``legacy_fit``, pylmm 1.0.0's
         search).
@@ -2723,13 +2723,13 @@ class LMM:
                 x0 = lo + (hi - lo) * g_a / (g_a - g_b)
             inside = np.isfinite(x0) & (x0 > lo) & (x0 < hi)
             x0 = np.where(inside, x0, 0.5 * (lo + hi))
-            # done already: l' = 0 at the peak, or an end bracket whose maximum is the end
+            # Done already: l' = 0 at the peak, or an end bracket without a (+, -)
+            # change whose slope at the end of the domain points out of it, so that
+            # its maximum is that end (a candidate already).  E.g. the ML profile of
+            # a centred K with an intercept, which dips below 1 and rises into its
+            # unbounded spike at h = 1 (l'(0.99) < 0 < l'(1)).
             known = (has_mid & (g_mid == 0)) | (
-                ~has_mid
-                & (
-                    ((blo == 0) & (g_lo <= 0) & (g_hi < 0))
-                    | ((bhi == 1) & (g_lo > 0) & (g_hi >= 0))
-                )
+                ~has_mid & ~whole & (((blo == 0) & (g_lo <= 0)) | ((bhi == 1) & (g_hi >= 0)))
             )
             use = left | right | whole
             sel = np.where(use)[0]

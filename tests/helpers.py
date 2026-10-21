@@ -167,14 +167,22 @@ H_REPARAM_ATOL = 1e-6
 # strain-expanded singular K at h2 = 1, a positive definite K; REML and ML; 1440
 # fits; plus the first 300 HMDP SNPs on the 94-strain K, REML and ML):
 #   max |dh|                                   8.9e-8
-#   max |d log-likelihood|                     1.8e-12  (vs the dense oracle,
-#       sims/oracle.py with the eigenvalue floor, 4.3e-11 in S9's quick run)
+#   max |d log-likelihood|                     1.8e-12
 #   t, p, beta, beta_var: max |a - b| / max|b|  5.8e-8;
 #       max |a - b| / |b| for |b| >= 1% of max|b|  6.0e-7  (HMDP, ML)
-# REFIT_H_ATOL is ~11x, REFIT_LL_ATOL ~23x the oracle's, REFIT_RTOL ~17x and
-# REFIT_ATOL_SCALE ~17x the worst.
-REFIT_H_ATOL = 1e-6
+# The full S9 run (sims/studies/s9_tests.py: 720 replicates x 20 SNPs x REML and ML,
+# 28,800 fits) stayed within: max |dh| 3.6e-7 (flat profiles), LL 2.9e-12.
+# REFIT_H_ATOL is ~28x the worst |dh|, REFIT_LL_ATOL ~350x the worst LL difference,
+# REFIT_RTOL ~17x and REFIT_ATOL_SCALE ~17x the worst statistics.
+REFIT_H_ATOL = 1e-5
 REFIT_LL_ATOL = 1e-9
+# The exact refit's maximum vs the dense oracle's (sims/oracle.py: Cholesky of the
+# n x n H per h, pylmm's eigenvalue floor applied densely): the oracle's own
+# log-likelihood carries ~1e-10 of rounding at n = 100 with h near 1 (cond(H) up to
+# 1e6).  Measured in the full S9 run (760 replicates, REML and ML, n = 100-300):
+# largest shortfall of the exact fit below the oracle 3.3e-10 (n = 100); 9.2e-12 at
+# n = 300.  ORACLE_LL_ATOL is ~30x the worst.
+ORACLE_LL_ATOL = 1e-8
 REFIT_RTOL = 1e-5
 REFIT_ATOL_SCALE = 1e-6
 # The analytic first and second derivatives of the log-likelihood in h

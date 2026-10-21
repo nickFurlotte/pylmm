@@ -133,6 +133,17 @@ def test_fit_snps_matches_the_grid_search(reml, kind, h2, n_cov):
         assert (new.h == 1.0).any()  # the boundary is reached, as fit(X=x) reaches it
 
 
+def test_fit_snps_ml_spike_at_1_needs_no_fallback():
+    """ML, centred GRM with an intercept: the profile dips below 1 and rises into its
+    unbounded spike at h = 1, so the top bracket has no (+, -) change of l'.  Its
+    maximum is the end h = 1, not a reason for the scalar search (it was, for every
+    SNP, in a first version of fit_snps: the LRT then cost ~3 ms per SNP)."""
+    y, X, K, _ = _data(n=300, h2=0.0, m=20)
+    L = LMM(y, K)
+    _check_refit(L, X, False, "ml spike")
+    assert L._snp_fallbacks == 0
+
+
 def test_fit_snps_matches_the_grid_search_on_hmdp():
     """94 inbred strains (singular K) with the HMDP SNPs mean-imputed."""
     Y = np.genfromtxt(h.HMDP_Y)
@@ -167,7 +178,7 @@ def test_fit_snps_matches_the_oracle():
         new = L.fit_snps(X[:, :3], reml=reml)
         for j in range(3):
             f = oracle.fit(y, K, X=np.column_stack([X0, X[:, j]]), reml=reml, eig_clamp=1e-6)
-            assert f.ll_pylmm - new.ll[j] <= h.REFIT_LL_ATOL
+            assert f.ll_pylmm - new.ll[j] <= h.ORACLE_LL_ATOL
             assert abs(f.h - new.h[j]) <= h.REFIT_H_ATOL or f.h == new.h[j]
 
 
