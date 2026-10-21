@@ -471,7 +471,17 @@ def test_cli_reader_error_mid_file(tmp_path, monkeypatch, flags):
     rc, clean, _ = _inprocess(tmp_path, "clean", flags)
     patch = (monkeypatch, plink_io.PlinkReader, "__next__", 7, RuntimeError("disk gone"))
     rc, lines, _ = _inprocess(tmp_path, "fail", flags, patch)
-    assert rc == 1 and lines == clean[:7]
+    assert rc == 1 and len(lines) == 7
+    if flags:  # the same blocks (or none) as the clean run: the same bytes
+        assert lines == clean[:7]
+    else:  # a block of 6 SNPs, not 20: a different GEMM, the same numbers to rounding
+        got = [line.split("\t") for line in lines[1:]]
+        ref = [line.split("\t") for line in clean[1:7]]
+        assert [g[0] for g in got] == [r[0] for r in ref]
+        for j in range(1, 5):
+            h.assert_batch_close(
+                [float(g[j]) for g in got], [float(r[j]) for r in ref], what="column %d" % j
+            )
 
 
 @pytest.mark.parametrize("flags", [[], ["--no-batch"]], ids=["default", "no-batch"])
