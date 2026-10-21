@@ -112,7 +112,7 @@ maps them).
   the default scan is unchanged. Evidence (`sims/studies/s8_loco.md`): with K from all SNPs, null λ_GC
   0.56-0.85 on inbred panels at h2 0.6-0.9 (type-I at 0.05 down to 0.009); with LOCO 0.98-1.04 everywhere,
   and the power of a q2 = 0.05 QTL at 1e-3 up from 0.30 to 0.55 (synthetic inbred panel, h2 = 0.6).
-  `pylmm gwas --loco` on the README data: 16.5 s vs 13.9 s for `pylmm kinship` + `pylmm gwas`
+  `pylmm gwas --loco` on the README data: 16.5-20.1 s vs 13.9-20.6 s for `pylmm kinship` + `pylmm gwas`
   (`just bench loco`).
 - `pylmm.kinship.snp_columns` and `finish_kinship`: the per-SNP step and the final scaling of
   `KinshipAccumulator`, factored out (K unchanged, bit for bit).
