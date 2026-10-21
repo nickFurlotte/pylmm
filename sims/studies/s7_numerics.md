@@ -1,9 +1,9 @@
-# S6: the h search on [0, 1] (Phase 6.3) vs pylmm 1.0.0's
+# S7: the h search on [0, 1] (Phase 6.3) vs pylmm 1.0.0's
 
-Study code: `sims/studies/s6_numerics.py`. Full tables: `sims/results/s6_numerics/summary.md` /
-`summary.csv`. Reproduce: `just sim s6_numerics --jobs 6 --report` (960 fits, about 4 min at 6 jobs on an
-8-core laptop); `just sim s6_numerics --quick` runs in seconds. The real-data table at the end:
-`uv run --group sims python -m sims.studies.s6_numerics 20000`.
+Study code: `sims/studies/s7_numerics.py`. Full tables: `sims/results/s7_numerics/summary.md` /
+`summary.csv`. Reproduce: `just sim s7_numerics --jobs 6 --report` (960 fits, about 4 min at 6 jobs on an
+8-core laptop); `just sim s7_numerics --quick` runs in seconds. The real-data table at the end:
+`uv run --group sims python -m sims.studies.s7_numerics 20000`.
 
 **Question.** Does the default search (grid 0, 0.01, ..., 1; every local maximum refined, the ends
 included; the best kept) find the maximum of the likelihood where 1.0.0's (`legacy_fit=True`: grid to

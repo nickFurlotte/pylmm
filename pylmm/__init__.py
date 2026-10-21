@@ -21,9 +21,13 @@ The SNP effect is tested by adding the SNP as a covariate (a Wald test).
 Module map
 ----------
 ``pylmm.lmm``
-    The model and GWAS: :func:`~pylmm.lmm.calculate_kinship`,
-    :class:`~pylmm.lmm.LMM` (``fit``, ``association``) and
-    :func:`~pylmm.lmm.gwas`.
+    The model and GWAS: :class:`~pylmm.lmm.LMM` (``fit``, ``association``)
+    and :func:`~pylmm.lmm.gwas`.
+``pylmm.kinship``
+    Kinship matrices: :func:`~pylmm.kinship.calculate_kinship` (standardized,
+    centred or EMMA's IBS; also importable from ``pylmm.lmm``),
+    :func:`~pylmm.kinship.kinship_scale` (the scale of h) and
+    :class:`~pylmm.kinship.KinshipAccumulator`.
 ``pylmm.plink_io``
     Readers for PLINK and EMMA files (:class:`~pylmm.plink_io.PlinkReader`).
 ``pylmm.genotypes``

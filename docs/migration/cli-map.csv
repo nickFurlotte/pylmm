@@ -44,3 +44,5 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm gwas,--block-size,yes,new,"SNPs read and tested together (batched Wald tests), default 1024 (pylmm.genotypes.DEFAULT_BLOCK_SIZE); added after 1.0.0"
 ,,,pylmm gwas,--no-batch,no,new,"test one SNP at a time, the 1.0.0 code path; added after 1.0.0"
 ,,,pylmm gwas,--legacy-fit,no,new,"fit h as pylmm 1.0.0 did (grid 0..0.99, first local maximum, sigma^2 = Q/(n-p) under --ml); with --no-batch the 1.0.0 output; added after 1.0.0"
+,,,pylmm kinship,--kinship-type,yes,new,"{standardized,centered,ibs}; default standardized (1.0.0's formula; now m = the SNPs used and the library uses the CLI's missing-call convention); ibs = EMMA's IBS kinship; added after 1.0.0"
+,,,pylmm kinship,--legacy-kinship,no,new,"the K of pylmm kinship 1.0.0, which counted skipped constant and all-missing SNPs in m (bug 8); added after 1.0.0"

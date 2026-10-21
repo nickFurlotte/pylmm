@@ -21,8 +21,9 @@ example at the end sketches the two published HMDP studies reproduced in
 files are not in the repository.
 
 **Planned, not yet in pylmm**: a strain-aware option that expands strain genotypes to animals
-and imputes over strains, a named IBS kinship, a LOCO flag for the command line, and marker metadata
-(chromosome, position, counted allele) carried through the EMMA path. Until then, use the recipes here.
+and imputes over strains, a LOCO flag for the command line, and marker metadata (chromosome, position,
+counted allele) carried through the EMMA path. Until then, use the recipes here. EMMA's IBS kinship is
+available: `calculate_kinship(G, kind="ibs")`, `pylmm kinship --kinship-type ibs` (section 3).
 
 ## 1. The two inputs
 
@@ -141,6 +142,22 @@ snp_alleles = [a for a, k in zip(snp_alleles, keep) if k]
 G_imp = np.where(np.isnan(G_raw), np.nanmean(G_raw, axis=0), G_raw)   # mean-impute over STRAINS
 K_strains = calculate_kinship(G_imp)
 print(G_raw.shape[1], "SNPs pass QC;", int(np.isnan(G_raw).any(axis=0).sum()), "have a missing call")
+```
+
+**IBS kinship.** EMMA-era HMDP papers used EMMA's identity-by-state kinship: the share of SNPs at which
+two strains carry the same allele (0 / 0.5 / 1 genotypes; missing calls at the SNP's mean over the rows
+given, here strains; diagonal 1). It weights every SNP equally, where the standardized K up-weights rare
+alleles. Its scale differs a lot: the diagonal is 1, but the off-diagonals of unrelated strains are about
+0.5, so its centred scale `c` is well below 1 and its `h` is larger; compare PVE, `h c / (h c + 1 - h)`
+(`estimate-heritability` section 3). Test statistics change only through the kinship's shape.
+
+```python
+from pylmm.kinship import kinship_scale
+
+K_strains_ibs = calculate_kinship(G_raw, kind="ibs")   # imputes over strains itself (EMMA's rule)
+for name, K_ in (("standardized", K_strains), ("ibs", K_strains_ibs)):
+    print(name, kinship_scale(K_))
+assert kinship_scale(K_strains_ibs).centered_mean_diag < kinship_scale(K_strains).centered_mean_diag
 ```
 
 ## 4. Expanding strains to animals
@@ -310,8 +327,10 @@ Both reproduced published HMDP scans from their phenotypes with the bundled geno
 3. **Genotypes.** Positions and alleles from the marker map (build 37). SJL/J, absent from the bundled
    matrix, added from the Broad file in the validated row order. Autosomes only, MAF ≥ 0.05 and missing
    < 0.2 over strains (105,130 and 105,249 SNPs), mean-imputed over strains.
-4. **Kinship.** Both the standardized `calculate_kinship` K and an EMMA-style IBS K
-   (`interpret-gwas-results/comparison-worksheet.md`), expanded to animals with `Z`.
+4. **Kinship.** Both the standardized `calculate_kinship` K and an EMMA-style IBS K (the worksheet's
+   hand-written version, `interpret-gwas-results/comparison-worksheet.md`; `kind="ibs"` is EMMA's own
+   formula, which differs from it only on the diagonal of strains with imputed calls and by a constant
+   and a scale, so the same p-values up to that diagonal), expanded to animals with `Z`.
 5. **Scan.** Individual level, REML; null-fit scans and a per-SNP refit (`fit(X=x)` then
    `association(x)`), the latter closest to EMMA. A per-animal BED and `pylmm gwas` as the CLI
    cross-check (section 6), with FIDs from `sanitize_ids` and placeholder alleles.

@@ -49,7 +49,13 @@ pylmm kinship --bfile geno -o geno.kin -v      # writes geno.kin and geno.kin.id
 ```
 
 Build K from the SNPs you trust (QC'd, autosomal). With many SNPs, K from all of them is standard; for
-LOCO (leave the tested chromosome out of K) see `custom-association-analysis`. A K from another tool works
+LOCO (leave the tested chromosome out of K) see `custom-association-analysis`. The default
+`--kinship-type standardized` is the GRM (GEMMA `-gk 2`'s formula on complete genotypes; GEMMA
+standardises after mean imputation and drops MAF < 0.01 / missingness > 0.05 SNPs by default);
+`--kinship-type ibs` is EMMA's IBS kinship (to match an EMMA-era inbred-panel paper); `centered` is GEMMA
+`-gk 1`'s formula (0/1/2 counts). `-v` logs the scale of K (`kinship scale: mean diagonal
+...`): the fitted h is on that scale (`estimate-heritability` section 3). The library's
+`calculate_kinship` gives the same K from the raw genotypes. A K from another tool works
 if it is a plain n × n text matrix; write its `.id` file (`pylmm.samples.write_id_file`).
 
 **Inbred panels** (strains with replicate animals, few distinct genotypes): a K built from the tested

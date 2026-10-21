@@ -64,6 +64,7 @@ the null-fit modes; Bonferroni 6.3). Individual-level SNP h² 0.80 [0.75, 0.85] 
   while the refit overshot Bennett (11.5). Use `--refit` / `refit=True` when matching an EMMA or
   GEMMA-exact analysis, and report which mode you used.
 
-Planned from these findings: a named IBS kinship option, strain-aware expansion and imputation,
-a LOCO flag for the command line, marker metadata through the EMMA path, and a machine-readable null-fit
-summary.
+Planned from these findings: strain-aware expansion and imputation, a LOCO flag for the command line,
+marker metadata through the EMMA path, and a machine-readable null-fit summary. Done since: a named IBS
+kinship, EMMA's own formula (`calculate_kinship(G, kind="ibs")`, `pylmm kinship --kinship-type ibs`); the
+reanalysis above used the hand-written equivalent of the comparison worksheet.

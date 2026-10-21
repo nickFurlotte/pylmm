@@ -1,4 +1,4 @@
-"""S6: the Phase 6.3 h search (default) vs pylmm 1.0.0's (``legacy_fit=True``).
+"""S7: the Phase 6.3 h search (default) vs pylmm 1.0.0's (``legacy_fit=True``).
 
 Question: does the new variance-component fit -- ``h`` searched on the closed
 interval [0, 1], every grid peak (the ends included) refined, the best kept,
@@ -27,8 +27,8 @@ n - 1, so ML has no maximum, bug 17), ``family`` (100 families of 3 sibs),
 ``bed`` (random mice of the bundled inbred panel, K from 2500 SNPs, rank
 about 100: most eigenvalues are floored) at n = 300 and n = 60.
 
-Run:   just sim s6_numerics --quick           (seconds)
-       just sim s6_numerics --jobs 6 --report (about 10 min)
+Run:   just sim s7_numerics --quick           (seconds)
+       just sim s7_numerics --jobs 6 --report (about 10 min)
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ import numpy as np
 
 from sims import genotypes, kinship, metrics, oracle, phenotypes
 
-NAME = "s6_numerics"
+NAME = "s7_numerics"
 STUDY_VERSION = 1
 
 H2S = [0.0, 0.05, 0.5, 0.95, 0.98, 1.0]
@@ -209,7 +209,7 @@ def report(df, outdir):
 
     rows = summarize(df)
     pd.DataFrame(rows).to_csv(os.path.join(outdir, "summary.csv"), index=False)
-    parts = ["# S6: h search, default (new) vs pylmm 1.0.0 (old, legacy_fit=True)\n"]
+    parts = ["# S7: h search, default (new) vs pylmm 1.0.0 (old, legacy_fit=True)\n"]
     for tag in ("reml", "ml"):
         parts.append(_fit_table(rows, tag))
     parts.append(_calibration_table(rows))
@@ -332,7 +332,7 @@ def hmdp_subset_fits(n_snps: int = 5000) -> tuple[int, list[dict]]:
 
 
 def main(argv=None) -> None:
-    """``python -m sims.studies.s6_numerics [n_snps]``: the HMDP subset table."""
+    """``python -m sims.studies.s7_numerics [n_snps]``: the HMDP subset table."""
     import sys
 
     argv = sys.argv[1:] if argv is None else argv

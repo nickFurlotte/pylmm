@@ -10,7 +10,8 @@ This file is for coding agents working in this repo or with pylmm; humans should
 
 | path | what |
 |---|---|
-| `pylmm/lmm.py` | the model: `calculate_kinship`, `LMM` (`fit`, `association`, `association_batch`), `gwas`, input checks |
+| `pylmm/lmm.py` | the model: `LMM` (`fit`, `association`, `association_batch`), `gwas`, input checks (re-exports `calculate_kinship`) |
+| `pylmm/kinship.py` | `calculate_kinship` (`kind=` standardized / centered / ibs; `legacy=True` = 1.0.0), `kinship_scale`, `KinshipAccumulator` |
 | `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes (per SNP or in blocks, with `.bim` metadata); phenotype, covariate, kinship files |
 | `pylmm/genotypes.py` | `Variants` (`.bim` columns), `GenotypeSource` protocol (`iter_blocks`), `ArraySource` (in-memory matrix), `normalize_genotype` |
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
@@ -126,9 +127,14 @@ use `skills/` directly, or copy it to `.claude/skills`.
   (grid to 0.99, first optimum, ML sigma Q/(n-p)); the golden tests run with it, and
   `--legacy-fit --no-batch` is 1.0.0's output byte for byte.
 * **Known, not yet fixed** (bug numbers: the table in
-  [sims/studies/s4_bug_confirmation.md](sims/studies/s4_bug_confirmation.md)): the two kinship
-  normalisations differ with missing calls and monomorphic SNPs still count in `m` (bug 8); genotypes are
+  [sims/studies/s4_bug_confirmation.md](sims/studies/s4_bug_confirmation.md)): genotypes are
   standardised over individuals later dropped for a missing phenotype (|Δt| ≤ 0.024).
+* **Kinship scale = h scale.** `calculate_kinship` and `pylmm kinship` give the same K (one missing-call
+  convention; constant and all-missing SNPs not counted in `m`; bug 8 fixed after 1.0.0, `legacy=True` /
+  `--legacy-kinship` reproduce 1.0.0). Its mean diagonal is about 1 − the missing rate; `kind="ibs"` (EMMA)
+  has diagonal 1 but a much smaller centred scale, so a larger h for the same data. Compare h across
+  kinships only as PVE: `kinship_scale(K)`, see `estimate-heritability`. Pass raw genotypes
+  (`norm_genotype=False`) to `calculate_kinship`, not reader-standardised ones.
 * `LMM.association` fails on a `nan` genotype; `gwas` handles missing calls.
 * A kinship without a `K.id` sidecar is assumed to be in genotype order. `pylmm gwas --bfile` / `--tfile`
   warns about that. `pylmm gwas --emma-geno` does **not**: EMMA input has no IDs, so K's rows are always

@@ -80,6 +80,9 @@ from scipy import linalg, optimize, special, stats
 
 from pylmm.genotypes import DEFAULT_BLOCK_SIZE, check_block_size
 
+# calculate_kinship lives in pylmm.kinship; re-exported here, where pylmm 1.0.0 had it.
+from pylmm.kinship import calculate_kinship as calculate_kinship
+
 FloatArray: TypeAlias = NDArray[np.float64]
 # A float64 numpy array of any shape (the shape is given in each docstring).
 
@@ -92,84 +95,6 @@ def _matrix_mult(A: ArrayLike, B: ArrayLike) -> Any:
     # no linalg.fblas since 0.12, so that path was dead and every call fell
     # back to np.dot -- which is what the golden outputs (tests/golden/) were computed with.
     return np.dot(A, B)
-
-
-def calculate_kinship(W: ArrayLike, center: bool = False) -> FloatArray:
-    """Realized relationship matrix (genomic kinship) from a SNP matrix.
-
-    Each SNP column is mean-imputed where missing (with the mean of its
-    observed values), standardised to mean 0 and variance 1, and
-    ``K = Z Z' / m`` is returned, where ``Z`` is the matrix of the kept
-    standardised columns.
-
-    Parameters
-    ----------
-    W : (n, m) array
-        Genotypes of ``n`` individuals at ``m`` SNPs, in any additive numeric
-        coding (0/1/2 counts, dosages, or the 0/0.5/1 fractions of
-        `pylmm.plink_io.PlinkReader`); ``nan`` marks a missing call.  Because
-        each column is standardised, ``K`` is identical for 0/1/2 and for
-        0/0.5/1 coding, and it does not matter which allele is counted.  Not
-        modified.
-    center : bool, default False
-        If True, return ``(n - 1) * K / trace(P K P)`` with
-        ``P = I - 11'/n``, i.e. a K centred on the individuals and scaled so
-        that its centred trace is ``n - 1``.
-
-    Returns
-    -------
-    K : (n, n) float64 array
-        Symmetric, positive semi-definite kinship matrix.
-
-    Notes
-    -----
-    SNPs that are all missing or have zero variance are left out of ``Z`` but
-    still count in the denominator ``m`` (the number of columns of ``W``), so
-    K shrinks when many SNPs are monomorphic (bug 8).  Rescaling K changes the
-    estimate of ``h`` but not the test statistics, up to the h grid.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from pylmm.lmm import calculate_kinship
-    >>> rng = np.random.default_rng(1)
-    >>> W = rng.binomial(2, 0.4, size=(20, 100)).astype(float)
-    >>> W[0, 3] = np.nan                      # missing calls are imputed
-    >>> K = calculate_kinship(W)
-    >>> K.shape
-    (20, 20)
-    >>> bool(np.allclose(K, K.T))
-    True
-    >>> round(float(np.trace(K) / 20), 1)     # about 1 when no SNP is dropped
-    1.0
-    """
-    # Work on a copy: the caller's W is not imputed or standardised in place
-    # (bug 12, fixed in 1.0.0).
-    W = np.array(W, dtype=np.float64)
-    n = W.shape[0]
-    m = W.shape[1]
-    keep = []
-    for i in range(m):
-        obs = ~np.isnan(W[:, i])
-        if not obs.any():
-            continue  # all-missing SNP: skip it (bug 11)
-        mn = W[obs, i].mean()
-        W[np.isnan(W[:, i]), i] = mn
-        vr = W[:, i].var()
-        if vr == 0:
-            continue
-
-        keep.append(i)
-        W[:, i] = (W[:, i] - mn) / np.sqrt(vr)
-
-    W = W[:, keep]
-    K: FloatArray = _matrix_mult(W, W.T) * 1.0 / float(m)
-    if center:
-        P = np.diag(np.repeat(1, n)) - 1 / float(n) * np.ones((n, n))
-        S = np.trace(_matrix_mult(_matrix_mult(P, K), P))
-        k_centered: FloatArray = (n - 1) * K / S
-        return k_centered
-    return K
 
 
 # ---------------------------------------------------------------------------
