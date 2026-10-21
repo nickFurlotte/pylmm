@@ -817,7 +817,7 @@ def gwas(
         test (the likelihood-ratio test always does; ``refit`` changes
         nothing there).  With ``batch=True`` (the default) the exact per-SNP fit of
         `LMM.fit_snps`, a block of SNPs at a time (Newton-Raphson on the
-        analytic derivatives; the maximum ``fit(X=x)`` finds, 8-46
+        analytic derivatives; the maximum ``fit(X=x)`` finds, 11-61
         times faster); with ``batch=False`` or ``legacy_fit=True``,
         ``LMM.fit(X=x)`` for each SNP (with ``legacy_fit``, pylmm 1.0.0's
         search).

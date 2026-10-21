@@ -99,20 +99,29 @@ maps them).
   `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
   matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
 - `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
-- Association tests (GEMMA's `-lmm 1/2/3`): `gwas(..., test="wald" | "lrt" | "score")` and
-  `pylmm gwas --test {wald,lrt,score}` (default `wald`, unchanged). `lrt`: likelihood ratio of ML fits with
-  and without each SNP, chi2(1), always ML (`LMM.lrt_batch`); `score`: the score test at the null fit,
-  F(1, n - q - 1), not with `--refit` (`LMM.score_batch`). `LMM.association_tests(X, test, reml, refit,
-  batch)` dispatches; `pylmm.lmm.TESTS`, `check_test`. The output columns are unchanged: for `lrt` and
-  `score` `F_STAT` is the signed square root of the statistic (`BETA` / `BETA_SD`: the ML fit's for `lrt`,
-  the null model's one-step estimate for `score`). On the same data and kinship the p-values equal GEMMA
-  0.98.5's to its 6 printed digits (pylmm `--refit`, `--test lrt`, `--test score --ml`); GEMMA centres
-  every K, which matters only for its ML fits.
+- The likelihood-ratio test: `gwas(..., test="wald" | "lrt")` and `pylmm gwas --test {wald,lrt}` (default
+  `wald`, unchanged). `lrt`: ML fits with and without each SNP, chi2(1), always ML (`--reml`, `--ml` and
+  `--refit` do not apply; logged), by **reduced ML**: the null directions of the kinship that the
+  covariates span are left out of both fits (`LMM.lrt_batch`, `LMM.lrt_null_fit`). With pylmm's centred
+  kinship and an intercept that is one direction, along which the plain ML likelihood grows without bound
+  as h -> 1 (bug 17): plain ML fits sat at h = 1 in 90-100% of S9's replicates at n = 100 whatever the true
+  h², and their LRT was anti-conservative (λ_GC up to 1.14, 2.4x at 1e-5); the reduced-ML LRT is calibrated
+  like the refitted Wald test (λ_GC 0.99-1.03, 1.2-1.35x at 1e-4 / 1e-5 at n = 100). The output columns are
+  unchanged: `F_STAT` is the signed square root of the statistic, `BETA` / `BETA_SD` the ML fit's.
+  `LMM.association_tests(X, test, reml, refit, batch)` dispatches; `pylmm.lmm.TESTS`, `check_test`;
+  `pylmm.loco.gwas_loco(..., test=)` and `pylmm gwas --loco --test lrt` (one LRT null fit per chromosome).
+  On a kinship with no such null direction the p-values equal GEMMA 0.98.5's `-lmm 2` to its 6 printed
+  digits (and `--refit` its `-lmm 1`); GEMMA centres every K and keeps the plain ML, so with a centred K
+  and an intercept they differ.
+- `LMM.score_batch(X, h=None, reml=True)`: the score test at the null fit, for comparison with GEMMA's
+  `-lmm 3` (`reml=False`). Library only: it is a monotone function of the null-fit Wald statistic (the
+  same ranking) and its p-value has a floor (t² <= n - q: about 9.7e-6 at n = 30, 7.4e-9 at n = 50).
 - `LMM.fit_snps(X, reml=True, ngrids=100)` -> `SnpFitResult(h, ll, t, p, beta, beta_var)`: the exact
   per-SNP fit for a block of SNPs (below).
 - `sims/bench/refit.py` (`just bench refit [--quick]`) and `sims/studies/s9_tests.py`
   (`just sim s9_tests [--quick]`; write-up `sims/studies/s9_tests.md`): the refit's speed and agreement,
-  and the calibration, power and cost of the four tests.
+  and the calibration, power and cost of the Wald, refitted Wald, LRT (reduced and plain ML) and score
+  tests.
 
 - Leave-one-chromosome-out (LOCO) scans. Library: `pylmm.loco.LocoKinship` builds every `K_{-c}` (the
   kinship of all chromosomes but `c`) in one pass over the raw genotypes, for each kind (standardized,
@@ -188,7 +197,8 @@ maps them).
   derivative or a Newton run that does not converge. Same candidates and tie rule, so the same maximum:
   |dh| <= 3.6e-7 and |d log-likelihood| <= 2.9e-12 against the per-SNP search on 28,800 fits of S9, and
   within 3.3e-10 of the dense oracle's maximum; t and p move by at most ~6e-7 relative (the grid search's
-  stopping error). Speedup over the per-SNP search (`sims/bench/refit.py`, single-threaded BLAS, arm64): 26-46x at n = 300 (2000 SNPs), 11-14x at n = 1000, 8-13x at n = 2000; the refit then costs 9.5-12x a default scan.
+  stopping error). Memory: about 5 arrays of n x block size (per-SNP terms in chunks of 256 SNPs).
+  Speedup over the per-SNP search (`sims/bench/refit.py`, single-threaded BLAS, arm64): 50-61x at n = 300 (2000 SNPs), 17-23x at n = 1000, 11-14x at n = 2000; the refit then costs 6.5-10x a default scan (the LRT 8-8.5x).
 - `--refit --no-batch` / `gwas(refit=True, batch=False)` and `--legacy-fit --refit` keep the per-SNP grid
   search, so `--legacy-fit --no-batch` is still 1.0.0's output byte for byte.
 - `association_batch`'s docstring: "batched vs per SNP <= 1.3e-15 of max |t|" -> that holds for a centred

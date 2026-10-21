@@ -123,7 +123,7 @@ Median µs per SNP of one scan, null fit included, 6 parallel jobs:
 | Wald + refit | 48–233 | 12–24× |
 | LRT | 30–169 | 7.5–15× |
 
-In a single process the refit is 8–46× faster than the per-SNP grid search (`sims/bench/refit.py`).
+In a single process (`sims/bench/refit.py`) the refit is 11–61× faster than the per-SNP grid search, and costs 6.5–10× a default scan (the LRT 8–8.5×).
 
 ## Which test when
 

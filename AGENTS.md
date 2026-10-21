@@ -10,7 +10,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 
 | path | what |
 |---|---|
-| `pylmm/lmm.py` | the model: `LMM` (`fit`, `association`, `association_batch`, `fit_snps`, `lrt_batch`, `score_batch`), `gwas` (`test=wald\|lrt\|score`), input checks (re-exports `calculate_kinship`) |
+| `pylmm/lmm.py` | the model: `LMM` (`fit`, `association`, `association_batch`, `fit_snps`, `lrt_batch`, `score_batch`), `gwas` (`test=wald\|lrt`), input checks (re-exports `calculate_kinship`) |
 | `pylmm/kinship.py` | `calculate_kinship` (`kind=` standardized / centered / ibs; `legacy=True` = 1.0.0), `kinship_scale`, `KinshipAccumulator` |
 | `pylmm/kinship_io.py` | GCTA binary GRM `read_grm` / `write_grm` (float32), plink2 `.rel` `read_rel`, eigendecomposition `.npz` with IDs (`read_eigen`, `write_eigen`) |
 | `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes (per SNP or in blocks, with `.bim` metadata); phenotype, covariate, kinship files |

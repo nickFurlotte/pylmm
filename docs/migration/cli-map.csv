@@ -18,7 +18,7 @@ pylmmGWAS,--noMean,no,pylmm gwas,--no-intercept,no,renamed,
 pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,"required (or --grm, or --loco without either); its rows are aligned by the IDs of FILE.id if that exists; a plink2 .rel/.rel.gz/.rel.bin is read with its .rel.id (after 1.0.0)"
 pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,behaviour-changed,"after 1.0.0: a decomposition with sample IDs (.npz fid/iid, or PATH.id / PATH.grm.id for text) is matched to the tested individuals: an error if one is missing, reordered if permuted; one without IDs is used as before, with a warning"
 pylmmGWAS,--removeMissingGenotypes,no,pylmm gwas,--remove-missing-genotypes,no,renamed,
-pylmmGWAS,--refit,no,pylmm gwas,--refit,no,behaviour-changed,"the exact per-SNP fit (LMM.fit_snps: Newton-Raphson on the likelihood's derivatives, a block of SNPs at a time; the same maximum, 8-46x faster); with --no-batch or --legacy-fit the grid search per SNP, as before"
+pylmmGWAS,--refit,no,pylmm gwas,--refit,no,behaviour-changed,"the exact per-SNP fit (LMM.fit_snps: Newton-Raphson on the likelihood's derivatives, a block of SNPs at a time; the same maximum, 11-61x faster); with --no-batch or --legacy-fit the grid search per SNP, as before"
 pylmmGWAS,--REML,no,pylmm gwas,--reml,no,renamed,"REML is the default, so the flag can be dropped; --reml and --ml are mutually exclusive"
 pylmmGWAS,--ML,no,pylmm gwas,--ml,no,renamed,
 pylmmGWAS,-v/--verbose,no,pylmm gwas,-v/--verbose,no,behaviour-changed,"logs INFO messages as `pylmm: info: ...`; the null fit line is now `null model: heritability=..., sigma=...`; the library's own eigendecomposition diagnostics need --debug"
@@ -44,7 +44,7 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm gwas,--block-size,yes,new,"SNPs read and tested together (batched Wald tests), default 1024 (pylmm.genotypes.DEFAULT_BLOCK_SIZE); added after 1.0.0"
 ,,,pylmm gwas,--no-batch,no,new,"test one SNP at a time, the 1.0.0 code path; added after 1.0.0"
 ,,,pylmm gwas,--legacy-fit,no,new,"fit h as pylmm 1.0.0 did (grid 0..0.99, first local maximum, sigma^2 = Q/(n-p) under --ml); with --no-batch the 1.0.0 output; added after 1.0.0"
-,,,pylmm gwas,--test,yes,new,"{wald,lrt,score}; default wald; lrt = likelihood ratio of ML fits with and without the SNP (chi2(1)), score = score test at the null fit (GEMMA -lmm 2 and 3); F_STAT is then the signed root of the statistic; added after 1.0.0"
+,,,pylmm gwas,--test,yes,new,"{wald,lrt}; default wald; lrt = likelihood ratio of ML fits with and without the SNP (chi2(1); reduced ML: the kinship's null directions spanned by the covariates left out); F_STAT is then the signed root of the statistic; added after 1.0.0"
 ,,,pylmm kinship,--kinship-type,yes,new,"{standardized,centered,ibs}; default standardized (1.0.0's formula; now m = the SNPs used and the library uses the CLI's missing-call convention); ibs = EMMA's IBS kinship; added after 1.0.0"
 ,,,pylmm kinship,--legacy-kinship,no,new,"the K of pylmm kinship 1.0.0, which counted skipped constant and all-missing SNPs in m (bug 8); added after 1.0.0"
 ,,,pylmm gwas,--grm,yes,new,"a GCTA binary GRM PREFIX.grm.bin/.grm.id instead of --kinship (GCTA's --grm), aligned by ID; float32; added after 1.0.0"
