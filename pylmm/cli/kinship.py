@@ -4,13 +4,19 @@
 # SPDX-License-Identifier: MIT
 # See the LICENSE file in the project root for full license text.
 
-"""``pylmm kinship``: compute a realized-relationship kinship matrix.
+"""``pylmm kinship``: compute a kinship matrix from genotypes.
 
-``K = W W' / m`` over the ``m`` SNPs of the genotype input, with ``W`` the
-standardised genotypes (mean-imputed); monomorphic SNPs and SNPs with no
-called genotype are skipped, but still counted in ``m``.  The SNPs are read
-in blocks of ``--block-size`` (`pylmm.plink_io.PlinkReader.iter_blocks`), and
-``W W'`` is summed over blocks of ``--block-size`` kept SNPs.
+``--kinship-type`` picks the kinship (`pylmm.kinship`): ``standardized`` (the
+default, ``K = Z Z' / m`` over the standardised SNPs), ``centered`` (centred
+0/1/2 allele counts, GEMMA ``-gk 1``) or ``ibs`` (EMMA's identity-by-state
+kinship).  K is bit for bit `pylmm.kinship.calculate_kinship` of the same
+SNPs at the same block size (the default ``--block-size`` 1000 is the
+library's): missing calls are mean-imputed, and SNPs with no called genotype
+(and, except for ``ibs``, constant SNPs) are skipped and not counted in ``m``.
+``--legacy-kinship`` reproduces the K of ``pylmm kinship`` 1.0.0, which still
+counted them (bug 8).  The scale of K (mean diagonal, centred mean diagonal;
+`pylmm.kinship.kinship_scale`) is logged.  The SNPs are read in blocks of
+``--block-size`` (`pylmm.plink_io.PlinkReader.iter_blocks`).
 
 Next to the kinship ``FILE`` (``-o``) it writes ``FILE.id``, the (FID, IID) of each row
 (one ``FID IID`` per line), which ``pylmm gwas --kinship FILE`` uses to align
@@ -39,6 +45,7 @@ from pylmm.cli._common import (
     log,
     positive_int,
 )
+from pylmm.kinship import KINSHIP_KINDS, KinshipAccumulator, KinshipKind, kinship_scale
 from pylmm.samples import InputError
 
 FloatArray = NDArray[np.float64]
@@ -47,16 +54,19 @@ _REPORT_EVERY = 10000
 """Log the progress of `compute_kinship` at INFO every this many SNPs."""
 
 _DESCRIPTION = """\
-Compute a realized-relationship kinship matrix K = W W'/m from genotypes,
-for `pylmm gwas --kinship`.  Writes K as whitespace-separated text to FILE
-(-o) and the sample IDs of its rows to FILE.id (not for EMMA input, which
-has no IDs)."""
+Compute a kinship matrix from genotypes, for `pylmm gwas --kinship`: by
+default the standardized relatedness matrix K = Z Z'/m (Z: the standardised
+SNPs, missing calls mean-imputed; m: the SNPs used).  Writes K as
+whitespace-separated text to FILE (-o) and the sample IDs of its rows to
+FILE.id (not for EMMA input, which has no IDs), and logs the scale of K (its
+mean diagonal), the scale of the heritability fitted with it."""
 
 _EPILOG = """\
 examples:
   pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
   pylmm kinship --bfile study -o study.kin --eigen-npz study.eig.npz
-  pylmm kinship --emma-geno snps.emma -o K.txt"""
+  pylmm kinship --emma-geno snps.emma -o K.txt
+  pylmm kinship --emma-geno snps.emma --kinship-type ibs -o K.ibs.txt"""
 
 
 def add_parser(commands: Any) -> argparse.ArgumentParser:
@@ -100,6 +110,23 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         type=positive_int,
         help="optional check: the number of SNPs (non-blank rows) of the --emma-geno file; "
         "it is counted from the file, and a different M is an error",
+    )
+
+    method = p.add_argument_group("kinship")
+    method.add_argument(
+        "--kinship-type",
+        choices=KINSHIP_KINDS,
+        default="standardized",
+        help="standardized: the standardized relatedness matrix (GCTA-style GRM, GEMMA -gk 2); "
+        "centered: centred allele counts 0/1/2, not scaled (GEMMA -gk 1); ibs: EMMA's "
+        "identity-by-state kinship, the share of alleles in common (inbred panels; genotypes "
+        "must be 0, 0.5 or 1, as BED, TPED and EMMA 0/1 files are) (default: standardized)",
+    )
+    method.add_argument(
+        "--legacy-kinship",
+        action="store_true",
+        help="reproduce the K of pylmm kinship 1.0.0 (standardized only): divide by all SNPs "
+        "read, including the skipped constant and all-missing ones (bug 8)",
     )
 
     output = p.add_argument_group("output")
@@ -148,6 +175,8 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     """
     if args.emma_num_snps is not None and not args.emma_geno:
         parser.error("--emma-num-snps applies only to --emma-geno")
+    if args.legacy_kinship and args.kinship_type != "standardized":
+        parser.error("--legacy-kinship applies only to --kinship-type standardized")
     check_log_file(parser, args)
 
 
@@ -161,7 +190,8 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
     """
     flag, base, kind = genotype_source(args)
     try:
-        return plink_io.PlinkReader(base, type=kind)
+        # Raw genotypes: the kinship standardises (or not) each SNP itself.
+        return plink_io.PlinkReader(base, type=kind, norm_genotype=False)
     except OSError as e:  # e.g. a missing .fam: name the option
         raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except ValueError as e:  # the message names the file
@@ -204,22 +234,30 @@ def iter_snp_vectors(reader: plink_io.PlinkReader, block_size: int) -> Iterator[
         del G  # before the next block is decoded
 
 
-def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray:
-    """``K = W W' / m`` over all ``m`` SNPs of ``reader``, ``block_size`` SNPs at a time.
+def compute_kinship(
+    reader: plink_io.PlinkReader,
+    block_size: int,
+    kind: str = "standardized",
+    legacy: bool = False,
+) -> FloatArray:
+    """The kinship of all the SNPs of ``reader``, ``block_size`` SNPs at a time.
 
-    SNPs that are monomorphic or have a missing value (after the reader's
-    imputation: no called genotype at all) are skipped but still counted in
-    ``m`` (bug 8 in docs/phase4-simulations.md; unchanged here).  ``W W'`` is
-    accumulated over blocks of ``block_size`` kept SNPs (`iter_snp_vectors`
-    reads blocks of ``block_size`` SNPs), so K does not depend on how the SNPs
-    are read.
+    `pylmm.kinship.KinshipAccumulator`, fed the raw genotypes: the same K as
+    `pylmm.kinship.calculate_kinship` (bit for bit at the same block size).
+    For ``kind="centered"`` the genotypes are counted as 0/1/2 copies of A2
+    (twice the reader's fractions), the coding GEMMA's ``-gk 1`` uses.
 
     Parameters
     ----------
     reader : pylmm.plink_io.PlinkReader
-        The genotype reader, with standardised SNPs (the default).
+        The genotype reader, with ``norm_genotype=False`` (raw genotypes).
     block_size : int
         The number of SNPs in memory at once.
+    kind : {"standardized", "centered", "ibs"}
+        The kinship (`pylmm.kinship`).
+    legacy : bool
+        ``kind="standardized"`` only: pylmm 1.0.0's K, which divides by all
+        the SNPs read (bug 8).
 
     Returns
     -------
@@ -229,54 +267,56 @@ def compute_kinship(reader: plink_io.PlinkReader, block_size: int) -> FloatArray
     Raises
     ------
     UsageError
-        If the genotype input has no SNP.
+        If the genotype input has no usable SNP, or (``ibs``) a genotype that
+        is not 0, 0.5 or 1.
     """
-    n = len(reader.indivs)
-    W = np.ones((n, block_size)) * np.nan
-    i = 0  # SNPs read
-    j = 0  # SNPs in W
-    flushed = 0  # SNPs read when W was last added to K
-    K: FloatArray | None = None
-    n_all_missing = 0
+    acc = KinshipAccumulator(
+        len(reader.indivs), kind=cast(KinshipKind, kind), block_size=block_size, legacy=legacy
+    )
     next_report = _REPORT_EVERY
+    scale = 2.0 if kind == "centered" else 1.0
+    for snp in iter_snp_vectors(reader, block_size):
+        try:
+            acc.add(snp * scale if scale != 1.0 else snp)
+        except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
+            raise UsageError("--kinship-type %s, SNP %d: %s" % (kind, acc.n_snps, e)) from e
+        # Progress at INFO every 10000 SNPs, else at DEBUG every block.
+        if acc.n_snps >= next_report:
+            log.info("Processing first %d SNPs", acc.n_snps)
+            next_report += _REPORT_EVERY
+        elif acc.n_snps % block_size == 0:
+            log.debug("Processing first %d SNPs", acc.n_snps)
+    try:
+        K = acc.result()
+    except ValueError as e:  # no usable SNP
+        raise UsageError(str(e)) from e
+    log.info("Processed %d SNPs", acc.n_snps)
+    if acc.n_all_missing:
+        log.warning("skipped %d SNPs with no called genotype", acc.n_all_missing)
+    skipped = acc.n_snps - acc.n_used - acc.n_all_missing
+    if skipped:
+        log.info("skipped %d constant SNPs", skipped)
+    log.info(
+        "kinship: %s, m = %d SNPs%s",
+        kind,
+        acc.n_snps if legacy else acc.n_used,
+        " (--legacy-kinship: all SNPs read; %d used)" % acc.n_used if legacy else "",
+    )
+    return K
 
-    def add(K: FloatArray | None, W: FloatArray, last: bool) -> FloatArray:
-        nonlocal next_report
-        # Progress at INFO every 10000 SNPs (and at the end), else at DEBUG.
-        if i >= next_report or last:
-            log.info("Processing first %d SNPs", i)
-            next_report = (i // _REPORT_EVERY + 1) * _REPORT_EVERY
-        else:
-            log.debug("Processing first %d SNPs", i)
-        ww: FloatArray = np.dot(W, W.T)
-        return ww if K is None else K + ww
 
-    snps = iter_snp_vectors(reader, block_size)
-    snp = next(snps, None)
-    while snp is not None:
-        i += 1
-        following = next(snps, None)  # None after the last SNP
-        # Skip monomorphic SNPs and SNPs with no called genotype (bug 11:
-        # an all-missing SNP used to crash, or to make K all nan).
-        if not np.isfinite(snp).all() or snp.var() == 0:
-            if np.isnan(snp).all():
-                n_all_missing += 1
-        else:
-            W[:, j] = snp
-            j += 1
-            if j == block_size:
-                K = add(K, W, following is None)
-                j = 0
-                flushed = i
-        snp = following
-    if i > flushed:  # the SNPs after the last full block (perhaps all skipped)
-        K = add(K, W[:, list(range(0, j))], True)
-    if n_all_missing:
-        log.warning("skipped %d SNPs with no called genotype", n_all_missing)
-    if K is None:
-        raise UsageError("No SNP with a non-constant genotype was read; cannot compute a kinship.")
-    result: FloatArray = K / float(i)
-    return result
+def log_kinship_scale(K: FloatArray) -> None:
+    """Log the scale of K (`pylmm.kinship.kinship_scale`), the scale of the h fitted with it."""
+    if K.shape[0] < 2:
+        return
+    s = kinship_scale(K)
+    log.info(
+        "kinship scale: mean diagonal %.4f, centred mean diagonal trace(PKP)/(n-1) %.4f; "
+        "h is the variance share on this scale (PVE = h c / (h c + 1 - h), c = the centred "
+        "mean diagonal)",
+        s.mean_diag,
+        s.centered_mean_diag,
+    )
 
 
 def write_kinship(K: FloatArray, reader: plink_io.PlinkReader, out_file: str) -> None:
@@ -343,7 +383,8 @@ def run(args: argparse.Namespace) -> None:
                 "--emma-num-snps %d: the --emma-geno file %s has %d SNPs (non-blank lines); "
                 "fix the number or leave the option out" % (args.emma_num_snps, args.emma_geno, m)
             )
-    K = compute_kinship(reader, args.block_size)
+    K = compute_kinship(reader, args.block_size, args.kinship_type, args.legacy_kinship)
+    log_kinship_scale(K)
     try:
         write_kinship(K, reader, args.out)
         write_eigen(K, args.out, args.eigen_text, args.eigen_npz)

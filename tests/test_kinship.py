@@ -51,14 +51,14 @@ def assert_eigenvalues_close(actual, expected, what):
 )
 def test_calculate_kinship_hmdp(hmdp, center, name):
     _, _, snps = hmdp
-    K = lmm.calculate_kinship(snps.copy(), center=center)
+    K = lmm.calculate_kinship(snps.copy(), center=center, legacy=True)
     h.assert_close(K, h.load_golden_txt(name), what=name)
     check_kinship_invariants(K, name)
 
 
 def test_calculate_kinship_bed():
     W = h.read_bed_snps(h.BED_KIN_NSNPS, norm=False)
-    K = lmm.calculate_kinship(W)
+    K = lmm.calculate_kinship(W, legacy=True)
     check_big_kinship(K, "kinship_bed_snps%d_calc" % h.BED_KIN_NSNPS)
     check_kinship_invariants(K, "calculate_kinship(bed)")
 
@@ -86,6 +86,7 @@ def test_cli_kinship_emma(tmp_path):
             "--block-size",
             300,
             "--eigen-text",
+            "--legacy-kinship",  # the golden is 1.0.0's K (7% of these SNPs are monomorphic)
             "-o",
             out,
         ],
@@ -181,11 +182,12 @@ def test_cli_kinship_bim_the_block_reader_rejects(tmp_path):
         assert a.read() == b.read()
 
 
+@pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("block_size", ["1", "7", "1000"])
-def test_cli_kinship_is_w_wt_over_m_at_any_block_size(tmp_path, block_size):
+def test_cli_kinship_is_w_wt_over_m_at_any_block_size(tmp_path, block_size, legacy):
     """Missing calls, an all-missing and a constant SNP: at each block size, K is W W' / m over
-    the kept SNPs (m counting all SNPs), to rounding.  (Byte identity with the previous code
-    at the same block size was checked against it, outside the suite: see PR #25.)"""
+    the kept SNPs, to rounding; m counts the kept SNPs, or all SNPs with --legacy-kinship
+    (1.0.0).  (Byte identity of --legacy-kinship with 1.0.0 was checked outside the suite.)"""
     base = h.write_bed_subset(tmp_path, 40)
     with open(base + ".fam") as f:
         n = sum(1 for _ in f)
@@ -201,8 +203,9 @@ def test_cli_kinship_is_w_wt_over_m_at_any_block_size(tmp_path, block_size):
     with open(base + ".bed", "wb") as f:
         f.write(bytes(raw))
     out = str(tmp_path / "k.txt")
+    flags = ["--legacy-kinship"] if legacy else []
     log = h.run_cli(
-        ["kinship", "--bfile", base, "-o", out, "--block-size", block_size], cwd=tmp_path
+        ["kinship", "--bfile", base, "-o", out, "--block-size", block_size, *flags], cwd=tmp_path
     )
     assert "skipped 1 SNPs with no called genotype" in log
     K = np.loadtxt(out)
@@ -210,4 +213,8 @@ def test_cli_kinship_is_w_wt_over_m_at_any_block_size(tmp_path, block_size):
 
     W = np.column_stack([g for g, _ in PlinkReader(base).iter_snps()])
     keep = np.isfinite(W).all(axis=0) & (W.var(axis=0) > 0)
-    h.assert_close(K, W[:, keep] @ W[:, keep].T / W.shape[1], what="K")
+    m = W.shape[1] if legacy else keep.sum()
+    h.assert_close(K, W[:, keep] @ W[:, keep].T / m, what="K")
+    if not legacy:  # the library computes the same K
+        G = np.column_stack([g for g, _ in PlinkReader(base, norm_genotype=False).iter_snps()])
+        h.assert_close(K, lmm.calculate_kinship(G), what="K vs calculate_kinship")
