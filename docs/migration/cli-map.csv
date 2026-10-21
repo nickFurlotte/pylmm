@@ -15,7 +15,7 @@ pylmmGWAS,-p,yes,pylmm gwas,--pheno-col,yes,semantics-changed,"now 1-based, like
 pylmmGWAS,--covfile,yes,pylmm gwas,--covar,yes,renamed,
 pylmmGWAS,--emmaCOV,yes,pylmm gwas,--emma-covar,yes,behaviour-changed,"renamed, and now mutually exclusive with --covar (--covfile used to win)"
 pylmmGWAS,--noMean,no,pylmm gwas,--no-intercept,no,renamed,
-pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,"required (or --grm); its rows are aligned by the IDs of FILE.id if that exists; a plink2 .rel/.rel.gz/.rel.bin is read with its .rel.id (after 1.0.0)"
+pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,"required (or --grm, or --loco without either); its rows are aligned by the IDs of FILE.id if that exists; a plink2 .rel/.rel.gz/.rel.bin is read with its .rel.id (after 1.0.0)"
 pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,behaviour-changed,"after 1.0.0: a decomposition with sample IDs (.npz fid/iid, or PATH.id / PATH.grm.id for text) is matched to the tested individuals: an error if one is missing, reordered if permuted; one without IDs is used as before, with a warning"
 pylmmGWAS,--removeMissingGenotypes,no,pylmm gwas,--remove-missing-genotypes,no,renamed,
 pylmmGWAS,--refit,no,pylmm gwas,--refit,no,unchanged,
@@ -48,3 +48,7 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm kinship,--legacy-kinship,no,new,"the K of pylmm kinship 1.0.0, which counted skipped constant and all-missing SNPs in m (bug 8); added after 1.0.0"
 ,,,pylmm gwas,--grm,yes,new,"a GCTA binary GRM PREFIX.grm.bin/.grm.id instead of --kinship (GCTA's --grm), aligned by ID; float32; added after 1.0.0"
 ,,,pylmm kinship,--out-format,yes,new,"{text,grm}; default text; grm writes a GCTA binary GRM FILE.grm.bin/.grm.N.bin/.grm.id (float32; not for EMMA input); added after 1.0.0"
+,,,pylmm gwas,--loco,no,new,"leave one chromosome out: each chromosome's SNPs tested with a kinship built from the other chromosomes' SNPs (GCTA --mlma-loco), computed from the genotypes; replaces --kinship/--grm/--eigen; added after 1.0.0"
+,,,pylmm gwas,--kinship-type,yes,new,"{standardized,centered,ibs}; with --loco only: the kinship built, as pylmm kinship --kinship-type; default standardized; added after 1.0.0"
+,,,pylmm gwas,--emma-map,yes,new,"with --loco and --emma-geno: the chromosome of each EMMA row (a header naming a chr column, or a PLINK .map); added after 1.0.0"
+,,,pylmm gwas,--loco-max-chroms,yes,new,"with --loco: refuse more than N chromosomes (default 100); added after 1.0.0"

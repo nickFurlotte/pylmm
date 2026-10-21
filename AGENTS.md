@@ -16,6 +16,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes (per SNP or in blocks, with `.bim` metadata); phenotype, covariate, kinship files |
 | `pylmm/genotypes.py` | `Variants` (`.bim` columns), `GenotypeSource` protocol (`iter_blocks`), `ArraySource` (in-memory matrix), `normalize_genotype` |
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
+| `pylmm/loco.py` | leave-one-chromosome-out: `LocoKinship` (every K_{-c} in one pass), `gwas_loco` |
 | `pylmm/misc.py` | `fit_two`, two-kinship variance components |
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
 | `tests/` | pytest suite; `tests/golden/` = reference outputs of the original Python 2 code; `tests/helpers.py` = all tolerances |
@@ -105,7 +106,7 @@ use `skills/` directly, or copy it to `.claude/skills`.
 |---|---|
 | `run-gwas` | run a GWAS end to end (CLI or library), check it, fix common errors; `reference.md`: phenotype QC/transforms, SNP QC, loci |
 | `estimate-heritability` | fit the null model, interpret h², SE / profile-likelihood intervals, K scale vs other tools, inbred panels (strain-mean h²) |
-| `custom-association-analysis` | write ad-hoc loops: subsets, conditional analysis, LOCO kinship, many phenotypes |
+| `custom-association-analysis` | write ad-hoc loops: subsets, conditional analysis, LOCO (`pylmm.loco`), many phenotypes |
 | `inbred-strain-panels` | strains with replicate animals: strain aliases and duplicate-genotype audits, strain → animal expansion, PLINK-safe IDs, imputing over strains, unequal replicates |
 | `simulate-lmm-data` | simulate genotypes/phenotypes with known h² and causal SNPs; sanity-check a pipeline |
 | `convert-genotype-formats` | VCF/BCF, BGEN, PGEN, VCF Zarr, Hail → PLINK BED; phenotype and `.id` files |

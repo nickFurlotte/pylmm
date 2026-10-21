@@ -83,8 +83,9 @@ Null calibration (λ_GC, type-I error at 0.05 and 0.01):
 3. **K from all SNPs is conservative on inbred panels when h2 > 0, for every kind** (λ 0.68-0.80 on the
    synthetic panel, 0.87-0.97 on HMDP; t1e at 0.05 down to 0.017): the tested chromosomes in K absorb
    variance the phenotype does not have along them. Without the tested chromosomes in K (`*_loco`), λ is
-   0.99-1.06 and t1e 0.048-0.054. LOCO, not the kinship kind, is the calibration lever (the CLI has no
-   LOCO flag yet; see `custom-association-analysis`).
+   0.99-1.06 and t1e 0.048-0.054. LOCO, not the kinship kind, is the calibration lever (now `pylmm gwas --loco`
+   and `pylmm.loco`; S8, `s8_loco.md`, measures it with per-chromosome LOCO and the background on many
+   chromosomes).
    Context: in this design the LOCO kinship is built from exactly the chromosomes that carry the causal
    SNPs, so it is close to the generating covariance and λ ≈ 1 is expected by construction; the
    all-SNP deflation is the finding. It is not an artefact of the half/half split: the PR #26 review

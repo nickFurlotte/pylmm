@@ -11,8 +11,8 @@ happen in the join between the two, not in the model. This skill is the data-pre
 model side lives elsewhere:
 
 * individual-level vs strain-mean set-up and heritability: `estimate-heritability` section 7;
-* power, LOCO and λ_GC in panels with few distinct genotypes: `run-gwas` section 1,
-  `simulate-lmm-data` section 6, `custom-association-analysis` (LOCO);
+* power, LOCO and λ_GC in panels with few distinct genotypes: `run-gwas` sections 1-2 (`pylmm gwas
+  --loco`), `simulate-lmm-data` section 6, `custom-association-analysis` (`pylmm.loco`);
 * comparing the result with a published scan: `interpret-gwas-results/comparison-worksheet.md`.
 
 Every block below runs in CI, in order, on a small synthetic panel built in the first block. The worked
@@ -21,9 +21,15 @@ example at the end sketches the two published HMDP studies reproduced in
 files are not in the repository.
 
 **Planned, not yet in pylmm**: a strain-aware option that expands strain genotypes to animals
-and imputes over strains, a LOCO flag for the command line, and marker metadata (chromosome, position,
-counted allele) carried through the EMMA path. Until then, use the recipes here. EMMA's IBS kinship is
-available: `calculate_kinship(G, kind="ibs")`, `pylmm kinship --kinship-type ibs` (section 3).
+and imputes over strains, and marker metadata (position, counted allele) carried through the EMMA path.
+Until then, use the recipes here. Available: EMMA's IBS kinship (`calculate_kinship(G, kind="ibs")`,
+`pylmm kinship --kinship-type ibs`, section 3) and leave-one-chromosome-out scans, **recommended for these
+panels**: a K from all SNPs absorbs much of a causal SNP's signal here, and LOCO roughly doubled QTL power
+in S8 (`pylmm gwas --loco [--kinship-type ibs]`; expect λ_GC well above 1 for a polygenic trait under LOCO,
+linked signal rather than inflation: never genomic-control it; for EMMA
+input give the chromosomes with `--emma-map data/hmdp.liver.snps.map.tsv`, whose rows are the bundled
+matrix's; `pylmm.loco` in the library). On a per-animal BED, `--loco` builds its kinships over the animals,
+as `pylmm kinship` does.
 
 ## 1. The two inputs
 
