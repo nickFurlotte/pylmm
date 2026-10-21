@@ -31,6 +31,14 @@ uv sync           # then prefix commands with `uv run`
 
 The `main` branch holds the current code; the older `master` branch keeps the original Python 2 code.
 
+To read PLINK 2 PGEN genotypes (`pylmm gwas --pfile`, imputed dosages included), add the optional `pgen`
+extra. It installs plink2's reader [pgenlib](https://pypi.org/project/Pgenlib/), which is LGPL-3.0 (see
+[License](#license)):
+
+```bash skip-ci: network
+pip install "pylmm[pgen] @ git+https://github.com/nickFurlotte/pylmm@main"   # or: uv sync --extra pgen
+```
+
 ## Quick start
 
 ### Command line
@@ -135,3 +143,8 @@ this repository" button reads it).
 ## License
 
 Code: MIT (see [LICENSE](LICENSE)). Example data in `data/`: see [data/README.md](data/README.md).
+
+The optional `pgen` extra installs [pgenlib](https://pypi.org/project/Pgenlib/), which is licensed under
+the **LGPL-3.0**, not MIT. pylmm does not include or modify pgenlib's code. It imports the separately
+installed package only when a PGEN file is read, and everything else works without it. If you redistribute
+pylmm together with pgenlib (in a container image, for example), the LGPL's terms apply to pgenlib.

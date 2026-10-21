@@ -14,6 +14,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/kinship.py` | `calculate_kinship` (`kind=` standardized / centered / ibs; `legacy=True` = 1.0.0), `kinship_scale`, `KinshipAccumulator` |
 | `pylmm/kinship_io.py` | GCTA binary GRM `read_grm` / `write_grm` (float32), plink2 `.rel` `read_rel`, eigendecomposition `.npz` with IDs (`read_eigen`, `write_eigen`) |
 | `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes (per SNP or in blocks, with `.bim` metadata); phenotype, covariate, kinship files |
+| `pylmm/pgen.py` | `PgenSource`, `read_psam`, `read_pvar`, `write_pgen`: PLINK 2 PGEN via the optional `pgenlib` (`pylmm[pgen]`, LGPL-3.0; imported lazily); `PlinkReader(type="pgen")` and `--pfile` use it |
 | `pylmm/genotypes.py` | `Variants` (`.bim` columns), `GenotypeSource` protocol (`iter_blocks`), `ArraySource` (in-memory matrix), `normalize_genotype` |
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
 | `pylmm/misc.py` | `fit_two`, two-kinship variance components |

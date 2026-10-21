@@ -25,6 +25,9 @@ pip install "git+https://github.com/nickFurlotte/pylmm@main"
 uv add "pylmm @ git+https://github.com/nickFurlotte/pylmm@main"
 ```
 
+Reading PLINK 2 PGEN files (section 3) needs the optional `pgen` extra, `pylmm[pgen]`, which installs
+plink2's reader pgenlib (LGPL-3.0; pylmm itself is MIT); from a clone, `uv sync --extra pgen`.
+
 A git install clones the whole repository, including ~215 MB of example data, so it takes a while (what
 the data is, and its checksums: [data/README.md](../data/README.md)). From a clone, `uv sync` (add
 `--group sims` for the simulation framework) and prefix commands with `uv run`, which uses the `.venv/`
@@ -148,7 +151,17 @@ assert np.array_equal(bim["pos"], variants.bp) and np.array_equal(bim["a2"], var
   (individuals are positions `0..n-1`, and every other file is matched by position) and no SNP names or
   positions. For the bundled `data/hmdp.liver.snps`, `data/hmdp.liver.snps.map.tsv` gives each row's
   chromosome, build-37 position and alleles (see `data/README.md`).
-* VCF, BCF, BGEN, PGEN, VCF Zarr, Hail: convert to BED first, see the `convert-genotype-formats` skill.
+* PLINK 2 PGEN (`.pgen` + `.pvar` or `.pvar.zst` + `.psam`), with the `pgen` extra:
+  `pylmm.pgen.PgenSource(prefix)` (a `GenotypeSource`, with `subset`) or `PlinkReader(prefix,
+  type="pgen")` (with the phenotype, covariate and kinship reading of `PlinkReader`; `pylmm gwas --pfile`
+  uses it). The genotype is the fraction of copies of **REF**, the A2 of the `.bim` plink2 writes for the
+  file: a PGEN reads exactly as `plink2 --pfile X --make-bed` of it (and a BED converted to PGEN reads as
+  the BED), and `variants.a2` is REF, `a1` ALT. Imputed **dosages** are read where the file stores them
+  (`1 - ALT dosage / 2`, at plink2's 1/16384 precision); `dosage=False` reads the hard calls. A
+  multiallelic variant is an `InputError` (drop or split them with plink2 or bcftools first). Without an
+  FID column in the `.psam`, the FID is `0`, as in the `.fam` plink2 writes.
+* VCF, BCF, BGEN, VCF Zarr, Hail: convert to BED (hard calls) or, to keep dosages, to PGEN; see the
+  `convert-genotype-formats` skill.
 * Any genotype matrix you already have in numpy works directly with `calculate_kinship`, `LMM` and `gwas`.
   To pass it to code written for blocks (`iter_blocks`), wrap it in `pylmm.genotypes.ArraySource(G,
   sample_ids=..., variants=..., norm_genotype=True)`: the same interface as `PlinkReader`
@@ -168,6 +181,24 @@ source = ArraySource(counts, sample_ids=[("F%d" % i, "I%d" % i) for i in range(5
                                        bp=np.arange(8) * 1000))
 for G, v in source.iter_blocks(5):         # standardised, like PlinkReader's default
     print(G.shape, v.snp.tolist())
+```
+
+A PGEN file set (here written by `pylmm.pgen.write_pgen` from the first 500 SNPs of the bundled BED: the
+file `plink2 --bfile ... --make-pgen` would make) reads as the BED it came from:
+
+```python needs=pgenlib
+from pylmm.pgen import PgenSource, write_pgen
+
+with PlinkReader("data/snps.132k.clean.noX", norm_genotype=False) as bed:
+    G500, v500 = next(bed.iter_blocks(500))
+    write_pgen("first500", G500, bed.indivs, v500)       # first500.pgen / .pvar / .psam
+
+pg = PgenSource("first500")                              # standardised blocks, like PlinkReader
+G_pgen, v_pgen = next(pg.iter_blocks(500))
+with PlinkReader("data/snps.132k.clean.noX") as bed:
+    G_bed = next(bed.iter_blocks(500))[0]
+assert np.array_equal(G_pgen, G_bed) and pg.sample_ids == bed.indivs
+print(v_pgen[0])                                         # a2 is REF, the counted allele
 ```
 
 ### Phenotypes and covariates
@@ -502,6 +533,8 @@ head -3 trait.tsv
 * The intercept is added unless `--no-intercept`; individuals with a missing phenotype or covariate are
   dropped (with a warning).
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
+* `--pfile P` reads a PLINK 2 PGEN file set instead of `--bfile` (the `pgen` extra; dosages included,
+  `--hardcalls` for the hard calls only); so does `pylmm kinship --pfile P`. The effect allele is REF.
 * `--id-match iid` matches on IID alone; `--ml`, `--refit`, `--remove-missing-genotypes` as in the
   library; `--eigen` reuses a decomposition (section 11).
 * Exit code 0 on success, 2 for a usage or input error (one `pylmm: error: ...` line), 1 for an unexpected

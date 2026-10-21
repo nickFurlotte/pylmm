@@ -11,6 +11,18 @@ maps them).
 ## [Unreleased]
 
 ### Added
+- PLINK 2 PGEN input, as an optional extra: `pip install 'pylmm[pgen]'` installs plink2's reader pgenlib
+  (LGPL-3.0, imported only when a PGEN is read; without it nothing changes). PGEN files: not readable
+  (convert to BED, losing dosages) -> `pylmm gwas --pfile PREFIX`, `pylmm kinship --pfile PREFIX`,
+  `pylmm.pgen.PgenSource` (a `GenotypeSource`) and `PlinkReader(prefix, type="pgen")`. They read
+  `.pgen` + `.pvar` (or `.pvar.zst`) + `.psam`. Dosages are read where stored (`--hardcalls` /
+  `dosage=False`: hard calls only). The genotype is the fraction of copies of **REF** (`1 - ALT dosage/2`;
+  `variants.a2` = REF, `a1` = ALT), so a PGEN reads bit for bit as the BED `plink2 --make-bed` writes from
+  it, and `pylmm gwas`/`pylmm kinship` give byte-identical output with `--pfile` and `--bfile` of the two
+  (checked on plink2-written fixtures). A `.psam` without FID gives FID `0` (as plink2's `.fam`).
+  Multiallelic variants are an `InputError` naming the first one. Also `pylmm.pgen.write_pgen` (genotypes
+  to PGEN, for tests and small conversions) and `sims/bench/pgen_read.py` (read throughput vs BED:
+  0.5-0.9x unstandardised, 0.8-1.2x standardised).
 - Variant metadata: `PlinkReader.variants` -> the `.bim` columns of every SNP (`chrom`, `snp`, `cm`, `bp`,
   `a1`, `a2`) as a `pylmm.genotypes.Variants`: read-only numpy columns (text as Python `str` objects, `cm`
   float64, `bp` int64); `variants[k]` is a `Variant` named tuple. Before, the reader kept only the SNP ID.
