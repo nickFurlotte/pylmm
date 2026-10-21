@@ -7,7 +7,7 @@ description: Write custom association analyses with the pylmm Python library (LM
 
 The building blocks (details in [docs/guide.md](../../docs/guide.md)):
 
-* `calculate_kinship(W)` → K; `scipy.linalg.eigh(K)` → `kva, kve` (compute once, reuse).
+* `calculate_kinship(G_raw)` → K, from **raw** genotypes (`norm_genotype=False`; then it is `pylmm kinship`'s K); `scipy.linalg.eigh(K)` → `kva, kve` (compute once, reuse).
 * `LMM(Y, K, kva, kve, X0=X0)` then `.fit()` (null model, REML) and `.association(x)` (one SNP), or
   `.association_batch(X)` (many complete SNPs at once: arrays `t, p, beta, beta_var`; much faster in a
   loop; check `snp_estimable` first, as for `association`).
@@ -50,13 +50,15 @@ Y = 1 + 0.5 * sex + 0.35 * Gs[:, 700] + u + rng.normal(scale=np.sqrt(0.5), size=
 with PlinkReader("cohort") as r:                                    # standardised genotypes
     W = np.hstack([G_block for G_block, _ in r.iter_blocks()])
     bim = r.variants                                                # chrom, snp, cm, bp, a1, a2
+with PlinkReader("cohort", norm_genotype=False) as r:               # raw 0/0.5/1, for the kinship
+    G_raw = np.hstack([G_block for G_block, _ in r.iter_blocks()])
 X0 = np.column_stack([np.ones(n), sex])
 ```
 
 ## Many phenotypes, one eigendecomposition
 
 ```python
-K = calculate_kinship(W)
+K = calculate_kinship(G_raw)          # raw genotypes: reader-standardised W would be standardised twice
 kva, kve = linalg.eigh(K)
 phenos = {"trait": Y, "noise": rng.normal(size=n)}
 results = {}

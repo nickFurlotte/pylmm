@@ -48,14 +48,22 @@ maps them).
   imports `pylmm` from its own tree, which is checked).
 - `pylmm.kinship`, the new home of `calculate_kinship` (`from pylmm.lmm import calculate_kinship` still
   works), with named kinships: `calculate_kinship(W, kind=...)` and `pylmm kinship --kinship-type ...`,
-  `standardized` (the default, the 1.0.0 kinship), `centered` (centred, not scaled; GEMMA `-gk 1`, on
-  0/1/2 counts in the CLI) and `ibs`, EMMA's identity-by-state kinship (`emma.kinship(snps,
-  method="additive", use="all")`, Kang et al. 2008: genotypes 0 / 0.5 / 1, heterozygotes split into two 0/1
-  codings, missing calls at the SNP mean, diagonal 1), checked against a transliteration of EMMA's R code.
-  `pylmm kinship` writes bit for bit the `calculate_kinship` of the same raw genotypes, for each kind.
+  `standardized` (the default; 1.0.0's formula, with the convention change below), `centered` (centred,
+  not scaled: GEMMA `-gk 1`'s formula, on 0/1/2 counts in the CLI, i.e. twice the reader's 0/0.5/1 values;
+  an `--emma-geno` file must be coded 0/0.5/1, and values above 1 are warned about) and `ibs`, EMMA's
+  identity-by-state kinship (`emma.kinship(snps, method="additive", use="all")`, Kang et al. 2008:
+  genotypes 0 / 0.5 / 1, heterozygotes split into two 0/1 codings, missing calls at the SNP mean, diagonal
+  1), checked against a transliteration of EMMA's R code and against EMMA's output from R on a fixture.
+  `pylmm kinship` writes bit for bit the `calculate_kinship` of the same raw genotypes (for `centered`, of
+  twice them) at the same block size (`--block-size` defaults to the library's `KINSHIP_BLOCK_SIZE`, 1000).
+  `standardized` is GEMMA `-gk 2`'s formula only on complete genotypes: GEMMA standardises after mean
+  imputation (1.0.0's library convention) and by default drops SNPs with MAF < 0.01 or missingness > 0.05
+  before both `-gk 1` and `-gk 2`.
 - `kinship_scale(K)` -> `KinshipScale(mean_diag, centered_mean_diag)` (`trace(K)/n`, `trace(PKP)/(n-1)`), the
   scale of the h fitted with K (PVE = `h c / (h c + 1 - h)`); `pylmm kinship -v` logs both, and the number
-  of SNPs used. `KinshipAccumulator`: build any kind one SNP at a time.
+  of SNPs used. `KinshipAccumulator`: build any kind one SNP at a time; it sums the blocks in place (two
+  n x n arrays plus an n x block buffer; `tracemalloc` peak of `calculate_kinship` at n = 3000, 2500 SNPs:
+  172 MB standardized / centered, 206 MB IBS).
 - `calculate_kinship(..., legacy=True)` and `pylmm kinship --legacy-kinship`: the 1.0.0 kinships, byte for
   byte (checked on the bundled BED and HMDP data and a synthetic BED with missing calls and constant SNPs,
   against v1.0.0 and the phase6 base, at block sizes 1000 and 300).

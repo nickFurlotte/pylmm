@@ -224,8 +224,8 @@ SNPs, to the last bit at the same block size. Three kinds (`kind=` / `--kinship-
 
 | kind | K | use |
 |---|---|---|
-| `standardized` (default) | `Z Z' / m`, `Z` the SNPs standardised to mean 0 and variance 1 (GCTA-style GRM, GEMMA `-gk 2`) | most analyses |
-| `centered` | `C C' / m`, `C` the centred SNPs, not scaled (GEMMA `-gk 1`); the CLI counts 0/1/2 copies of A2 | matching GEMMA's default |
+| `standardized` (default) | `Z Z' / m`, `Z` the SNPs standardised to mean 0 and variance 1 (a GRM; GEMMA `-gk 2`'s formula on complete genotypes) | most analyses |
+| `centered` | `C C' / m`, `C` the centred SNPs, not scaled (GEMMA `-gk 1`'s formula on 0/1/2 counts); the CLI counts 0/1/2 copies of A2 (an `--emma-geno` file must be coded 0/0.5/1) | matching GEMMA's default |
 | `ibs` | EMMA's identity-by-state kinship: the share of alleles two individuals have in common, diagonal 1 (Kang et al. 2008) | matching EMMA-era inbred-panel papers |
 
 One convention for missing calls: each SNP is centred (and, for `standardized`, scaled) with the mean and
@@ -234,6 +234,12 @@ does; `ibs` follows EMMA (missing calls at the SNP's mean). SNPs with no called 
 `standardized` and `centered` constant SNPs, are skipped and not counted in `m`. Give
 `calculate_kinship` the raw genotypes (`norm_genotype=False`, or 0/1/2 counts): a matrix already
 standardised by the reader has its missing calls at 0 and is standardised again.
+
+GEMMA is close but not identical: it mean-imputes a missing call and then (for `-gk 2`) scales by the SD
+over all individuals *after* imputation, which is pylmm 1.0.0's library convention (mean diagonal 1 with
+missing calls), and by default it first drops SNPs with MAF < 0.01 or missingness > 0.05. So
+`standardized` equals GEMMA's `-gk 2` only on complete genotypes passing those filters; `centered`
+equals `-gk 1` (0/1/2 counts) on SNPs passing them.
 
 ```python
 from pylmm.kinship import calculate_kinship, kinship_scale

@@ -86,7 +86,8 @@ Getting their K's mean diagonal:
 
 * **Compute their K** from the same genotypes when you can (the tool itself, or the formula). GCTA's GRM
   (also plink2 `--make-grm-bin`) has diagonal `1 + F`: **≈ 1 in outbred samples, ≈ 2 in inbred lines**
-  (F ≈ 1; 1.99 on the bundled mice). GEMMA `-gk 2` (standardised) is ≈ 1 when outbred; GEMMA `-gk 1`
+  (F ≈ 1; 1.99 on the bundled mice). GEMMA `-gk 2` (standardised; it mean-imputes before scaling, so its diagonal stays ≈ 1 with missing
+  calls, and it drops MAF < 0.01 / missingness > 0.05 SNPs by default) is ≈ 1 when outbred; GEMMA `-gk 1`
   (centred, not standardised) has diagonal ≈ the mean of `2p(1-p)(1+F)` over SNPs, well below 1:
   compute it.
 * pylmm's default `calculate_kinship` / `pylmm kinship` (`kind="standardized"`) have mean diagonal ≈ 1
