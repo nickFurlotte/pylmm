@@ -95,14 +95,15 @@ Options that matter:
 | option | default | when to change it |
 |---|---|---|
 | `--reml` / `--ml` | REML | ML only to match a method that used ML; ML is ill-posed for a centred K from more SNPs than individuals |
-| `--refit` | off (fit h once, EMMAX/P3D) | a few strong-effect SNPs; slow (a likelihood search per SNP); same power in the simulation studies; **can abort at high h²** (per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md)): avoid it when the null h is near 0.99 (fixed since: the per-SNP search is bounded and covers [0, 1]) |
+| `--refit` | off (fit h once, EMMAX/P3D) | strong-effect loci (the null fit absorbs part of a big SNP's effect, so P3D is conservative there), or to match EMMA / GEMMA (`-lmm 1`); the exact per-SNP fit, a block at a time (10-40x the cost of the default scan; `--no-batch` or `--legacy-fit`: the old grid search per SNP, 8-46x slower still). A little more power than the default (S9), slightly anti-conservative at n ~ 100. (pylmm ≤ 1.0.0's per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md); fixed since) |
+| `--test wald\|lrt\|score` | `wald` | `lrt`: likelihood ratio of ML fits with and without the SNP, chi2(1) (GEMMA `-lmm 2`; always ML; anti-conservative at small n, 2-2.4x in the 1e-4 / 1e-5 tail at n = 100); `score`: at the null fit (GEMMA `-lmm 3`; not with `--refit`), the default scan's ranking with conservative tail p-values ([S9](../../sims/studies/s9_tests.md)). `F_STAT` is then the signed root of the statistic (`interpret-gwas-results`) |
 | `--covar F --covar-name a b` | none | covariates; the intercept is added unless `--no-intercept` |
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
 | `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; changes BETA's scale) |
 | `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`; the file carries the sample IDs, which must be the tested individuals: an error otherwise) |
 | `--block-size N` | 1024 | SNPs read (a BED file is decoded a block at a time) and tested together (one matrix product per block); lower it if memory is tight (about 6-8 × n × N floats) |
-| `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower); `--refit` and SNPs with missing calls always run this way. With well-conditioned covariates both give the same numbers up to rounding (within ~1e-9 relative); with a badly scaled covariate (a raw date or year column) they can differ by up to a few 1e-6 relative, and the batched default is the more accurate. Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are the same, and both paths are then accurate |
+| `--no-batch` | batched | one SNP at a time, the pylmm 1.0.0 code path (slower; with `--refit`, the grid search per SNP); SNPs with missing calls always run this way. With well-conditioned covariates both give the same numbers up to rounding (within ~1e-9 relative); with a badly scaled covariate (a raw date or year column) they can differ by up to a few 1e-6 relative, and the batched default is the more accurate. Centre or scale such covariates (`(c - c.mean()) / c.std()`): the model and its tests are the same, and both paths are then accurate |
 
 The same scan in Python, when you need the arrays (subsets, loops, other covariates):
 

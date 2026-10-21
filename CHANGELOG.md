@@ -99,8 +99,38 @@ maps them).
   `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
   matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
 - `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
+- Association tests (GEMMA's `-lmm 1/2/3`): `gwas(..., test="wald" | "lrt" | "score")` and
+  `pylmm gwas --test {wald,lrt,score}` (default `wald`, unchanged). `lrt`: likelihood ratio of ML fits with
+  and without each SNP, chi2(1), always ML (`LMM.lrt_batch`); `score`: the score test at the null fit,
+  F(1, n - q - 1), not with `--refit` (`LMM.score_batch`). `LMM.association_tests(X, test, reml, refit,
+  batch)` dispatches; `pylmm.lmm.TESTS`, `check_test`. The output columns are unchanged: for `lrt` and
+  `score` `F_STAT` is the signed square root of the statistic (`BETA` / `BETA_SD`: the ML fit's for `lrt`,
+  the null model's one-step estimate for `score`). On the same data and kinship the p-values equal GEMMA
+  0.98.5's to its 6 printed digits (pylmm `--refit`, `--test lrt`, `--test score --ml`); GEMMA centres
+  every K, which matters only for its ML fits.
+- `LMM.fit_snps(X, reml=True, ngrids=100)` -> `SnpFitResult(h, ll, t, p, beta, beta_var)`: the exact
+  per-SNP fit for a block of SNPs (below).
+- `sims/bench/refit.py` (`just bench refit [--quick]`) and `sims/studies/s9_tests.py`
+  (`just sim s9_tests [--quick]`; write-up `sims/studies/s9_tests.md`): the refit's speed and agreement,
+  and the calibration, power and cost of the four tests.
 
 ### Changed
+#### Exact per-SNP refit
+- `gwas(refit=True)` / `pylmm gwas --refit`: `LMM.fit(X=x)` per SNP (a 101-point grid and a bounded Brent
+  search per peak, ~130 scalar likelihood evaluations per SNP) -> `LMM.fit_snps`, a block of SNPs at a
+  time: the grid of every SNP as matrix products, then a vectorised safeguarded Newton-Raphson on the
+  analytic first and second derivatives of the rotated likelihood (Zhou & Stephens 2012) inside each grid
+  peak's bracket, falling back to the scalar search for a bracket without a sign change of the
+  derivative or a Newton run that does not converge. Same candidates and tie rule, so the same maximum:
+  |dh| <= 3.6e-7 and |d log-likelihood| <= 2.9e-12 against the per-SNP search on 28,800 fits of S9, and
+  within 3.3e-10 of the dense oracle's maximum; t and p move by at most ~6e-7 relative (the grid search's
+  stopping error). Speedup over the per-SNP search (`sims/bench/refit.py`, single-threaded BLAS, arm64): 26-46x at n = 300 (2000 SNPs), 11-14x at n = 1000, 8-13x at n = 2000; the refit then costs 9.5-12x a default scan.
+- `--refit --no-batch` / `gwas(refit=True, batch=False)` and `--legacy-fit --refit` keep the per-SNP grid
+  search, so `--legacy-fit --no-batch` is still 1.0.0's output byte for byte.
+- `association_batch`'s docstring: "batched vs per SNP <= 1.3e-15 of max |t|" -> that holds for a centred
+  kinship; with many null directions (strain means expanded to animals) at h >= 1 - 1e-7 the per-SNP path
+  drifts by up to ~3e-10 of max |t| and the batched values are the accurate ones.
+
 - `pylmm kinship --eigen-npz`: arrays `Kva`, `Kve` -> also `fid`, `iid` (the samples of Kve's rows; not for
   EMMA input) and `kinship_type` (plain arrays, no pickle; 1.0.0 readers still find `Kva` and `Kve`).
 - `pylmm gwas --eigen`: the decomposition was used only if no individual was dropped or reordered, its rows
@@ -160,8 +190,8 @@ maps them).
   the same and both paths are then accurate.
 - Which SNPs are tested (nan for constant, collinear or untestable SNPs) is unchanged: the block check makes
   exactly the decisions of `snp_estimable`.
-- SNPs with missing calls (tested on their called individuals) and `refit=True` / `--refit` still test one SNP
-  at a time.
+- SNPs with missing calls (tested on their called individuals) still test one SNP at a time; `refit=True`
+  / `--refit` did too (until the exact refit, above).
 - `pylmm gwas` writes each result line, in file order, as soon as it is known. If a SNP's test fails, every
   SNP before it has its line and no later one does, as in 1.0.0 (byte for byte with `--no-batch`); if the
   reader fails mid-file, the SNPs read before the failure are tested and written first. No SNP is tested

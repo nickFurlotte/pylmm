@@ -87,7 +87,11 @@ strain means are different models with different h² and p-values (`estimate-her
 
 **Variance fit: per-SNP refit vs null only.** EMMA and GEMMA's exact test refit the variance components
 for every SNP; EMMAX, P3D and pylmm's default fit them once without SNPs. The refit is the closer match
-to an EMMA paper (`gwas(..., refit=True)`, `pylmm gwas --refit`, or `fit(X=x)` then `association(x)`):
+to an EMMA paper (`gwas(..., refit=True)`, `pylmm gwas --refit`, or `fit(X=x)` then `association(x)`).
+GEMMA's `-lmm 1` / `2` / `3` are pylmm's `--refit`, `--test lrt` and `--test score --ml`: on the same
+data and K, the p-values agree to GEMMA's 6 printed digits (Phase 6.5, GEMMA 0.98.5). GEMMA centres every
+kinship first; that changes nothing under REML with an intercept, but its ML fits (LRT, score) then often
+sit at its bound lambda = 1e5, so give pylmm the centred K too when comparing those:
 
 ```python
 x = G[:, 0]

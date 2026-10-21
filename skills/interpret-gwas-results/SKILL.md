@@ -26,6 +26,27 @@ Tab-separated, one line per `.bim` SNP, in `.bim` order:
 
 All four values are `nan` for an untestable SNP (constant, collinear with covariates, all missing).
 
+**Other tests** (`--test`, `gwas(test=...)`): with `--test lrt`, `F_STAT` is the signed square root of the
+likelihood-ratio statistic and `P_VALUE` is from chi2(1); `BETA` / `BETA_SD` come from the ML fit with the
+SNP, so `BETA / BETA_SD` is not `F_STAT`. With `--test score`, `F_STAT` = `BETA / BETA_SD` is the signed
+root of the score statistic (null-model variance), `P_VALUE` from t(n - q - 1) (GEMMA's F(1, n - q - 1)).
+Which to use:
+
+* **Wald, null fit (default)**: the genome-wide scan. Calibrated in the simulations (`sims/studies/s9_tests.md`).
+* **Wald with `--refit`**: at strong loci, where the null fit's h absorbed part of the SNP's effect and the
+  default p-value is conservative; and to compare with EMMA or GEMMA (`-lmm 1` is a refitted Wald test).
+  Slightly anti-conservative at n ~ 100 (1.2-1.4x the nominal rate at 1e-4 / 1e-5 in S9).
+* **LRT** (`--test lrt`, GEMMA `-lmm 2`): ML, chi2(1) with no small-sample correction: anti-conservative
+  at small n (n = 100: λ_GC 1.06-1.14, 2-2.4x the nominal rate at 1e-4 and 1e-5 in S9) and where its ML
+  fits sit at h = 1, which happens with a centred kinship (λ_GC 1.10-1.13 at h² = 0.8, n = 300; GEMMA's
+  fits sit at its bound lambda = 1e5 the same way).
+* **Score** (`--test score`, GEMMA `-lmm 3` with `--ml`): a monotone function of the default Wald
+  statistic (same ranking), conservative in the tail (n = 100: 0.1x the nominal rate at 1e-5); it never
+  fits a SNP's model.
+
+A SNP significant under one test and far from it under another is a SNP to look at (a strong effect, a
+boundary h, few distinct genotypes).
+
 ```python
 import sys
 import numpy as np
