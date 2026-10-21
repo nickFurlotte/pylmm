@@ -11,9 +11,9 @@ import pytest
 from synthetic_bed import write_synthetic_bed
 
 from pylmm import cli
-from pylmm.kinship import calculate_kinship
+from pylmm.kinship import calculate_kinship, finish_kinship
 from pylmm.lmm import gwas
-from pylmm.loco import LocoKinship, gwas_loco
+from pylmm.loco import LocoKinship, gwas_loco, loco_memory_bytes, normalize_chrom
 from pylmm.plink_io import PlinkReader
 
 KINDS = ("standardized", "centered", "ibs")
@@ -176,11 +176,17 @@ def test_gwas_loco_other_chromosome_and_errors():
     chrom = np.repeat(["1", "2"], 100)
     loco = LocoKinship.from_genotypes(G, chrom)
     Y = np.random.default_rng(7).normal(size=50)
-    # SNPs on a chromosome the kinships do not have: tested with the all-SNP K
-    t, p, hh = gwas_loco(Y, G[:, :10], ["X"] * 10, kinships=loco)
-    t_all, _ = gwas(Y, G[:, :10], loco.kinship())
-    np.testing.assert_array_equal(t, t_all)
-    assert list(hh) == ["X"]
+    # A chromosome the kinships do not have is an error (review S-2), not the all-SNP K
+    with pytest.raises(ValueError, match=r"chromosome\(s\) 'X' of chroms have no SNP in kinships"):
+        gwas_loco(Y, G[:, :10], ["X"] * 10, kinships=loco)
+    with pytest.raises(ValueError, match="'3', '4'"):
+        gwas_loco(Y, G[:, :20], ["3"] * 10 + ["4"] * 10, kinships=loco)
+    # ... but another spelling of the same chromosome is the same chromosome
+    t_chr, p_chr, _ = gwas_loco(Y, G, np.repeat(["chr01", "chr2"], 100), kinships=loco)
+    t_one, p_one, _ = gwas_loco(Y, G, chrom, kinships=loco)
+    np.testing.assert_array_equal(p_chr, p_one)
+    t1, _ = gwas(Y, G[:, :100], loco.kinship("1"))
+    np.testing.assert_array_equal(t_chr[:100], t1)
     with pytest.raises(ValueError, match="one chromosome per SNP"):
         gwas_loco(Y, G, chrom[:5])
     with pytest.raises(ValueError, match="kinships are for 50 individuals but Y has 49"):
@@ -189,6 +195,26 @@ def test_gwas_loco_other_chromosome_and_errors():
         gwas_loco(Y, G, ["1"] * 200)
     all_nan = gwas_loco(np.full(50, np.nan), G, chrom)
     assert np.isnan(all_nan.p_values).all() and all_nan.h == {}
+
+
+def test_chromosome_labels_normalised():
+    assert [normalize_chrom(c) for c in ["chr1", "CHR01", 1, "001", "0", "chrX", "x", "chrM"]] == [
+        "1", "1", "1", "1", "0", "X", "X", "MT"
+    ]  # fmt: skip
+    assert normalize_chrom("Un_gl000220") == "Un_gl000220" and normalize_chrom("chr") == "chr"
+    G = _genotypes(8, n=40, m=90)
+    raw = np.array(["1"] * 30 + ["chr1"] * 10 + ["02"] * 25 + ["2"] * 25, dtype=object)
+    with pytest.warns(UserWarning, match=r"'1', 'chr1' -> 1; '02', '2' -> 2"):
+        loco = LocoKinship.from_genotypes(G, raw)
+    assert loco.chromosomes == ("1", "2") and loco.kinship("chr1").shape == (40, 40)
+    k_ref = calculate_kinship(G[:, 40:])
+    _assert_k_close(loco.kinship("01"), k_ref, "normalised leave-out")
+
+
+def test_finish_kinship_needs_snps():
+    with pytest.raises(ValueError, match="no SNP was used"):
+        finish_kinship(np.zeros((3, 3)), "standardized", 0)
+    assert loco_memory_bytes(1000, 10) == 16 * 1000 * 1000 * 8
 
 
 # ---------------------------------------------------------------------------
@@ -424,3 +450,51 @@ def test_cli_loco_readme_data(tmp_path):
     del raw
     t, p = gwas(y, Z, loco.kinship("19"))
     h.assert_batch_close(vals[on, 3], p, what="p, chromosome 19")
+
+
+def test_cli_loco_chromosome_guards(tmp_path):
+    """Review S-3: the chromosome cap, a map read from the wrong column, label spellings, memory."""
+    base, raw, y = _bed_with_pheno(tmp_path, n=40, m=60, seed=16)
+    out = str(tmp_path / "o.tsv")
+    argv = ["gwas", "-v", "--bfile", base, "--pheno", base + ".phen", "--loco", "-o", out]
+    # 3 chromosomes, the cap at 2
+    err = _err([*argv, "--loco-max-chroms", "2"], rc=2)
+    assert "3 chromosomes (1, 2, 3, ...), more than --loco-max-chroms 2" in err
+    assert "--loco-max-chroms applies only to --loco" in _err(
+        ["gwas", "--bfile", base, "--pheno", base + ".phen", "--kinship", "k", "--loco-max-chroms",
+         "5", "-o", out], rc=2,
+    )  # fmt: skip
+    # mixed spellings of one chromosome are merged, with a warning; the memory estimate is logged
+    _rewrite_bim_chroms(base, ["1"] * 15 + ["chr1"] * 15 + ["02"] * 30)
+    log = _err(argv)
+    assert "treated as one chromosome: '1', 'chr1' -> 1" in log
+    assert "--loco: 60 SNPs on 2 chromosomes (1, 2)" in log
+    assert "the kinships of 2 chromosomes for 40 individuals need about" in log
+    # the chromosome lines come before the progress of their block
+    log_lines = log.splitlines()
+    first_chrom = next(i for i, x in enumerate(log_lines) if "chromosome 1: K from" in x)
+    assert all("At SNP" not in x for x in log_lines[:first_chrom])
+    # many one-SNP chromosomes: a warning
+    _rewrite_bim_chroms(base, ["1"] * 50 + [str(c) for c in range(2, 12)])
+    assert "10 of the 11 chromosomes have fewer than 2 SNPs" in _err(argv)
+    # every SNP its own chromosome (SNP IDs read as chromosomes): an error
+    _rewrite_bim_chroms(base, ["rs%d" % j for j in range(60)])
+    err = _err([*argv, "--loco-max-chroms", "1000"], rc=2)
+    assert "every one of the 60 SNPs is on a chromosome of its own" in err
+    # an EMMA map without a header whose first column is a SNP ID
+    emma = h.write_emma_subset(tmp_path, 120)
+    bad = str(tmp_path / "noheader.map")
+    with open(bad, "w") as f:
+        for k in range(120):
+            f.write("rs%d\t1\t%d\n" % (k, 1000 * k))
+    err = _err(
+        ["gwas", "--emma-geno", emma, "--emma-pheno", h.HMDP_Y, "--loco", "--emma-map", bad,
+         "-o", out], rc=2,
+    )  # fmt: skip
+    assert "its first column is read as the chromosome" in err and "SNP IDs" in err
+
+
+def test_cli_missing_kinship_suggests_loco(tmp_path):
+    base, raw, y = _bed_with_pheno(tmp_path, n=40, m=60, seed=17)
+    err = _err(["gwas", "--bfile", base, "--pheno", base + ".phen", "-o", "o.tsv"], rc=2)
+    assert "or --loco to build a leave-one-chromosome-out kinship" in err

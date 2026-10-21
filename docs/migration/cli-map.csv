@@ -51,3 +51,4 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm gwas,--loco,no,new,"leave one chromosome out: each chromosome's SNPs tested with a kinship built from the other chromosomes' SNPs (GCTA --mlma-loco), computed from the genotypes; replaces --kinship/--grm/--eigen; added after 1.0.0"
 ,,,pylmm gwas,--kinship-type,yes,new,"{standardized,centered,ibs}; with --loco only: the kinship built, as pylmm kinship --kinship-type; default standardized; added after 1.0.0"
 ,,,pylmm gwas,--emma-map,yes,new,"with --loco and --emma-geno: the chromosome of each EMMA row (a header naming a chr column, or a PLINK .map); added after 1.0.0"
+,,,pylmm gwas,--loco-max-chroms,yes,new,"with --loco: refuse more than N chromosomes (default 100); added after 1.0.0"
