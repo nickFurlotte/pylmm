@@ -218,3 +218,77 @@ def test_cli_emma_ibs_matches_library(tmp_path, hmdp):
     np.testing.assert_array_equal(
         np.loadtxt(str(tmp_path / "k")), calculate_kinship(snps, kind="ibs")
     )
+
+
+def test_ibs_matches_emma_run_in_r():
+    """An external anchor: EMMA's own ``emma.kinship(snps, "additive", "all")`` (emma.R, as in
+    Gregor-Mendel-Institute/MultLocMixMod misc/emma.r), run in R 4.4.2 on this 5 SNP x 4
+    individual matrix (hets, a missing call, an all-missing SNP, a constant SNP); its output
+    printed with 17 significant digits (the PR #26 review's hand-built case)."""
+    snps = np.array(
+        [
+            [0, 0.5, 1, 1],
+            [0.5, 0.5, np.nan, 0],
+            [1, 1, 1, 1],
+            [np.nan, np.nan, np.nan, np.nan],
+            [0.5, 0.5, 0, 1],
+        ]
+    )
+    k_r = np.array(
+        [
+            [1.0, 0.875, 0.70833333333333326, 0.375],
+            [0.875, 1.0, 0.83333333333333337, 0.5],
+            [0.70833333333333326, 0.83333333333333337, 1.0, 0.66666666666666663],
+            [0.375, 0.5, 0.66666666666666663, 1.0],
+        ]
+    )
+    np.testing.assert_allclose(calculate_kinship(snps.T, kind="ibs"), k_r, rtol=0, atol=1e-15)
+    np.testing.assert_allclose(emma_kinship_reference(snps), k_r, rtol=0, atol=1e-15)
+
+
+def test_ibs_error_names_the_column():
+    G = np.zeros((4, 3))
+    G[1, 2] = 2.0
+    with pytest.raises(ValueError, match="SNP column 2 of W"):
+        calculate_kinship(G, kind="ibs")
+
+
+def test_reader_standardised_input_is_not_the_cli_k(tmp_path):
+    """Raw genotypes (norm_genotype=False) give `pylmm kinship`'s K; genotypes the reader has
+    already standardised (its default) are standardised again and, with missing calls, do not."""
+    from pylmm.plink_io import PlinkReader
+
+    base = str(tmp_path / "s")
+    write_synthetic_bed(base, 60, 400, missing=0.10, seed=3)
+    h.run_cli(["kinship", "--bfile", base, "-o", "k"], tmp_path)
+    k_cli = np.loadtxt(str(tmp_path / "k"))
+    with PlinkReader(base, norm_genotype=False) as r:
+        raw = np.column_stack([g for g, _ in r.iter_snps()])
+    with PlinkReader(base) as r:
+        std = np.column_stack([g for g, _ in r.iter_snps()])
+    np.testing.assert_array_equal(calculate_kinship(raw), k_cli)
+    assert np.abs(calculate_kinship(std) - k_cli).max() > 0.02
+    assert kinship_scale(calculate_kinship(std)).mean_diag == pytest.approx(1.0)
+
+
+def test_accumulator_finishes_and_scale():
+    G = _panel(het=0.2, seed=9)
+    acc = KinshipAccumulator(G.shape[0], kind="centered", scale=2.0, block_size=7)
+    for g in G.T:
+        acc.add(g)
+    K = acc.result()
+    assert acc.result() is K
+    with pytest.raises(RuntimeError, match="finished"):
+        acc.add(G[:, 0])
+    np.testing.assert_allclose(K, 4 * calculate_kinship(G, kind="centered"), rtol=1e-12)
+    with pytest.raises(ValueError, match="scale"):
+        KinshipAccumulator(3, scale=2.0)
+
+
+def test_cli_centered_warns_on_emma_counts(tmp_path):
+    emma = tmp_path / "g.txt"
+    emma.write_text("0 1 2 1\n1 0 1 2\n2 2 0 1\n")
+    log = h.run_cli(
+        ["kinship", "--emma-geno", str(emma), "--kinship-type", "centered", "-o", "k"], tmp_path
+    )
+    assert "3 SNPs have values above 1" in log and "4 times" in log

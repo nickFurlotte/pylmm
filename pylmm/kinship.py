@@ -10,12 +10,15 @@ Three kinds of kinship (``kind=`` of `calculate_kinship`, ``--kinship-type``
 of ``pylmm kinship``):
 
 ``"standardized"`` (the default)
-    The standardized relatedness matrix (GCTA-style GRM, GEMMA ``-gk 2``):
-    every SNP is centred and scaled to unit variance, ``K = Z Z' / m``.
+    The standardized relatedness matrix: every SNP is centred and scaled to
+    unit variance, ``K = Z Z' / m``.  On complete genotypes this is the
+    formula of GEMMA ``-gk 2`` (and a GCTA-style GRM with the sample variance
+    in place of ``2p(1-p)``); see *Other tools* below for missing calls.
 ``"centered"``
-    The centred relatedness matrix (GEMMA ``-gk 1``): every SNP is centred,
-    not scaled, ``K = C C' / m``, so common SNPs weigh more than rare ones and
-    the scale of K depends on the genotype coding.
+    The centred relatedness matrix: every SNP is centred, not scaled,
+    ``K = C C' / m``, so common SNPs weigh more than rare ones and the scale
+    of K depends on the genotype coding (GEMMA ``-gk 1``'s formula on 0/1/2
+    counts).
 ``"ibs"``
     EMMA's identity-by-state kinship (Kang et al. 2008), the kinship of the
     EMMA-era inbred mouse panel papers: the share of alleles two individuals
@@ -42,6 +45,18 @@ skipped them too but still counted them in ``m``, which shrank K: bug 8;
 ``legacy=True`` / ``pylmm kinship --legacy-kinship`` reproduce it.)  For
 ``"ibs"`` a constant SNP counts, as in EMMA: it is identical by state for
 every pair, which is part of that kinship's definition.
+
+**Other tools.**  GEMMA (``PlinkKin`` in ``src/gemma_io.cpp``) mean-imputes
+a missing call and then, for ``-gk 2``, scales by the SD over all
+individuals *after* imputation, which is pylmm 1.0.0's library convention
+(``legacy=True``, except that 1.0.0 also counted skipped SNPs in ``m``), so
+with missing calls GEMMA's ``-gk 2`` has a mean diagonal of 1 where
+``"standardized"`` has about 1 - the missing rate.  Its ``-gk 1`` centres
+the mean-imputed counts as ``"centered"`` does.  GEMMA also uses only the
+SNPs that pass its filters (by default MAF >= 0.01 and missingness <= 0.05)
+and divides by their number; pylmm does not filter.  So the two agree
+only on SNPs that pass those filters, and for ``-gk 2`` only without
+missing calls.
 
 The **scale** of K sets the scale of the heritability ``h`` fitted with it
 (the share of the variance carried by K): `kinship_scale` reports it.
@@ -194,9 +209,11 @@ class KinshipAccumulator:
 
     Feed the *raw* genotype vector of every SNP to `add`, then call
     `result`.  The used SNPs are packed into blocks of ``block_size``
-    columns, and ``W W'`` is summed over blocks, so memory is a few ``n x
-    block_size`` arrays plus K, and the result depends on the block size
-    only through rounding.
+    columns, and ``W W'`` is summed over blocks in place, so memory is an
+    ``n x block_size`` buffer plus two ``n x n`` arrays (the sum and one
+    block's product), and the result depends on the block size only
+    through rounding.  `result` turns the sum into K in place: after it,
+    the accumulator is finished (`add` raises, `result` returns the same K).
 
     Parameters
     ----------
@@ -209,6 +226,12 @@ class KinshipAccumulator:
     legacy : bool, default False
         ``kind="standardized"`` only: divide by the number of SNPs *added*
         rather than used, as ``pylmm kinship`` 1.0.0 did (bug 8).
+    scale : float, default 1.0
+        ``kind="centered"`` only: multiply each centred SNP by ``scale``
+        (``pylmm kinship`` passes 2: the readers' 0 / 0.5 / 1 fractions
+        counted as 0 / 1 / 2 copies), so K is ``scale**2`` times the K of
+        the genotypes as given.  Which SNPs are constant is decided on the
+        genotypes as given.
 
     Attributes
     ----------
@@ -236,11 +259,15 @@ class KinshipAccumulator:
         kind: KinshipKind = "standardized",
         block_size: int = KINSHIP_BLOCK_SIZE,
         legacy: bool = False,
+        scale: float = 1.0,
     ) -> None:
         self.kind = _check_kind(kind)
         if legacy and kind != "standardized":
             raise ValueError("legacy applies to kind='standardized' only")
+        if scale != 1.0 and kind != "centered":
+            raise ValueError("scale applies to kind='centered' only")
         self.legacy = legacy
+        self.scale = float(scale)
         self.n = int(n)
         block_size = check_block_size(block_size)
         # IBS adds EMMA's two codings of each SNP: two columns per SNP.
@@ -250,15 +277,24 @@ class KinshipAccumulator:
         self._W = np.ones((self.n, self._width)) * np.nan
         self._j = 0  # columns in the buffer
         self._flushed = 0  # SNPs added when the buffer was last summed into K
-        self._S: FloatArray | None = None
+        self._S: FloatArray | None = None  # the sum of the blocks' W W'
+        self._ww: FloatArray | None = None  # one block's W W' (reused)
+        self._K: FloatArray | None = None  # the result, once computed
         self._rowsum = np.zeros(self.n)  # IBS: sum over columns of the codings
         self.n_snps = 0
         self.n_used = 0
         self.n_all_missing = 0
 
     def _flush(self, W: FloatArray) -> None:
-        ww: FloatArray = np.dot(W, W.T)
-        self._S = ww if self._S is None else self._S + ww
+        # In place: S += W W' gives the same bits as S + W W' (pylmm 1.0.0)
+        # without a third n x n temporary.
+        if self._S is None:
+            self._S = np.dot(W, W.T)
+        else:
+            if self._ww is None:
+                self._ww = np.empty((self.n, self.n))
+            np.dot(W, W.T, out=self._ww)
+            self._S += self._ww
         self._j = 0
         self._flushed = self.n_snps
 
@@ -286,6 +322,8 @@ class KinshipAccumulator:
             If ``g`` has the wrong length, or for ``"ibs"`` a value other
             than 0, 0.5, 1 or nan.
         """
+        if self._K is not None:
+            raise RuntimeError("result() was called: the accumulator is finished")
         x = np.asarray(g, dtype=np.float64)
         if x.shape != (self.n,):
             raise ValueError(
@@ -322,43 +360,57 @@ class KinshipAccumulator:
         mu = obs.mean()
         if np.ptp(obs) <= 1e-12 * max(1.0, abs(mu)):  # constant, as normalize_genotype
             return False
-        self._push(np.where(called, x - mu, 0.0))
+        if self.scale == 1.0:
+            self._push(np.where(called, x - mu, 0.0))
+        else:
+            # scale * (x - mu): the same bits as centring scale * x (2 is exact)
+            self._push(np.where(called, self.scale * (x - mu), 0.0))
         self.n_used += 1
         return True
 
     def result(self) -> FloatArray:
-        """The ``(n, n)`` kinship of the SNPs added so far.
+        """The ``(n, n)`` kinship of the SNPs added (computed in place, once).
 
         Raises
         ------
         ValueError
             If no SNP was added, or (except with ``legacy``) none was used.
         """
+        if self._K is not None:
+            return self._K
         if self.n_snps > self._flushed:  # the SNPs after the last full block
             self._flush(self._W[:, list(range(0, self._j))])
         if self.n_snps == 0:
             raise ValueError("no SNP was given; cannot compute a kinship")
-        if self.legacy:
-            assert self._S is not None
-            legacy_k: FloatArray = self._S / float(self.n_snps)
-            return legacy_k
-        if self.n_used == 0:
+        if not self.legacy and self.n_used == 0:
             raise ValueError(
                 "no SNP with a non-constant genotype was given; cannot compute a kinship"
                 if self.kind != "ibs"
                 else "no SNP with a called genotype was given; cannot compute a kinship"
             )
-        assert self._S is not None
-        if self.kind != "ibs":
-            K: FloatArray = self._S / float(self.n_used)
-            return K
-        # EMMA: mean over the 0/1 codings of x_i x_j + (1 - x_i)(1 - x_j)
-        #     = 1 - x_i - x_j + 2 x_i x_j, with a diagonal of 1.
-        m = 2.0 * self.n_used
-        a = self._rowsum
-        K = (m - a[:, None] - a[None, :] + 2.0 * self._S) / m
-        np.fill_diagonal(K, 1.0)
-        return K
+        S = self._S
+        assert S is not None
+        self._ww = None
+        self._W = np.empty((self.n, 0))
+        if self.legacy:
+            S /= float(self.n_snps)
+        elif self.kind != "ibs":
+            S /= float(self.n_used)
+        else:
+            # EMMA: mean over the 0/1 codings of x_i x_j + (1 - x_i)(1 - x_j)
+            #     = 1 - x_i - x_j + 2 x_i x_j, with a diagonal of 1.
+            # (m - a_i - a_j + 2 S_ij) / m, in place, rows in chunks.
+            m = 2.0 * self.n_used
+            a = self._rowsum
+            S *= 2.0
+            for i0 in range(0, self.n, 256):
+                i1 = min(i0 + 256, self.n)
+                S[i0:i1] += (m - a[i0:i1, None]) - a[None, :]
+            S /= m
+            np.fill_diagonal(S, 1.0)
+        self._S = None
+        self._K = S
+        return S
 
 
 def _calculate_kinship_1_0(W: FloatArray) -> FloatArray:
@@ -404,22 +456,32 @@ def calculate_kinship(
     Parameters
     ----------
     W : (n, m) array
-        Genotypes of ``n`` individuals at ``m`` SNPs; ``nan`` marks a missing
-        call.  ``"standardized"``: any additive coding (0/1/2 counts,
-        dosages, the 0/0.5/1 fractions of `pylmm.plink_io.PlinkReader`); K
-        does not depend on it, nor on which allele is counted.
-        ``"centered"``: K is on the scale of the coding (0/1/2 counts give
-        GEMMA's ``-gk 1`` matrix; 0/0.5/1 fractions a quarter of it).
-        ``"ibs"``: 0 / 0.5 / 1 (EMMA's coding; inbred strains are 0 or 1).
-        Not modified.
+        *Raw* genotypes of ``n`` individuals at ``m`` SNPs; ``nan`` marks a
+        missing call.  ``"standardized"``: any additive coding (0/1/2
+        counts, dosages, the 0/0.5/1 fractions of
+        ``PlinkReader(..., norm_genotype=False)``); K does not depend on it,
+        nor on which allele is counted.  ``"centered"``: K is on the scale
+        of the coding (0/1/2 counts give GEMMA's ``-gk 1`` formula; 0/0.5/1
+        fractions a quarter of it).  ``"ibs"``: 0 / 0.5 / 1 (EMMA's coding;
+        inbred strains are 0 or 1).  Not modified.
+
+        Pass raw genotypes to get the K of ``pylmm kinship``.  Genotypes
+        already standardised by `pylmm.plink_io.PlinkReader` (its default,
+        ``norm_genotype=True``) have their missing calls at 0; they are
+        standardised again, over all individuals, which is about pylmm
+        1.0.0's library convention: with missing calls the K differs from
+        the command line's (by up to 0.11 in an entry at 10% missing calls).
     center : bool, default False
         If True, return ``(n - 1) * K / trace(P K P)`` with
         ``P = I - 11'/n``, i.e. K rescaled so that its centred trace is
         ``n - 1`` (Gower's centring scale; `kinship_scale` then reports a
         centred mean diagonal of 1).
     kind : {"standardized", "centered", "ibs"}, default "standardized"
-        ``"standardized"``: the GRM (GCTA-style; GEMMA ``-gk 2``).
-        ``"centered"``: centred, not scaled (GEMMA ``-gk 1``).
+        ``"standardized"``: the standardized relatedness matrix (GRM; GEMMA
+        ``-gk 2``'s formula on complete genotypes).
+        ``"centered"``: centred, not scaled (GEMMA ``-gk 1``'s formula on
+        0/1/2 counts).  For GEMMA's missing-call handling and SNP filters
+        see `pylmm.kinship`, *Other tools*.
         ``"ibs"``: EMMA's identity-by-state kinship, ``emma.kinship(snps,
         method="additive", use="all")`` of the EMMA R package (Kang et al.
         2008, *Genetics* 178:1709): for each SNP, coded ``x`` in {0, 0.5, 1},
@@ -429,8 +491,8 @@ def calculate_kinship(
         two heterozygotes share 1, a heterozygote and a homozygote 0.5, two
         opposite homozygotes 0: the allele-sharing IBS ``1 - |x_i - x_j|``
         (except on a SNP whose mean is exactly 0.5, where EMMA codes a
-        heterozygote 0 in both codings).  A missing call is replaced by the SNP's mean, an all-missing SNP is
-        left out, and constant SNPs count.
+        heterozygote 0 in both codings).  A missing call is replaced by the
+        SNP's mean, an all-missing SNP is left out, and constant SNPs count.
     legacy : bool, default False
         Reproduce pylmm 1.0.0's ``calculate_kinship`` exactly (only with
         ``kind="standardized"``): mean-impute first, then standardise with
@@ -448,7 +510,7 @@ def calculate_kinship(
     ValueError
         If ``W`` is not 2-d, ``kind`` is unknown, ``legacy`` is used with
         another kind, no SNP can be used, or (``"ibs"``) a genotype is not
-        0, 0.5, 1 or nan.
+        0, 0.5, 1 or nan (the message names the column).
 
     Notes
     -----
@@ -484,17 +546,21 @@ def calculate_kinship(
     _check_kind(kind)
     if legacy and kind != "standardized":
         raise ValueError("legacy=True applies to kind='standardized' only")
-    # A copy: the caller's W is not imputed or standardised in place (bug 12).
-    A = np.array(W, dtype=np.float64)
+    # No copy unless needed: the accumulator does not modify its input; the
+    # 1.0.0 code imputes in place, so it gets a copy (bug 12).
+    A = np.asarray(W, dtype=np.float64)
     if A.ndim != 2:
         raise ValueError("W must be 2-d (n individuals x m SNPs), got shape %s" % (A.shape,))
     n = A.shape[0]
     if legacy:
-        K = _calculate_kinship_1_0(A)
+        K = _calculate_kinship_1_0(np.array(A))
     else:
         acc = KinshipAccumulator(n, kind=kind)
         for j in range(A.shape[1]):
-            acc.add(A[:, j])
+            try:
+                acc.add(A[:, j])
+            except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
+                raise ValueError("SNP column %d of W: %s" % (j, e)) from e
         K = acc.result()
     if center:
         P = np.diag(np.repeat(1, n)) - 1 / float(n) * np.ones((n, n))

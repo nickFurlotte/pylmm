@@ -8,10 +8,13 @@
 
 ``--kinship-type`` picks the kinship (`pylmm.kinship`): ``standardized`` (the
 default, ``K = Z Z' / m`` over the standardised SNPs), ``centered`` (centred
-0/1/2 allele counts, GEMMA ``-gk 1``) or ``ibs`` (EMMA's identity-by-state
-kinship).  K is bit for bit `pylmm.kinship.calculate_kinship` of the same
-SNPs at the same block size (the default ``--block-size`` 1000 is the
-library's): missing calls are mean-imputed, and SNPs with no called genotype
+0/1/2 allele counts, not scaled: GEMMA ``-gk 1``'s formula) or ``ibs``
+(EMMA's identity-by-state kinship).  K is bit for bit
+`pylmm.kinship.calculate_kinship` of the same raw genotypes (for
+``centered``, of twice them: the readers' 0 / 0.5 / 1 fractions as 0/1/2
+counts) at the same block size (the default ``--block-size`` is the library's
+`pylmm.kinship.KINSHIP_BLOCK_SIZE`): missing calls are mean-imputed, and SNPs
+with no called genotype
 (and, except for ``ibs``, constant SNPs) are skipped and not counted in ``m``.
 ``--legacy-kinship`` reproduces the K of ``pylmm kinship`` 1.0.0, which still
 counted them (bug 8).  The scale of K (mean diagonal, centred mean diagonal;
@@ -45,7 +48,13 @@ from pylmm.cli._common import (
     log,
     positive_int,
 )
-from pylmm.kinship import KINSHIP_KINDS, KinshipAccumulator, KinshipKind, kinship_scale
+from pylmm.kinship import (
+    KINSHIP_BLOCK_SIZE,
+    KINSHIP_KINDS,
+    KinshipAccumulator,
+    KinshipKind,
+    kinship_scale,
+)
 from pylmm.samples import InputError
 
 FloatArray = NDArray[np.float64]
@@ -117,10 +126,12 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--kinship-type",
         choices=KINSHIP_KINDS,
         default="standardized",
-        help="standardized: the standardized relatedness matrix (GCTA-style GRM, GEMMA -gk 2); "
-        "centered: centred allele counts 0/1/2, not scaled (GEMMA -gk 1); ibs: EMMA's "
-        "identity-by-state kinship, the share of alleles in common (inbred panels; genotypes "
-        "must be 0, 0.5 or 1, as BED, TPED and EMMA 0/1 files are) (default: standardized)",
+        help="standardized: the standardized relatedness matrix (GRM; GEMMA -gk 2's formula on "
+        "complete genotypes); centered: centred allele counts 0/1/2, not scaled (GEMMA -gk 1's "
+        "formula; it counts twice the reader's 0/0.5/1 values, so an --emma-geno file must be "
+        "coded 0/0.5/1, EMMA's coding); ibs: EMMA's identity-by-state kinship, the share of "
+        "alleles in common (inbred panels; genotypes must be 0, 0.5 or 1, as BED, TPED and "
+        "EMMA 0/1 files are) (default: standardized)",
     )
     method.add_argument(
         "--legacy-kinship",
@@ -155,9 +166,10 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--block-size",
         metavar="N",
         type=positive_int,
-        default=1000,
+        default=KINSHIP_BLOCK_SIZE,
         help="the number of SNPs read, and summed into K, at once: a few arrays of n x N floats in "
-        "memory (default: 1000)",
+        "memory (default: %d, the library's, so that K is bit for bit calculate_kinship's)"
+        % KINSHIP_BLOCK_SIZE,
     )
     add_logging_options(p)
     return p
@@ -245,7 +257,9 @@ def compute_kinship(
     `pylmm.kinship.KinshipAccumulator`, fed the raw genotypes: the same K as
     `pylmm.kinship.calculate_kinship` (bit for bit at the same block size).
     For ``kind="centered"`` the genotypes are counted as 0/1/2 copies of A2
-    (twice the reader's fractions), the coding GEMMA's ``-gk 1`` uses.
+    (twice the reader's fractions), the coding of GEMMA's ``-gk 1``: an EMMA
+    file must be coded 0 / 0.5 / 1 for that (a value above 1 is warned
+    about: a 0/1/2-coded file gives 4 times that K).
 
     Parameters
     ----------
@@ -271,13 +285,20 @@ def compute_kinship(
         is not 0, 0.5 or 1.
     """
     acc = KinshipAccumulator(
-        len(reader.indivs), kind=cast(KinshipKind, kind), block_size=block_size, legacy=legacy
+        len(reader.indivs),
+        kind=cast(KinshipKind, kind),
+        block_size=block_size,
+        legacy=legacy,
+        scale=2.0 if kind == "centered" else 1.0,  # 0/0.5/1 fractions -> 0/1/2 counts
     )
     next_report = _REPORT_EVERY
-    scale = 2.0 if kind == "centered" else 1.0
+    check_coding = kind == "centered" and reader.type == "emma"
+    above_one = 0  # centered, EMMA input: SNPs with a value above 1 (not 0/0.5/1 coded)
     for snp in iter_snp_vectors(reader, block_size):
+        if check_coding and np.nanmax(snp, initial=0.0) > 1.0:
+            above_one += 1
         try:
-            acc.add(snp * scale if scale != 1.0 else snp)
+            acc.add(snp)
         except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
             raise UsageError("--kinship-type %s, SNP %d: %s" % (kind, acc.n_snps, e)) from e
         # Progress at INFO every 10000 SNPs, else at DEBUG every block.
@@ -291,6 +312,13 @@ def compute_kinship(
     except ValueError as e:  # no usable SNP
         raise UsageError(str(e)) from e
     log.info("Processed %d SNPs", acc.n_snps)
+    if above_one:
+        log.warning(
+            "--kinship-type centered counts twice the --emma-geno values (0/0.5/1 -> 0/1/2), "
+            "but %d SNPs have values above 1: if the file is coded 0/1/2, K is 4 times "
+            "GEMMA -gk 1's (h is on that scale)",
+            above_one,
+        )
     if acc.n_all_missing:
         log.warning("skipped %d SNPs with no called genotype", acc.n_all_missing)
     skipped = acc.n_snps - acc.n_used - acc.n_all_missing
