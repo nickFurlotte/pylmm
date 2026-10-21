@@ -476,14 +476,16 @@ def test_cli_reader_error_mid_file(tmp_path, monkeypatch, flags):
 
     The failure is tied to SNP 7, however often it is read: a block is read whole, so after
     a failed block `scan` reads it again one SNP at a time.  (A failure on the 7th read only
-    is the transient case of `test_cli_transient_reader_error_is_recovered`.)
+    is the transient case of `test_cli_transient_reader_error_is_recovered`.)  The error is
+    an OSError, which the CLI reports with exit code 2: only data and I/O errors of the block
+    reader are read again one SNP at a time (`test_cli_block_reader_bug_is_not_hidden`).
     """
     from pylmm import plink_io
 
     rc, clean, _ = _inprocess(tmp_path, "clean", flags)
-    patch = (monkeypatch, plink_io.PlinkReader, "__next__", _reading_snp(7), RuntimeError("gone"))
+    patch = (monkeypatch, plink_io.PlinkReader, "__next__", _reading_snp(7), OSError("disk gone"))
     rc, lines, _ = _inprocess(tmp_path, "fail", flags, patch)
-    assert rc == 1 and len(lines) == 7
+    assert rc == 2 and len(lines) == 7
     if flags:  # the same blocks (or none) as the clean run: the same bytes
         assert lines == clean[:7]
     else:  # a block of 6 SNPs, not 20: a different GEMM, the same numbers to rounding
@@ -503,7 +505,7 @@ def test_cli_transient_reader_error_is_recovered(tmp_path, monkeypatch, flags):
     from pylmm import plink_io
 
     rc, clean, _ = _inprocess(tmp_path, "clean", flags)
-    patch = (monkeypatch, plink_io.PlinkReader, "__next__", 7, RuntimeError("disk gone"))
+    patch = (monkeypatch, plink_io.PlinkReader, "__next__", 7, OSError("disk gone"))
     log_file = str(tmp_path / "fail.log")
     rc, lines, _ = _inprocess(tmp_path, "fail", [*flags, "--log-file", log_file], patch)
     # Read again in blocks of the same size (one block of 20 by default): the same bytes.
@@ -578,6 +580,99 @@ def test_cli_bim_the_block_reader_rejects_is_read_one_snp_at_a_time(tmp_path):
         rows = [line.split()[:5] for line in f]
     with open(base + ".bim", "w") as f:
         f.writelines(" ".join(r) + "\n" for r in rows)
-    log, lines = _bed_run(tmp_path, "five", base, [])
+    log, lines = _bed_run(tmp_path, "five", base, ["-v"])
     assert lines == clean
-    assert "reading SNPs in blocks failed from SNP 1" in log and "line 1" in log
+    warning = log.index("reading the SNPs one at a time (slower)")
+    assert "line 1" in log[:warning]
+    assert warning < log.index("Wrote the results")  # said at the start of the scan
+    assert "blocks failed" not in log
+
+
+def _main(argv, out):
+    """Run ``pylmm <argv> -o out`` in this process; (rc, output lines or None)."""
+    from pylmm.cli import main
+
+    rc = main([*argv, "-o", out])
+    if not os.path.exists(out):
+        return rc, None
+    with open(out) as f:
+        return rc, f.read().splitlines()
+
+
+def _clean_inputs(tmp_path):
+    """BED, TPED and EMMA `pylmm gwas` arguments (without -o) on small subsets."""
+    kin = ["--kinship", h.README_KIN, "--pheno", h.FAKE_PHENOS]
+    bed = ["gwas", "-q", "--bfile", h.write_bed_subset(tmp_path, h.BED_GWAS_SMALL_NSNPS), *kin]
+    tped = ["gwas", "-q", "--tfile", h.write_tped_subset(tmp_path, 30), *kin]
+    emma = ["gwas", "-q", "--emma-geno", h.write_emma_subset(tmp_path, 30)]
+    emma += ["--emma-pheno", h.HMDP_Y, "--kinship", h.write_headerless_kinship(tmp_path)]
+    return {"bed": bed, "tped": tped, "emma": emma}
+
+
+@pytest.mark.parametrize("kind", ["bed", "tped", "emma"])
+@pytest.mark.parametrize("flags", [[], ["--block-size", "7"]], ids=["default", "bs7"])
+def test_cli_clean_run_takes_the_block_path(tmp_path, monkeypatch, kind, flags):
+    """A clean BED, TPED or EMMA run never falls back to reading one SNP at a time."""
+    from pylmm.cli import gwas as cli_gwas
+
+    def no_fallback(*a, **kw):
+        raise AssertionError("fell back to reading one SNP at a time")
+
+    monkeypatch.setattr(cli_gwas, "_scan_snps", no_fallback)
+    rc, lines = _main([*_clean_inputs(tmp_path)[kind], *flags], str(tmp_path / "out"))
+    assert rc == 0 and len(lines) > 1
+
+
+@pytest.mark.parametrize("flags", [["--block-size", "7"], ["--block-size", "20"]])
+def test_cli_transient_bed_decode_error_is_recovered(tmp_path, monkeypatch, flags):
+    """An OSError while decoding the 2nd BED block, once: exit 0, a warning, the clean bytes.
+
+    (The fallback stacks per-SNP vectors, C-ordered, where blocks are F-ordered views:
+    the same numbers and the same bytes.)"""
+    from pylmm.plink_io import PlinkReader
+
+    argv = [*_clean_inputs(tmp_path)["bed"], *flags]
+    rc, clean = _main(argv, str(tmp_path / "clean"))
+    assert rc == 0
+    orig = PlinkReader._decode_bed_block.__func__
+    calls = [0]
+
+    def fail_once(cls, *a):
+        calls[0] += 1
+        if calls[0] == 2:
+            raise OSError(5, "Input/output error")
+        return orig(cls, *a)
+
+    monkeypatch.setattr(PlinkReader, "_decode_bed_block", classmethod(fail_once))
+    log_file = str(tmp_path / "fail.log")
+    rc, lines = _main([*argv, "--log-file", log_file], str(tmp_path / "fail"))
+    assert rc == 0 and lines == clean
+    first = int(flags[1]) + 1  # the first SNP of the 2nd block
+    with open(log_file) as f:
+        assert "failed from SNP %d" % first in f.read()
+
+
+@pytest.mark.parametrize("where", ["call", "next"])
+def test_cli_block_reader_bug_is_not_hidden(tmp_path, monkeypatch, where):
+    """An exception from the block reader that is not a data or I/O error (a bug) is raised:
+    no fallback, exit 1."""
+    from pylmm.plink_io import PlinkReader
+
+    orig = PlinkReader.iter_blocks
+
+    def broken(self, block_size):
+        if where == "call":
+            raise TypeError("simulated bug in the block reader")
+        it = orig(self, block_size)
+
+        def gen():
+            yield next(it)
+            raise TypeError("simulated bug in the block reader")
+
+        return gen()
+
+    monkeypatch.setattr(PlinkReader, "iter_blocks", broken)
+    argv = [*_clean_inputs(tmp_path)["bed"], "--block-size", "7"]
+    rc, lines = _main(argv, str(tmp_path / "out"))
+    assert rc == 1
+    assert lines is None or len(lines) <= 1 + 7  # the header and, at most, the first block

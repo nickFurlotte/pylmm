@@ -967,14 +967,18 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     write, the lines already written stay; the SNPs of the current block that
     were read but not yet written get none.
 
-    A block is read whole, so a reader error inside a block (a truncated BED
-    file, a bad TPED or EMMA line, or SNP metadata `iter_blocks` cannot
-    parse) loses the block's earlier SNPs.  The scan then reads the rest of
-    the file one SNP at a time (`_scan_snps`, buffered into blocks of
+    A block is read whole, so a reader error inside a block (an `InputError`
+    such as a truncated BED file or a bad TPED or EMMA line, or an `OSError`)
+    loses the block's earlier SNPs.  The scan then reads the rest of the
+    file one SNP at a time (`_scan_snps`, buffered into blocks of
     ``--block-size`` as before), from the first SNP of that block: the SNPs
     before the error are tested and written and the error is raised, as
     above (an error that does not recur there, e.g. a transient one, is
-    logged as a warning and the scan continues).
+    logged as a warning and the scan continues).  If the SNP metadata
+    `iter_blocks` needs cannot be parsed (a ``.bim`` line with fewer than 6
+    fields, which `iter_snps` reads), the whole scan reads one SNP at a
+    time, with a warning at the start.  Any other exception from the block
+    reader (a bug, not a data or I/O error) is raised as is.
 
     Returns
     -------
@@ -991,8 +995,9 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     blocks: Iterator[tuple[FloatArray, Variants]] | None = None
     try:
         blocks = inputs.reader.iter_blocks(args.block_size)
-    except Exception as e:  # e.g. a .bim the variant metadata cannot parse
-        error = e
+    except _READ_ERRORS as e:  # e.g. a .bim the variant metadata cannot parse
+        log.warning("%s; reading the SNPs one at a time (slower)", e)
+        return _finish(_scan_snps(inputs, L, args, out, Q0, counts, 0), counts)
     try:
         while blocks is not None:
             # Only the reader is guarded: an error in a test or a write is raised as is.
@@ -1000,12 +1005,13 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
                 G, variants = next(blocks)
             except StopIteration:
                 break
-            except Exception as e:
+            except _READ_ERRORS as e:
                 error = e
                 break
             _log_progress(count, G.shape[1])
             count += G.shape[1]
             _write_block(out, G, variants.snp, inputs, L, Q0, args, counts)
+            del G, variants  # before the next block is decoded
     finally:
         close = getattr(blocks, "close", None)
         if close is not None:
@@ -1024,6 +1030,15 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
             restart,
             error,
         )
+    return _finish(count, counts)
+
+
+_READ_ERRORS = (samples.InputError, OSError)
+"""The block reader's data and I/O errors, after which `scan` reads one SNP at a time."""
+
+
+def _finish(count: int, counts: dict[str, int]) -> int:
+    """Log the count of SNPs that are nan for lack of rank; return ``count``."""
     if counts.get("collinear"):
         log.info(
             "%d of %d SNPs are nan because, on the individuals with a called genotype, "
@@ -1070,9 +1085,17 @@ def _scan_snps(
     then the error is raised.
     """
     snps: Iterator[tuple[FloatArray, str]] = iter(inputs.reader)
-    for _ in range(start):  # already written from blocks
-        if next(snps, None) is None:
-            return start
+    # Skip the SNPs already written from blocks; unstandardised, which is
+    # most of the cost of reading a SNP.
+    reader = inputs.reader
+    norm = reader.norm_genotype
+    reader.norm_genotype = False
+    try:
+        for _ in range(start):
+            if next(snps, None) is None:
+                return start
+    finally:
+        reader.norm_genotype = norm
     count = start
 
     def test_and_write(block: list[tuple[FloatArray, str]]) -> None:
