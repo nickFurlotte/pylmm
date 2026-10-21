@@ -79,7 +79,7 @@ True
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Literal, NamedTuple, TypeAlias, cast
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -166,10 +166,10 @@ def kinship_scale(K: ArrayLike) -> KinshipScale:
     return KinshipScale(mean_diag, centered)
 
 
-def _check_kind(kind: str) -> str:
+def _check_kind(kind: str) -> KinshipKind:
     if kind not in KINSHIP_KINDS:
         raise ValueError("kind must be one of %s, got %r" % (", ".join(KINSHIP_KINDS), kind))
-    return kind
+    return cast(KinshipKind, kind)
 
 
 def _check_ibs_coding(g: FloatArray) -> None:
@@ -375,7 +375,9 @@ class KinshipAccumulator:
         return S
 
 
-def snp_columns(x: FloatArray, kind: str, scale: float = 1.0) -> tuple[FloatArray, ...] | None:
+def snp_columns(
+    x: FloatArray, kind: KinshipKind, scale: float = 1.0
+) -> tuple[FloatArray, ...] | None:
     """The columns one SNP adds to the kinship's ``W`` (``K ~ W W'``), or None if it is not used.
 
     The per-SNP step of `KinshipAccumulator`: ``"standardized"``, the
@@ -432,7 +434,7 @@ def snp_columns(x: FloatArray, kind: str, scale: float = 1.0) -> tuple[FloatArra
 
 
 def finish_kinship(
-    S: FloatArray, kind: str, n_used: int, rowsum: FloatArray | None = None
+    S: FloatArray, kind: KinshipKind, n_used: int, rowsum: FloatArray | None = None
 ) -> FloatArray:
     """Turn ``S``, the sum of ``W W'`` over the used SNPs' `snp_columns`, into K, in place.
 
@@ -455,7 +457,15 @@ def finish_kinship(
     -------
     numpy.ndarray
         ``S``, now K.
+
+    Raises
+    ------
+    ValueError
+        If ``n_used`` is not positive (no SNP: K is undefined), or
+        ``kind="ibs"`` without ``rowsum``.
     """
+    if n_used <= 0:
+        raise ValueError("finish_kinship: no SNP was used (n_used=%r); K is undefined" % n_used)
     if kind != "ibs":
         S /= float(n_used)
         return S

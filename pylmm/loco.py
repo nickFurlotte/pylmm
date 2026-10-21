@@ -24,7 +24,7 @@ IBS) and the number of SNPs used ``m_c``, and ``K_{-c}`` is
 `pylmm.kinship.finish_kinship` of ``sum_{d != c} S_d`` and ``sum_{d != c}
 m_d``: the same K as `pylmm.kinship.calculate_kinship` of the other
 chromosomes' SNPs, up to the order of the floating-point sums (the tests
-check it within ``LOCO_KINSHIP_RTOL``).  The rules for which SNPs count in
+check it within ``LOCO_KINSHIP_ATOL_SCALE`` of ``max|K|``).  The rules for which SNPs count in
 ``m`` (no called genotype: never; constant: not for ``"standardized"`` and
 ``"centered"``, yes for ``"ibs"``) are per SNP, so they carry over exactly.
 ``legacy`` (pylmm 1.0.0's K) is not supported.
@@ -32,11 +32,29 @@ check it within ``LOCO_KINSHIP_RTOL``).  The rules for which SNPs count in
 Memory: one ``n x n`` float64 array per chromosome (plus a buffer of
 ``n x block_size`` SNPs and, while a ``K_{-c}`` is built, one more ``n x
 n``): about 230 MB for 1219 individuals and 19 chromosomes, 4 GB for 5000
-individuals and 20 chromosomes.
+individuals and 20 chromosomes (`loco_memory_bytes`).
+
+Chromosome labels are normalised (`normalize_chrom`): a ``chr`` prefix and
+leading zeros are dropped and ``x``, ``y``, ``mt`` / ``m`` are written ``X``,
+``Y``, ``MT``, so ``"chr1"``, ``"01"`` and ``1`` are one chromosome.  Every
+other label is a chromosome of its own, ``"0"`` (unplaced) and ``"MT"``
+included.
 
 `gwas_loco` scans SNP matrices with these kinships, one chromosome at a
 time: a null fit on ``K_{-c}`` (its own ``h``) and the SNPs of ``c`` tested
-by `pylmm.lmm.gwas`.  ``pylmm gwas --loco`` does the same from files.
+by `pylmm.lmm.gwas`.  ``pylmm gwas --loco`` does the same from files.  Its
+cost is one eigendecomposition (``O(n^3)``) and null fit per chromosome:
+about the cost of the all-SNP scan at ``n ~ 1200`` (19 chromosomes), about
+6 times it at ``n = 3000`` (10 chromosomes).
+
+**Reading lambda_GC under LOCO.**  With a polygenic trait, the SNPs linked to
+causal variants on the tested chromosome are no longer explained by K, so
+they are associated: lambda_GC of a LOCO scan rises above 1 without any
+confounding (``sims/studies/s8_loco.md``: about 1.5 on a mouse panel at h2 =
+0.5 with causal SNPs on every chromosome).  It is not a calibration check
+there, and genomic control must not be applied to a LOCO scan (it would
+remove that signal).  Check calibration on a null phenotype (permuted or
+simulated), or on chromosomes without causal variants.
 
 Examples
 --------
@@ -62,6 +80,7 @@ True
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import NamedTuple
 
@@ -79,7 +98,50 @@ from pylmm.kinship import (
 )
 from pylmm.lmm import LMM, _check_phenotype, gwas
 
-__all__ = ["LocoKinship", "LocoResult", "gwas_loco"]
+__all__ = ["LocoKinship", "LocoResult", "gwas_loco", "loco_memory_bytes", "normalize_chrom"]
+
+_CHROM_ALIASES = {"X": "X", "Y": "Y", "XY": "XY", "MT": "MT", "M": "MT"}
+
+
+def normalize_chrom(label: object) -> str:
+    """A chromosome label in one spelling: ``"chr01"``, ``"01"`` and ``1`` are all ``"1"``.
+
+    Drops a ``chr`` prefix (any case) and the leading zeros of a number, and
+    writes ``x``, ``y``, ``xy``, ``mt`` and ``m`` as ``X``, ``Y``, ``XY``,
+    ``MT``, ``MT``.  Anything else is kept as written (``"0"``, contig names).
+    Numbers are not mapped to letters (``"23"`` stays ``"23"``: its meaning
+    depends on the species).
+
+    Examples
+    --------
+    >>> from pylmm.loco import normalize_chrom
+    >>> [normalize_chrom(c) for c in ["chr1", "01", 1, "chrX", "mt", "0", "Un_gl000220"]]
+    ['1', '1', '1', 'X', 'MT', '0', 'Un_gl000220']
+    """
+    s = str(label).strip()
+    if len(s) > 3 and s[:3].lower() == "chr":
+        s = s[3:]
+    if s.isdigit():
+        return str(int(s))
+    return _CHROM_ALIASES.get(s.upper(), s)
+
+
+def loco_memory_bytes(n: int, n_chrom: int) -> int:
+    """About the peak memory of LOCO kinships for ``n`` individuals and ``n_chrom`` chromosomes.
+
+    ``(n_chrom + 6) * n**2 * 8`` bytes: one float64 ``n x n`` sum per
+    chromosome, plus about six for the ``K_{-c}`` being built, its
+    eigendecomposition and the null model (measured: 591 MB at n = 1219, 19
+    chromosomes; 1.16 GB at n = 3000, 10 chromosomes, peak RSS of ``pylmm
+    gwas --loco`` before the all-SNP K was dropped from it).
+
+    Examples
+    --------
+    >>> from pylmm.loco import loco_memory_bytes
+    >>> round(loco_memory_bytes(1219, 19) / 1e6)
+    297
+    """
+    return int((n_chrom + 6) * n * n * 8)
 
 
 class LocoKinship:
@@ -171,7 +233,7 @@ class LocoKinship:
             *Raw* genotypes, as for `pylmm.kinship.calculate_kinship`.  Not
             modified.
         chroms : sequence of length m
-            The chromosome of each column (any labels; compared as `str`).
+            The chromosome of each column (any labels; normalised by `normalize_chrom`).
         kind, block_size
             As for `LocoKinship`.
 
@@ -217,7 +279,7 @@ class LocoKinship:
             raise ValueError(
                 "expected a genotype vector of length %d, got shape %s" % (self.n, x.shape)
             )
-        c = str(chrom)
+        c = normalize_chrom(chrom)
         cols = snp_columns(x, self.kind, self.scale)
         self.n_snps += 1
         self._used.setdefault(c, 0)
@@ -284,7 +346,7 @@ class LocoKinship:
         return self.n_used - self._used[self._chrom_key(leave_out)]
 
     def _chrom_key(self, chrom: object) -> str:
-        c = str(chrom)
+        c = normalize_chrom(chrom)
         if c not in self._used:
             raise KeyError(
                 "no SNP on chromosome %r was added (chromosomes: %s)"
@@ -298,7 +360,7 @@ class LocoKinship:
         Parameters
         ----------
         leave_out : chromosome label, optional
-            The chromosome to leave out (compared as `str`); None gives the K
+            The chromosome to leave out (normalised by `normalize_chrom`); None gives the K
             of all SNPs.
 
         Returns
@@ -343,13 +405,46 @@ class LocoKinship:
 
 
 def _labels(chroms: Sequence[object] | NDArray[np.object_], m: int) -> list[str]:
-    """The chromosome labels as `str`, checked to be ``m`` of them."""
+    """The chromosome labels, normalised (`normalize_chrom`), checked to be ``m`` of them.
+
+    Warns when two spellings in ``chroms`` become one chromosome.
+    """
     a = np.asarray(chroms, dtype=object)
     if a.ndim != 1 or len(a) != m:
         raise ValueError(
             "chroms must give one chromosome per SNP: expected %d, got shape %s" % (m, a.shape)
         )
-    return [str(c) for c in a]
+    raw = [str(c) for c in a]
+    merged = merged_chrom_labels(raw)
+    if merged:
+        warnings.warn(
+            "chromosome labels written differently are treated as one chromosome: %s"
+            % describe_merged(merged),
+            stacklevel=3,
+        )
+    return [normalize_chrom(c) for c in raw]
+
+
+def merged_chrom_labels(labels: Sequence[str]) -> dict[str, list[str]]:
+    """The normalised labels that more than one spelling in ``labels`` maps to.
+
+    Examples
+    --------
+    >>> from pylmm.loco import merged_chrom_labels
+    >>> merged_chrom_labels(["1", "chr1", "2", "01"])
+    {'1': ['01', '1', 'chr1']}
+    """
+    spellings: dict[str, set[str]] = {}
+    for c in set(labels):
+        spellings.setdefault(normalize_chrom(c), set()).add(c)
+    return {k: sorted(v) for k, v in sorted(spellings.items()) if len(v) > 1}
+
+
+def describe_merged(merged: dict[str, list[str]], limit: int = 5) -> str:
+    """``"'1', 'chr1' -> 1; ..."`` for a warning (the first ``limit``)."""
+    items = list(merged.items())
+    text = "; ".join("%s -> %s" % (", ".join(repr(x) for x in v), k) for k, v in items[:limit])
+    return text + ("; ..." if len(items) > limit else "")
 
 
 class LocoResult(NamedTuple):
@@ -382,8 +477,10 @@ def gwas_loco(
     null model is fitted with ``K_{-c}`` and the SNPs of ``c`` are tested
     with `pylmm.lmm.gwas` (batched, missing calls, ``refit``: as there).  The
     numbers are those of ``gwas(Y, X[:, on_c], K_{-c}, X0=X0, ...)`` for
-    each ``c``.  A chromosome of ``chroms`` with no SNP in ``kinships`` is
-    tested with the K of all its SNPs (nothing to leave out).
+    each ``c``.  Every chromosome of ``chroms`` must be one of
+    ``kinships.chromosomes`` (after `normalize_chrom`): a missing one is an
+    error, not a silent all-SNP K.  Under LOCO, lambda_GC of a polygenic
+    trait is above 1 by design; see `pylmm.loco`.
 
     Parameters
     ----------
@@ -420,7 +517,9 @@ def gwas_loco(
     ValueError
         As `pylmm.lmm.gwas`; if ``chroms`` does not have one label per
         column; if ``kinships`` is for another number of individuals; or if
-        a ``K_{-c}`` has no SNP (all SNPs on one chromosome).
+        a ``K_{-c}`` has no SNP (all SNPs on one chromosome); if a chromosome
+        of ``chroms`` has no SNP in ``kinships`` (e.g. labels from another
+        file: ``"chrUn"`` vs ``"Un"``).
 
     Examples
     --------
@@ -452,6 +551,18 @@ def gwas_loco(
         kinships = LocoKinship.from_genotypes(A, labels, kind=kind)
     elif kinships.n != n:
         raise ValueError("kinships are for %d individuals but Y has %d values" % (kinships.n, n))
+    else:
+        missing = [c for c in dict.fromkeys(labels) if c not in kinships.chromosomes]
+        if missing:
+            raise ValueError(
+                "chromosome(s) %s of chroms have no SNP in kinships (whose chromosomes are %s): "
+                "K_{-c} would be the K of all SNPs, not a LOCO kinship; check the labels"
+                % (
+                    ", ".join(repr(c) for c in missing[:5]) + (", ..." if len(missing) > 5 else ""),
+                    ", ".join(repr(c) for c in kinships.chromosomes[:10])
+                    + (", ..." if len(kinships.chromosomes) > 10 else ""),
+                )
+            )
     x0_all = np.ones((n, 1)) if X0 is None else np.asarray(X0, dtype=np.float64)
 
     t_stats: list[float] = [np.nan] * m
@@ -467,7 +578,7 @@ def gwas_loco(
     lab = np.array(labels, dtype=object)
     for c in dict.fromkeys(labels):
         cols = np.flatnonzero(lab == c)
-        K = kinships.kinship(c if c in kinships.chromosomes else None)
+        K = kinships.kinship(c)
         if not all_kept:
             K = K[keep][:, keep]
         L = LMM(y_kept, K, X0=x0_kept, legacy_fit=legacy_fit)
