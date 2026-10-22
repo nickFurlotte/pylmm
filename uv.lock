@@ -1679,7 +1679,8 @@ sims = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=1.23.2" },
-    { name = "pgenlib", marker = "extra == 'pgen'", specifier = ">=0.92.1" },
+    { name = "pgenlib", marker = "python_full_version >= '3.14' and extra == 'pgen'", specifier = ">=0.94.0" },
+    { name = "pgenlib", marker = "python_full_version < '3.14' and extra == 'pgen'", specifier = ">=0.92.1" },
     { name = "scipy", specifier = ">=1.9.2" },
 ]
 provides-extras = ["pgen"]

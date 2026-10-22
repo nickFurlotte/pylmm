@@ -49,7 +49,7 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm kinship,--legacy-kinship,no,new,"the K of pylmm kinship 1.0.0, which counted skipped constant and all-missing SNPs in m (bug 8); added after 1.0.0"
 ,,,pylmm gwas,--grm,yes,new,"a GCTA binary GRM PREFIX.grm.bin/.grm.id instead of --kinship (GCTA's --grm), aligned by ID; float32; added after 1.0.0"
 ,,,pylmm kinship,--out-format,yes,new,"{text,grm}; default text; grm writes a GCTA binary GRM FILE.grm.bin/.grm.N.bin/.grm.id (float32; not for EMMA input); added after 1.0.0"
-,,,"pylmm gwas, pylmm kinship",--pfile,yes,new,"PLINK 2 genotypes PREFIX.pgen/.pvar(.zst)/.psam, dosages included; the counted allele is REF (the A2 of plink2's .bim); needs the optional pgenlib (pip install 'pylmm[pgen]'); added after 1.0.0"
+,,,"pylmm gwas, pylmm kinship",--pfile,yes,new,"PLINK 2 genotypes PREFIX.pgen/.pvar(.zst)/.psam, dosages included; the counted allele is REF (the A2 of plink2's .bim); needs the optional pgenlib (pip install pgenlib); added after 1.0.0"
 ,,,"pylmm gwas, pylmm kinship",--hardcalls,no,new,"with --pfile: the hard calls instead of the dosages (what plink2 --make-bed writes); added after 1.0.0"
 ,,,pylmm gwas,--loco,no,new,"leave one chromosome out: each chromosome's SNPs tested with a kinship built from the other chromosomes' SNPs (GCTA --mlma-loco), computed from the genotypes; replaces --kinship/--grm/--eigen; added after 1.0.0"
 ,,,pylmm gwas,--kinship-type,yes,new,"{standardized,centered,ibs}; with --loco only: the kinship built, as pylmm kinship --kinship-type; default standardized; added after 1.0.0"

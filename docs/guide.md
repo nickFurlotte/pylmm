@@ -25,8 +25,10 @@ pip install "git+https://github.com/nickFurlotte/pylmm@main"
 uv add "pylmm @ git+https://github.com/nickFurlotte/pylmm@main"
 ```
 
-Reading PLINK 2 PGEN files (section 3) needs the optional `pgen` extra, `pylmm[pgen]`, which installs
-plink2's reader pgenlib (LGPL-3.0; pylmm itself is MIT); from a clone, `uv sync --extra pgen`.
+Reading PLINK 2 PGEN files (section 3) needs plink2's reader pgenlib (LGPL-3.0-only; pylmm itself
+is MIT): `pip install pgenlib` next to pylmm, or the `pgen` extra (from a clone, `uv sync --extra
+pgen`). pgenlib has wheels for Linux (manylinux x86-64 and aarch64) and macOS only; on Windows or
+musl Linux (Alpine) pip builds it from source, which needs a C++ compiler (or convert to BED).
 
 A git install clones the whole repository, including ~215 MB of example data, so it takes a while (what
 the data is, and its checksums: [data/README.md](../data/README.md)). From a clone, `uv sync` (add

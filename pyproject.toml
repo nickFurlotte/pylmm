@@ -50,10 +50,15 @@ classifiers = [
 
 [project.optional-dependencies]
 # PLINK 2 PGEN genotypes (`pylmm gwas --pfile`, `pylmm.pgen.PgenSource`): pgenlib, plink2's own
-# reader, LGPL-3.0 (pylmm is MIT).  Optional, imported only when a PGEN file is read; without it
-# pylmm installs and works as before.  0.92.1: the first release with wheels for Python 3.11-3.13
-# (3.14: 0.94.0); CI runs the PGEN tests with the locked version on every supported Python.
-pgen = ["pgenlib>=0.92.1"]
+# reader, LGPL-3.0-only (pylmm is MIT).  Optional, imported only when a PGEN file is read; without it
+# pylmm installs and works as before.  The floors are the first releases with wheels for that
+# Python: 0.92.1 for 3.11-3.13, 0.94.0 for 3.14.  pgenlib has wheels for manylinux (x86-64,
+# aarch64) and macOS only; elsewhere (Windows, musllinux) pip builds it, which needs a C++
+# compiler.  CI runs the PGEN tests with the locked version on every supported Python.
+pgen = [
+    "pgenlib>=0.92.1; python_version < '3.14'",
+    "pgenlib>=0.94.0; python_version >= '3.14'",
+]
 
 [project.urls]
 Homepage = "https://github.com/nickFurlotte/pylmm"

@@ -19,7 +19,7 @@ genotype order); use it only for a pipeline you have already checked.
 
 | input | format | notes |
 |---|---|---|
-| genotypes | PLINK 1 BED/BIM/FAM (`--bfile`), TPED (`--tfile`) or EMMA (`--emma-geno`); PLINK 2 PGEN (`--pfile`, dosages included, `--hardcalls` to ignore them) with the optional `pip install 'pylmm[pgen]'` | anything else: the `convert-genotype-formats` skill. PGEN counts REF (as the BED plink2 makes of it); multiallelic variants are an error |
+| genotypes | PLINK 1 BED/BIM/FAM (`--bfile`), TPED (`--tfile`) or EMMA (`--emma-geno`); PLINK 2 PGEN (`--pfile`, dosages included, `--hardcalls` to ignore them) with the optional pgenlib (`pip install pgenlib`) | anything else: the `convert-genotype-formats` skill. PGEN counts REF (as the BED plink2 makes of it); multiallelic variants are an error; an IID-only `.psam` has FID `0` (use `--id-match iid` if the phenotype file repeats the IID as FID) |
 | phenotype | `FID IID name1 name2 ...` (header optional, `NA`/`-9` missing) | matched to the `.fam` by FID **and** IID |
 | covariates | same layout; only `NA` is missing | an intercept is added for you |
 | kinship | n × n text from `pylmm kinship`, plus `K.id` | `K.id` aligns K by ID (PLINK input); with `--emma-geno` K is in genotype order, no `.id` and no warning |
