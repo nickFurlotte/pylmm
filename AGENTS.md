@@ -10,7 +10,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 
 | path | what |
 |---|---|
-| `pylmm/lmm.py` | the model: `LMM` (`fit`, `association`, `association_batch`), `gwas`, input checks (re-exports `calculate_kinship`) |
+| `pylmm/lmm.py` | the model: `LMM` (`fit`, `association`, `association_batch`, `fit_snps`, `lrt_batch`, `score_batch`), `gwas` (`test=wald\|lrt`), input checks (re-exports `calculate_kinship`) |
 | `pylmm/kinship.py` | `calculate_kinship` (`kind=` standardized / centered / ibs; `legacy=True` = 1.0.0), `kinship_scale`, `KinshipAccumulator` |
 | `pylmm/kinship_io.py` | GCTA binary GRM `read_grm` / `write_grm` (float32), plink2 `.rel` `read_rel`, eigendecomposition `.npz` with IDs (`read_eigen`, `write_eigen`) |
 | `pylmm/plink_io.py` | `PlinkReader`: PLINK BED, TPED and EMMA genotypes (per SNP or in blocks, with `.bim` metadata); phenotype, covariate, kinship files |
@@ -21,7 +21,7 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/sumstats.py` | the summary-statistics table `pylmm gwas` writes: `SumStats`, `write_sumstats`, `read_sumstats`, per-allele conversion |
 | `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship`; `run_record.py`, the JSON run record of `pylmm gwas` |
 | `tests/` | pytest suite; `tests/golden/` = reference outputs of the original Python 2 code; `tests/helpers.py` = all tolerances |
-| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies); `sims/bench/`: Phase 6 speed benchmarks (`just bench <name> [--quick]`, e.g. `gwas_batch`, `bed_blocks`) |
+| `sims/` | simulation framework (genotype/phenotype generators, oracle, studies); `sims/bench/`: Phase 6 speed benchmarks (`just bench <name> [--quick]`, e.g. `gwas_batch`, `bed_blocks`, `refit`) |
 | `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, reports on the Python 2 baseline, the port and the simulation studies, `migration/` maps |
 | `skills/` | agent skills (below); `.claude/skills` links here |
 | `data/` | example data (~215 MB): 1219 mice BED (fake phenotypes), 94-strain HMDP EMMA text; provenance, marker map and checksums in [data/README.md](data/README.md) |

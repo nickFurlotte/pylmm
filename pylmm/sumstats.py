@@ -29,35 +29,61 @@ p_value                    the p-value of the test, never written as 0 when it
 variant_id                 the SNP ID of the genotype input, verbatim
 rsid                       the SNP ID if it is an rsID (``rs`` + digits), else NA
 n                          the number of individuals the SNP was tested on
-t_stat                     the test statistic, signed for the effect allele
+t_stat                     the test statistic, signed for the effect allele:
+                           the Wald t, beta / standard_error; with
+                           ``--test lrt`` the signed square root of the
+                           chi2(1) statistic (sign of beta), not beta / SE
 neg_log_10_p_value         ``-log10 p``, accurate where ``p`` underflows
 missing_rate               the share of the individuals with a phenotype
                            (and covariates) whose genotype is missing
 beta_std                   ``beta`` times the standard deviation of the effect
-                           allele count over the called genotypes used: the
-                           effect of one SD of the genotype
+                           allele count over the called genotypes of the
+                           individuals tested: the effect of one SD of the
+                           genotype (not the legacy -BETA, whose SD is over
+                           every genotyped individual)
 =========================  ====================================================
 
 Missing values are written ``NA``.  Floats are written with Python's
 ``repr`` (the shortest string that reads back as the same double), integers
 as integers.
 
-Deviations from GWAS-SSF v1.1.0, all deliberate: missing values are ``NA``
-rather than the recommended ``#NA`` (R's ``read.table`` treats ``#`` as a
-comment and its readers do not take ``#NA`` as missing; pandas reads both);
-``chromosome`` is written as in the genotype input (``X``, mouse 20, ...)
-rather than recoded to 1-25; ``variant_id`` is the input's SNP ID, not a
-``chr_pos_ref_alt`` string (pylmm does not know which allele is the
-reference); the alleles are written as in the input (PLINK's ``0`` for a
-missing allele becomes ``NA``).  The GWAS-SSF metadata YAML is not written;
-``pylmm gwas`` writes a JSON run record instead.
+Deviations from GWAS-SSF v1.1.0 (checked against the GWAS Catalog validator's
+schema, ``gwas-sumstats-tools``), all deliberate; a file with any of them is
+not accepted for submission as it is:
+
+* **Untested SNPs are rows with NA** in ``beta``, ``standard_error`` and
+  ``p_value`` (and ``effect_allele_frequency`` with no call); the mandatory
+  columns must not be missing.
+* **Alleles as in the input**: GWAS-SSF wants ``[ACGT]+`` (or ``LONG_STRING``);
+  PLINK files coded ``1``/``2`` (the bundled example), ``0`` (no second
+  allele, written ``NA``) and EMMA input without allele letters fail.
+* **chromosome as in the input** (``X``, ``chr1``, a non-human numbering such
+  as mouse X = 20): GWAS-SSF wants the integers 1-25 with X = 23, Y = 24,
+  MT = 25 (human).
+* **variant_id is the input's SNP ID**, not GWAS-SSF's ``chr_pos_ref_alt``
+  (pylmm does not know which allele is the reference); the validator's pattern
+  ``^[A-Za-z0-9_]+$`` rejects IDs such as ``mm37-1-3125499`` or ``1:200``.
+* Missing values are ``NA``, not the recommended ``#NA`` (R's ``read.table``
+  treats ``#`` as a comment; pandas reads both).
+* No GWAS-SSF metadata YAML; ``pylmm gwas`` writes a JSON run record instead.
+
+For a submission, filter and recode the table (keep the tested rows, ACGT
+alleles, human chromosomes 1-25, and build ``variant_id`` from the
+chromosome, position and the REF/ALT alleles), then run the Catalog's
+``gwas-ssf validate``; the ``interpret-gwas-results`` skill has a recipe.
+
+Reading it in R: ``read.table(f, header = TRUE, sep = "\\t", colClasses =
+c(effect_allele = "character", other_allele = "character"))`` (an allele
+column that is all ``T`` would otherwise become logical), or
+``data.table::fread(f)``.
 
 The genotype coding
 -------------------
 pylmm reads a genotype as the fraction of copies of A2 (0, 0.5, 1), and
 ``pylmm gwas`` tests it standardised.  The table reports the effect of the
-other allele, A1, per copy: the convention of plink2 ``--glm``, REGENIE,
-GEMMA, GCTA and GWAS-SSF (effect allele = ALT).  If the model column is
+other allele, A1, per copy: ALT for plink2-written files, the effect allele of
+REGENIE and GWAS-SSF, and of plink2 ``--glm omit-ref`` (plink2's default A1 is
+the minor allele: compare alleles by name).  If the model column is
 ``x = (g - m) / s`` for the A2 fraction ``g``, the A1 count is ``c = 2 - 2 g``
 and ``dx/dc = -1 / (2 s)``, so::
 
@@ -147,8 +173,12 @@ P_VALUE_DIRECT_MIN = 1e-300
 """p-values at or above this are written as computed; below it (or 0) they are
 written from ``-log10 p``."""
 
+_FINGERPRINT_RTOL = 1e-9
+"""`SumStats.from_genotypes`: the relative tolerance of its check that the genotypes are those
+the scan tested (the same SDs, computed the same way: equal to rounding)."""
+
 _RSID = re.compile(r"^rs[0-9]+$")
-_MISSING_ALLELES = frozenset(("", "0", ".", "-9", "NA"))
+MISSING_ALLELES = frozenset(("", "0", ".", "-9", "NA"))
 
 Coding = Literal["a2_fraction", "a1_count"]
 """Genotype codings `SumStats.from_genotypes` accepts: ``a2_fraction`` (pylmm's raw
@@ -178,7 +208,7 @@ def _allele_column(values: ArrayLike | None, m: int, name: str) -> NDArray[np.ob
     """Alleles as text; PLINK's missing-allele codes (``0``, ``.``) become None."""
     a = _text_column(values, m, name)
     for k, v in enumerate(a):
-        if v is not None and v in _MISSING_ALLELES:
+        if v is not None and v in MISSING_ALLELES:
             a[k] = None
     return a
 
@@ -258,9 +288,9 @@ class SumStats:
         p = _float_column(p_value, m, "p_value")
         if neg_log_10_p_value is None:
             with np.errstate(divide="ignore"):
-                nl10 = -np.log10(p)
+                nl10 = -np.log10(p) + 0.0  # + 0.0: never -0.0
         else:
-            nl10 = _float_column(neg_log_10_p_value, m, "neg_log_10_p_value")
+            nl10 = _float_column(neg_log_10_p_value, m, "neg_log_10_p_value") + 0.0
         bp = (
             np.full(m, np.nan)
             if variants.bp is None
@@ -296,7 +326,7 @@ class SumStats:
         X: ArrayLike,
         variants: Variants | None = None,
         *,
-        coding: Coding = "a2_fraction",
+        coding: Coding,
         Y: ArrayLike | None = None,
     ) -> SumStats:
         """The table of a `pylmm.lmm.gwas` scan, per copy of the effect allele A1.
@@ -307,12 +337,17 @@ class SumStats:
             ``gwas(Y, X, K, ..., return_details=True)``: effects per unit
             of the columns of ``X``.
         X : (n, m) array
-            The genotypes the scan tested, raw: ``coding`` says how.  Not
-            standardised (the per-copy scale is lost then).
+            The genotypes the scan tested, the very matrix passed to
+            ``gwas``, raw: ``coding`` says how.  Checked against the scan's
+            fingerprint (``result.x_sd``, the SD of each column it tested):
+            raw genotypes for a scan of standardised ones (``PlinkReader``'s
+            default) raise, instead of silently giving effects on the wrong
+            scale.
         variants : pylmm.genotypes.Variants, optional
             The SNPs' metadata; default: IDs ``SNP_1``, ``SNP_2``, ...
             and no positions or alleles.
-        coding : {"a2_fraction", "a1_count"}, default "a2_fraction"
+        coding : {"a2_fraction", "a1_count"}
+            Required.
             ``a2_fraction``: the fraction of copies of A2 (``variants.a2``)
             in 0..1, as ``PlinkReader(norm_genotype=False)`` and
             ``ArraySource`` with such data give it; the effect allele is A1.
@@ -321,7 +356,8 @@ class SumStats:
         Y : (n,) array, optional
             The phenotype the scan used: individuals with a missing (nan)
             phenotype are left out of ``effect_allele_frequency`` and
-            ``missing_rate``.  Default: all individuals.
+            ``missing_rate``.  Default: all individuals (an error if the scan
+            dropped some: the fingerprint then does not match).
 
         Returns
         -------
@@ -331,7 +367,8 @@ class SumStats:
         ------
         ValueError
             For an unknown ``coding``, genotypes outside its range (e.g.
-            standardised ones), or sizes that do not match.
+            standardised ones), genotypes that are not those the scan tested
+            (the fingerprint), or sizes that do not match.
 
         Examples
         --------
@@ -374,6 +411,21 @@ class SumStats:
             raise ValueError(
                 "genotypes outside 0..%g: not %s coded (pass the raw genotypes, not "
                 "standardised ones)" % (hi, coding)
+            )
+        _, x_sd, _ = allele_count_stats(x_used)  # the SD of the columns as given
+        scanned = np.asarray(result.x_sd, dtype=np.float64)
+        if scanned.shape != (m,):
+            raise ValueError("the scan has %d SNPs, X %d columns" % (scanned.size, m))
+        both = np.isfinite(x_sd) & np.isfinite(scanned)
+        off = both & ~np.isclose(x_sd, scanned, rtol=_FINGERPRINT_RTOL, atol=0.0)
+        if off.any() or not np.array_equal(np.isfinite(x_sd), np.isfinite(scanned)):
+            j = int(np.flatnonzero(off)[0]) if off.any() else 0
+            raise ValueError(
+                "X is not the genotype matrix the scan tested (column %d: SD %.6g here, %.6g in "
+                "the scan): pass the same raw matrix to gwas and from_genotypes (a scan of "
+                "standardised genotypes, PlinkReader's default, cannot be converted to "
+                "per-allele effects), and Y if the scan dropped individuals with a missing "
+                "phenotype" % (j, x_sd[j], scanned[j])
             )
         freq, sd, missing = allele_count_stats(counts)
         beta, se, t = per_allele_effects(result.beta, result.beta_se, result.t, slope)
@@ -513,7 +565,10 @@ def format_p_values(p: ArrayLike, neg_log10_p: ArrayLike) -> list[str]:
     ``repr``; a smaller one (subnormal, or 0 after underflow) is written as
     ``10 ** -neg_log10_p`` in scientific notation with `P_VALUE_DIGITS`
     significant digits (e.g. ``1.23457e-400``), beyond the range of a
-    double.  ``NA`` where ``p`` is nan.
+    double.  ``NA`` where ``p`` is nan.  ``0.0`` only for an infinite
+    statistic (``-log10 p`` infinite: p is exactly 0); a p below 1e-300
+    with a finite or missing ``-log10 p`` that is not positive raises
+    ValueError (inconsistent inputs).
 
     Examples
     --------
@@ -528,7 +583,13 @@ def format_p_values(p: ArrayLike, neg_log10_p: ArrayLike) -> list[str]:
     for x, L in zip(pv, nl):
         if x != x:
             out.append(NA)
-        elif x >= P_VALUE_DIRECT_MIN or not math.isfinite(L) or L <= 0:
+        elif x >= P_VALUE_DIRECT_MIN:
+            out.append(repr(x))
+        elif not (math.isfinite(L) and L > 0):
+            # A p below 1e-300 whose -log10 is not a positive finite number: only an
+            # infinite statistic (L = inf, p exactly 0) gets here, and 0.0 is then exact.
+            if not (math.isinf(L) and L > 0):
+                raise ValueError("p-value %r with -log10 p %r: inconsistent" % (x, L))
             out.append(repr(x))
         else:
             e = math.ceil(L)

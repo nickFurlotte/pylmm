@@ -24,12 +24,28 @@ file, by role), ``samples`` (`SampleCounts`), ``model`` (`ModelInfo`),
 warning messages logged during the run, in order).
 
 The ``TypedDict`` classes below are the schema of the nested objects; the
-keys of each are fixed.  ``tests/test_sumstats_cli.py`` checks a written
-record against them.
+keys of each are fixed.  ``tests/test_sumstats.py`` checks a written record
+against them.  A number that is not finite (nan, inf: e.g. a log-likelihood
+that overflowed) is written as ``null``, so the file is always valid JSON.
+
+**What the record reveals.**  By default it holds the *base names* of the
+input files (with their sizes, modification times and SHA-256) and the
+command line with every path argument cut to its base name; the platform
+string (OS, release, architecture) and the Python, numpy and scipy versions;
+no host name, user name or directory.  It is meant to be shared with the
+summary statistics.  ``--run-record-full-paths`` keeps the paths as typed.
+
+**Where it goes.**  ``-o x.tsv.gz``, ``-o x.tsv``, ``-o x.txt`` and ``-o x``
+all write ``x.json`` (`sidecar_path`), overwriting an existing one with a
+warning; ``--run-record PATH`` names it, ``--no-run-record`` skips it, and
+there is none by default when ``-o`` is not a regular file (``/dev/stdout``,
+a pipe).  It is written to a temporary file and renamed, so a failed write
+leaves no partial file, and a failure to write it never fails the run.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import json
@@ -37,6 +53,7 @@ import logging
 import os
 import platform
 import sys
+import tempfile
 from typing import Any, TypedDict
 
 import numpy as np
@@ -53,8 +70,9 @@ only their size and modification time (hashing reads the whole file, ~0.5 s per 
 
 
 class FileInfo(TypedDict):
-    """An input file: ``path`` as given, ``size`` (bytes), ``mtime`` (UTC, ISO 8601), ``sha256``
-    (hex, or null above `HASH_MAX_BYTES` or if the file does not exist)."""
+    """An input file: ``path`` (its base name; as typed with ``--run-record-full-paths``),
+    ``size`` (bytes), ``mtime`` (UTC, ISO 8601), ``sha256`` (hex, or null above
+    `HASH_MAX_BYTES` or if the file does not exist)."""
 
     path: str
     exists: bool
@@ -112,14 +130,23 @@ class KinshipInfo(TypedDict):
 
 class NullFit(TypedDict):
     """The null model: ``h``, ``sigma2`` (total), ``sigma_g2 = h sigma2``,
-    ``sigma_e2 = (1 - h) sigma2``, ``log_likelihood`` and whether it is REML."""
+    ``sigma_e2 = (1 - h) sigma2``, ``log_likelihood``, whether it is REML, and
+    ``kind``: ``reml``, ``ml`` or ``lrt-reduced-ml`` (``--test lrt``: the ML fit
+    of the model with ``dropped_null_directions`` null directions of the kinship,
+    which the covariates span, left out, `pylmm.lmm.LMM.lrt_null_fit`).
+    ``per_snp_null_fits``: under ``--remove-missing-genotypes``, each SNP with
+    missing calls was tested at its own null fit on its called individuals, not
+    at this one."""
 
-    h: float
-    sigma2: float
-    sigma_g2: float
-    sigma_e2: float
-    log_likelihood: float
+    h: float | None
+    sigma2: float | None
+    sigma_g2: float | None
+    sigma_e2: float | None
+    log_likelihood: float | None
     reml: bool
+    kind: str
+    dropped_null_directions: int
+    per_snp_null_fits: bool
 
 
 class LocoChromosome(NullFit):
@@ -130,9 +157,13 @@ class LocoChromosome(NullFit):
 
 class ResultsInfo(TypedDict):
     """The table: ``path``, ``format`` (``pylmm.sumstats/1`` or ``legacy``),
-    ``columns``, ``n_variants`` (rows), ``n_tested``, ``not_tested`` by reason
-    (``no_called_genotype``, ``monomorphic``, ``not_estimable``: collinear
-    with the covariates or too few called individuals), ``lambda_gc`` (from
+    ``columns``, ``effect_allele`` (the rule, or ``unknown: ...`` when the input
+    names no alleles and the table's allele columns are NA), ``n_variants``
+    (rows), ``n_tested``, ``not_tested`` by reason (``no_called_genotype``,
+    ``monomorphic``, ``collinear_on_called``: the covariates lose rank on the
+    called individuals, ``lrt_unbounded``: ``--test lrt`` without an ML maximum,
+    ``not_estimable``: any other, e.g. collinear with the covariates or too few
+    called individuals), ``lambda_gc`` (from
     the tested p-values; under ``--loco`` not a calibration check),
     ``max_neg_log_10_p_value``."""
 
@@ -172,12 +203,25 @@ def utc_now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
 
-def file_info(path: str) -> FileInfo:
-    """Size, modification time and (up to `HASH_MAX_BYTES`) SHA-256 of ``path``."""
+def basenames(argv: list[str]) -> list[str]:
+    """``argv`` with every argument that names a path cut to its base name.
+
+    >>> basenames(["--bfile", "/home/me/study/geno", "--pheno-col", "2", "-o", "out/r.tsv.gz"])
+    ['--bfile', 'geno', '--pheno-col', '2', '-o', 'r.tsv.gz']
+    """
+    return [os.path.basename(a) if os.sep in a and not a.startswith("-") else a for a in argv]
+
+
+def file_info(path: str, full_path: bool = False) -> FileInfo:
+    """Size, modification time and (up to `HASH_MAX_BYTES`) SHA-256 of ``path``.
+
+    The record keeps ``path``'s base name, or ``path`` as given with ``full_path``.
+    """
+    name = path if full_path else os.path.basename(path)
     try:
         st = os.stat(path)
     except OSError:
-        return FileInfo(path=path, exists=False, size=None, mtime=None, sha256=None)
+        return FileInfo(path=name, exists=False, size=None, mtime=None, sha256=None)
     digest: str | None = None
     if st.st_size <= HASH_MAX_BYTES:
         h = hashlib.sha256()
@@ -187,7 +231,7 @@ def file_info(path: str) -> FileInfo:
         digest = h.hexdigest()
     mtime = datetime.datetime.fromtimestamp(st.st_mtime, datetime.UTC)
     return FileInfo(
-        path=path,
+        path=name,
         exists=True,
         size=int(st.st_size),
         mtime=mtime.isoformat(timespec="seconds"),
@@ -205,16 +249,27 @@ def environment() -> EnvironmentInfo:
     )
 
 
-def null_fit(h: float, sigma2: float, ll: float, reml: bool) -> NullFit:
-    """A `NullFit` from the fitted ``h``, ``sigma2`` and log-likelihood."""
+def null_fit(
+    h: float,
+    sigma2: float,
+    ll: float,
+    reml: bool,
+    kind: str = "reml",
+    dropped_null_directions: int = 0,
+    per_snp_null_fits: bool = False,
+) -> NullFit:
+    """A `NullFit` from the fitted ``h``, ``sigma2`` and log-likelihood (non-finite -> None)."""
     h, sigma2 = float(h), float(sigma2)
     return NullFit(
-        h=h,
-        sigma2=sigma2,
-        sigma_g2=h * sigma2,
-        sigma_e2=(1.0 - h) * sigma2,
-        log_likelihood=float(ll),
+        h=finite_or_none(h),
+        sigma2=finite_or_none(sigma2),
+        sigma_g2=finite_or_none(h * sigma2),
+        sigma_e2=finite_or_none((1.0 - h) * sigma2),
+        log_likelihood=finite_or_none(float(ll)),
         reml=bool(reml),
+        kind=kind,
+        dropped_null_directions=int(dropped_null_directions),
+        per_snp_null_fits=bool(per_snp_null_fits),
     )
 
 
@@ -259,11 +314,44 @@ def new_record(command: list[str]) -> dict[str, Any]:
     }
 
 
+def json_safe(obj: Any) -> Any:
+    """``obj`` with every non-finite float (nan, inf) replaced by None, recursively.
+
+    numpy scalars become Python numbers, tuples lists.
+
+    >>> json_safe({"a": float("nan"), "b": [1.5, float("inf")], "c": (2,)})
+    {'a': None, 'b': [1.5, None], 'c': [2]}
+    """
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    if isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, (float, np.floating)):
+        return finite_or_none(float(obj))
+    return obj
+
+
 def write_record(path: str, record: dict[str, Any]) -> None:
-    """Write ``record`` as JSON (sorted keys, indent 2; nan/inf are an error)."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(record, f, indent=2, sort_keys=True, allow_nan=False)
-        f.write("\n")
+    """Write ``record`` as JSON (sorted keys, indent 2; non-finite numbers as null).
+
+    The text is written to a temporary file next to ``path`` and renamed onto
+    it, so ``path`` is either the old file or the complete new one.
+    """
+    text = json.dumps(json_safe(record), indent=2, sort_keys=True, allow_nan=False) + "\n"
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(prefix=".%s." % os.path.basename(path), dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
 
 
 def command_line() -> list[str]:

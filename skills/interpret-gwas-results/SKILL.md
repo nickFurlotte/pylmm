@@ -25,14 +25,14 @@ GWAS-SSF v1.1.0, in its order; the rest are optional GWAS-SSF columns and pylmm'
 | `chromosome`, `base_pair_location` | from the `.bim` (`.map`; `--emma-map` for EMMA input) | as written in the input (`X`, not 23); `NA` for EMMA input without a map |
 | `effect_allele` | **A1**, `.bim` column 5: ALT for plink2-written files; for EMMA input the allele coded 1 | the minor allele for plink 1.9 files without `--keep-allele-order` |
 | `other_allele` | A2, `.bim` column 6 | PLINK's `0` (no second allele) is written `NA` |
-| `beta` | effect of **one copy of the effect allele** | per allele, like plink2 `--glm` |
+| `beta` | effect of **one copy of the effect allele** | per allele, like plink2 `--glm` (whose default A1 is the minor allele: `omit-ref` gives ALT) |
 | `standard_error` | SE of `beta` | |
 | `effect_allele_frequency` | over the tested individuals with a call | not the panel frequency |
 | `p_value` | two-sided Wald, from t(n - q - 1) | below 1e-300 written from -log10 p (`3.16228e-401`, 6 digits), never 0 |
 | `variant_id` | the input's SNP ID | not GWAS-SSF's `chr_pos_ref_alt` |
 | `rsid` | the SNP ID if it is `rs` + digits, else `NA` | |
 | `n` | individuals the SNP was tested on | per SNP with `--remove-missing-genotypes` |
-| `t_stat` | the test statistic, signed for the effect allele (Wald: `beta / standard_error`) | |
+| `t_stat` | the test statistic, signed for the effect allele (Wald: `beta / standard_error`) | `--test lrt`: signed √χ² (sign of `beta`), not `beta / standard_error` |
 | `neg_log_10_p_value` | -log10 p | rank by this, not by `p_value` |
 | `missing_rate` | share of tested individuals without a call | mean-imputed unless `--remove-missing-genotypes` |
 | `beta_std` | `beta` × SD of the effect allele count over the called genotypes | the effect of one SD of the genotype |
@@ -50,6 +50,36 @@ the run failed. Read it first: it answers "which individuals, which K, which fit
 **The legacy table** (`--output-format legacy`, pylmm 1.0.0's): `SNP_ID`, `BETA` (effect of the **A2**
 allele **per SD** of the standardised genotype), `BETA_SD` (its standard error, not an SD), `F_STAT` (the
 signed Wald t, not an F) and `P_VALUE` (exactly 0.0 when it underflows); `nan` for untestable SNPs.
+
+**The LRT** (`--test lrt`, `gwas(test="lrt")`): `t_stat` (legacy `F_STAT`) is the signed square root
+of the likelihood-ratio statistic (the sign of `beta`) and `p_value` (`P_VALUE`) is from chi2(1), also
+for `neg_log_10_p_value` where p underflows; `beta` / `standard_error` (`BETA` / `BETA_SD`) come from the
+ML fit with the SNP, so `beta / standard_error` is not `t_stat`. The run record's `null_fit` is then the
+LRT's reduced ML fit (`kind: lrt-reduced-ml`, `reml: false`, with `dropped_null_directions`), and SNPs
+whose ML fit has no maximum are counted in `results.not_tested.lrt_unbounded`. Which to use:
+
+* **Wald, null fit (default)**: the genome-wide scan. Calibrated in the simulations (`sims/studies/s9_tests.md`).
+* **Wald with `--refit`**: at strong loci, where the null fit's h absorbed part of the SNP's effect and the
+  default p-value is conservative; and to compare with EMMA or GEMMA (`-lmm 1` is a refitted Wald test).
+  Slightly anti-conservative at n ~ 100 (1.2-1.4x the nominal rate at 1e-4 / 1e-5 in S9).
+* **LRT** (`--test lrt`): ML fits with and without each SNP, chi2(1). With pylmm's centred kinship
+  and an intercept the plain ML likelihood has no maximum (it grows as h -> 1), and both fits would sit at
+  h = 1 in most replicates whatever the true h², making the LRT anti-conservative (S9: λ_GC up to 1.14,
+  2.4x the nominal rate at 1e-5). pylmm's LRT therefore leaves out the kinship's null directions that the
+  covariates span (reduced ML): calibrated like the refitted Wald test (λ_GC 0.99-1.03; 1.2-1.35x at 1e-4 /
+  1e-5 at n = 100, no correction for the fitted variance component). It differs from GEMMA's `-lmm 2`,
+  which centres K and keeps the plain ML (its fits sit at its bound lambda = 1e5). In panels where most
+  strains have one animal and a few have two, the LRT can still be ill-posed: a warning that its null
+  model has no maximum (then its p-values are anti-conservative), or `nan` lines for SNPs whose calls
+  differ within a strain (counted in the log). Use the Wald test for such panels. A `nan` LRT line is a
+  "not tested", not a non-significant SNP.
+* **Score test**: not a `--test` option; `LMM.score_batch` reproduces GEMMA's `-lmm 3`. It is a monotone
+  function of the default Wald statistic (same ranking), conservative in the tail (n = 100: 0.1x the
+  nominal rate at 1e-5), and its p-value has a floor (t² <= n - q: about 9.7e-6 at n = 30, 7.4e-9 at n =
+  50), so a GEMMA `-lmm 3` scan of a small panel cannot reach genome-wide significance.
+
+A SNP significant under one test and far from it under another is a SNP to look at (a strong effect, a
+boundary h, few distinct genotypes).
 
 ```python
 import json
@@ -69,7 +99,8 @@ G = rng.binomial(2, rng.uniform(0.05, 0.5, 1000), size=(300, 1000)).astype(float
 y = 0.5 * G[:, 10] + rng.normal(size=300)
 iids = ["i%d" % i for i in range(300)]
 plink_tools.write_bed("scan", G, iids=iids, chrom=np.repeat(["1", "2"], 500),
-                      pos=np.tile(np.arange(1, 501) * 10_000, 2))      # G = copies of A2
+                      pos=np.tile(np.arange(1, 501) * 10_000, 2),     # G = copies of A2
+                      a1=["C"] * 1000, a2=["T"] * 1000)
 plink_tools.write_pheno("scan.pheno", [(i, i) for i in iids], y, ["y"])
 ```
 
@@ -145,6 +176,43 @@ sd = summarize_gwas.dosage_sd("scan")                             # SD of the A2
 assert np.allclose(-leg["beta"] / sd, res["beta"], rtol=1e-10, equal_nan=True)
 assert np.array_equal(-leg["t"], res["t_stat"], equal_nan=True)
 ```
+
+**Submitting to the GWAS Catalog.** The table follows GWAS-SSF's column order but is not a submittable
+file as it is (the deviations are listed in `pylmm/sumstats.py`): untested SNPs are `NA` rows, alleles
+and chromosomes are written as in the input (`1`/`2` alleles, `X`, mouse chromosome numbers), and
+`variant_id` is the input's ID. For human data on a known build, keep the tested rows with ACGT alleles
+on chromosomes 1-25 (X = 23, Y = 24, MT = 25), build `variant_id` as `chr_pos_ref_alt` from your REF/ALT
+(here A2/A1, as plink2 writes them), write `#NA` for the remaining missing values, then run the
+Catalog's validator (`gwas-ssf validate`, from `gwas-sumstats-tools`) and write its metadata YAML:
+
+```python
+import re
+
+ssf = read_sumstats("scan.tsv.gz")
+keep = (
+    np.isfinite(ssf["p_value"])
+    & np.array([bool(re.fullmatch("[ACGT]+", a)) for a in ssf["effect_allele"]])
+    & np.array([bool(re.fullmatch("[ACGT]+", a)) for a in ssf["other_allele"]])
+)
+chrom = np.array([{"X": "23", "Y": "24", "MT": "25"}.get(c, c) for c in ssf["chromosome"]])
+keep &= np.isin(chrom, [str(k) for k in range(1, 26)])
+with open("scan.ssf.tsv", "w") as f:
+    cols = ["chromosome", "base_pair_location", "effect_allele", "other_allele", "beta",
+            "standard_error", "effect_allele_frequency", "p_value", "variant_id", "rsid", "n"]
+    f.write("\t".join(cols) + "\n")
+    for j in np.flatnonzero(keep):
+        vid = "%s_%d_%s_%s" % (chrom[j], ssf["base_pair_location"][j], ssf["other_allele"][j],
+                               ssf["effect_allele"][j])          # chr_pos_ref_alt (REF = A2)
+        row = [chrom[j], "%d" % ssf["base_pair_location"][j], ssf["effect_allele"][j],
+               ssf["other_allele"][j]] + [repr(float(ssf[c][j])) for c in cols[4:8]]
+        rs = ssf["rsid"][j]
+        f.write("\t".join(row + [vid, "#NA" if rs == "NA" else rs, "%d" % ssf["n"][j]]) + "\n")
+print("%d of %d rows kept" % (keep.sum(), len(keep)))
+assert keep.sum() == np.isfinite(ssf["p_value"]).sum()
+```
+
+(The p-values below 1e-300 that the table writes from -log10 p read back as 0.0 here: copy those strings
+from the table, or give `neg_log_10_p_value` as column 8 instead of `p_value`.)
 
 ## 3. Significance thresholds
 

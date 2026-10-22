@@ -28,6 +28,7 @@ import argparse
 import dataclasses
 import gzip
 import os
+import stat
 import time
 import warnings
 from collections import Counter
@@ -37,7 +38,7 @@ from typing import IO, Any
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import linalg, stats
+from scipy import linalg
 
 from pylmm import kinship_io, plink_io, samples, sumstats
 from pylmm.cli import run_record
@@ -54,9 +55,11 @@ from pylmm.genotypes import DEFAULT_BLOCK_SIZE, Variants, check_block_size, norm
 from pylmm.kinship import KINSHIP_KINDS, KinshipKind, kinship_scale
 from pylmm.lmm import (
     LMM,
+    TESTS,
     AssociationResult,
     check_covariates,
-    neg_log10_pvalue,
+    check_test,
+    neg_log10_p_for,
     snp_estimable,
     snp_estimable_columns,
     subset_testable,
@@ -127,6 +130,10 @@ examples:
       --block-size 200 -o results.tsv
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
       --no-batch -o results.tsv
+
+  # the Wald test at each SNP's own h, or a likelihood-ratio test (GEMMA's -lmm 1, 2)
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --refit -o refit.tsv.gz
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --test lrt -o lrt.tsv.gz
 
   # the exact output of pylmm 1.0.0 (its columns, its h search and its
   # one-SNP-at-a-time path)
@@ -333,7 +340,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         action="store_true",
         default=True,
         help="restricted maximum likelihood, for the null fit, the per-SNP fits and the test "
-        "(the default)",
+        "(the default; --test lrt is always ML)",
     )
     method.add_argument(
         "--ml",
@@ -345,8 +352,21 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     model.add_argument(
         "--refit",
         action="store_true",
-        help="refit the variance components at each SNP (default: fit them once, under the "
-        "null model)",
+        help="refit the variance components at each SNP, exactly (Newton-Raphson on the "
+        "likelihood's derivatives, a block of SNPs at a time; with --no-batch or --legacy-fit, "
+        "the grid search of the null fit per SNP).  Default: fit them once, under the null "
+        "model.  --test lrt always fits each SNP's model",
+    )
+    model.add_argument(
+        "--test",
+        choices=TESTS,
+        default="wald",
+        help="the test of each SNP: wald (the Wald t test, the default; with --refit, GEMMA's "
+        "-lmm 1) or lrt (likelihood ratio of ML fits with and without the SNP, chi2(1), with "
+        "the null directions of the kinship that the covariates span left out, so that ML "
+        "has a maximum; it always fits each SNP's model by ML, so --reml, --ml and --refit do "
+        "not apply).  With lrt, t_stat (legacy F_STAT) is the signed square root of the "
+        "statistic (the sign of beta) and beta, standard_error (BETA, BETA_SD) are the ML fit's",
     )
     model.add_argument(
         "--legacy-fit",
@@ -372,7 +392,8 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         help="the number of SNPs read and tested together: a block is read at once (a BED "
         "file is decoded a block at a time), and its complete SNPs (no missing call) are "
         "rotated with one matrix product and tested in closed form; memory "
-        "is about 6-8 x n x N floats (default: %d)" % DEFAULT_BLOCK_SIZE,
+        "is about 6-8 x n x N floats, also with --refit and --test lrt (default: %d)"
+        % DEFAULT_BLOCK_SIZE,
     )
     performance.add_argument(
         "--no-batch",
@@ -381,7 +402,9 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "The numbers are the same up to rounding (within about 1e-9 relative); with "
         "--legacy-fit and a badly scaled covariate (e.g. a raw date or year column) they can "
         "differ by a few 1e-6 relative, the batched default being the more accurate: centre "
-        "or scale such covariates.  --refit and SNPs with missing calls always take this path",
+        "or scale such covariates.  SNPs with missing calls, and --refit with --legacy-fit, "
+        "always take this path; --refit and --test lrt then fit each SNP with the grid search "
+        "of the null fit",
     )
 
     output = p.add_argument_group("output")
@@ -403,6 +426,27 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "with BETA per SD of the A2 allele's dosage (as before; with "
         "--remove-missing-genotypes per 0-1 step of the A2 fraction for SNPs without a missing "
         "call)",
+    )
+    record = output.add_mutually_exclusive_group()
+    record.add_argument(
+        "--run-record",
+        metavar="PATH",
+        help="write the JSON run record to PATH (default: FILE without .gz and .tsv/.txt, "
+        "plus .json, when FILE is a regular file; none when it is not, e.g. /dev/stdout or a "
+        "pipe).  -o x.tsv.gz, -o x.tsv and -o x all have the record x.json; an existing "
+        "record is overwritten, with a warning",
+    )
+    record.add_argument(
+        "--no-run-record",
+        action="store_true",
+        help="do not write the JSON run record",
+    )
+    output.add_argument(
+        "--run-record-full-paths",
+        action="store_true",
+        help="record the input file names and the command line as typed (full paths); by "
+        "default the record keeps only their base names, so it can be shared without "
+        "revealing your directory layout (it has no host or user name either)",
     )
     add_logging_options(p)
     return p
@@ -469,10 +513,19 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         check_block_size(args.block_size)
     except ValueError as e:
         parser.error("--block-size: %s" % e)
+    try:
+        check_test(args.test, args.refit, args.legacy_fit)
+    except ValueError:
+        parser.error("--test %s: --legacy-fit (pylmm 1.0.0) has only the Wald test" % args.test)
     check_log_file(parser, args)
-    record = run_record.sidecar_path(args.out)  # never args.out itself: it ends in .json
-    if args.log_file and os.path.realpath(args.log_file) == os.path.realpath(record):
-        parser.error("--log-file %s is also the run record of -o/--out" % args.log_file)
+    record = record_path(args)
+    if record is not None and os.path.realpath(record) == os.path.realpath(args.out):
+        parser.error("--run-record %s is also the -o/--out file" % record)
+    same_as_log = args.log_file and os.path.realpath(args.log_file) == os.path.realpath(
+        record or ""
+    )
+    if record is not None and same_as_log:
+        parser.error("--log-file %s is also the run record" % args.log_file)
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +837,7 @@ class GwasInputs:
     chroms: NDArray[np.object_] | None = None
     emma_variants: Variants | None = None
     sample_counts: dict[str, Any] = dataclasses.field(default_factory=dict)
+    covariate_names: list[str] | None = None
 
 
 def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
@@ -890,6 +944,20 @@ def _pheno_column(args: argparse.Namespace, reader: plink_io.PlinkReader) -> int
             "plink2 --pheno-col-nums)" % (col, n_cols)
         )
     return col - 1
+
+
+def _covariate_names(
+    args: argparse.Namespace, reader: plink_io.PlinkReader, P: FloatArray | None
+) -> list[str] | None:
+    """The covariates used (without the intercept), for the run record; None without any."""
+    if P is None:
+        return None
+    if args.covar_name:
+        return list(args.covar_name)
+    names = reader.covariate_names if args.covar else None
+    if names is not None and len(names) == P.shape[1]:
+        return list(names)
+    return ["column %d" % (k + 1) for k in range(P.shape[1])]
 
 
 def _design_matrix(n: int, P: FloatArray | None, no_intercept: bool) -> FloatArray:
@@ -1038,6 +1106,7 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
         chroms=chroms,
         emma_variants=emma_variants,
         sample_counts=sample_counts,
+        covariate_names=_covariate_names(args, reader, P),
     )
 
 
@@ -1151,7 +1220,8 @@ def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
     With ``--refit`` the variance components are fitted per SNP instead,
     so the null model is not fitted here.  REML by default, ML with
     ``--ml``, here and in every per-SNP fit (before 1.0.0 the null fit was
-    always REML).
+    always REML).  With ``--test lrt``, the LRT's ML null fit
+    (`pylmm.lmm.LMM.lrt_null_fit`).
 
     Raises
     ------
@@ -1171,7 +1241,21 @@ def fit_null_model(inputs: GwasInputs, args: argparse.Namespace) -> LMM:
         verbose=verbose,
         legacy_fit=args.legacy_fit,
     )
-    if not args.refit:
+    if args.test == "lrt":
+        log.info(
+            "--test lrt: maximum-likelihood fits with and without each SNP (--reml/--ml and "
+            "--refit do not apply)"
+        )
+        h, _ = L.lrt_null_fit()
+        dropped = L._lrt_model()._dropped
+        log.info(
+            "null model (ML%s): heritability=%0.3f",
+            ", %d null direction(s) of the kinship in the covariates' span left out" % dropped
+            if dropped
+            else "",
+            h,
+        )
+    elif not args.refit:
         log.info("Computing fit for null model")
         L.fit(reml=args.reml)
         log.info("null model: heritability=%0.3f, sigma=%0.3f", L.opt_h, L.opt_sigma)
@@ -1268,6 +1352,8 @@ class ScanOutput:
         self.p_values: list[FloatArray] = []
         self.neg_log10: list[FloatArray] = []
         self.not_tested: Counter[str] = Counter()
+        self.counts: dict[str, int] = {}  # the scan's counters (collinear, lrt_unbounded)
+        self.alleles_known = False
         self.loco_fits: dict[str, dict[str, Any]] = {}
         self._warned_range = False
         self._legacy_out: IO[str] | None = None
@@ -1304,23 +1390,28 @@ class ScanOutput:
                 n_used = np.full(G.shape[1], float(n_t))
         mean_g = 2.0 * g_half  # the mean raw value
         top = 2.0 / abs(self.copies)  # the largest raw value: 1 (fraction) or 2 (count)
-        if self.emma and not self.legacy and not self._warned_range:
+        if self.emma and not self.legacy:
             v = T[~np.isnan(T)]
             if v.size and (v.min() < 0.0 or v.max() > top):
-                self._warned_range = True
-                if self.emma_coding == "fraction":
-                    what = "0 / 0.5 / 1, the fraction of copies of the allele coded 1"
-                    hint = "; use --emma-coding count for 0 / 1 / 2 allele counts"
-                else:
-                    what, hint = "0 / 1 / 2 copies of the allele coded 1", ""
-                log.warning(
-                    "EMMA genotypes outside 0..%g: the per-allele columns (beta, "
-                    "standard_error, effect_allele_frequency, beta_std) assume --emma-coding "
-                    "%s (%s)%s",
-                    top,
-                    self.emma_coding,
-                    what,
-                    hint,
+                hint = (
+                    "; pass --emma-coding count for 0 / 1 / 2 allele counts"
+                    if self.emma_coding == "fraction" and v.min() >= 0.0 and v.max() <= 2.0
+                    else ""
+                )
+                raise samples.InputError(
+                    "EMMA genotypes outside 0..%g (SNPs %d-%d): --emma-coding %s reads them "
+                    "as %s copies of the allele coded 1%s (or --output-format legacy, which "
+                    "has no per-allele columns)"
+                    % (
+                        top,
+                        self.index + 1,
+                        self.index + T.shape[1],
+                        self.emma_coding,
+                        "the fraction 0 / 0.5 / 1 of"
+                        if self.emma_coding == "fraction"
+                        else "0 / 1 / 2",
+                        hint,
+                    )
                 )
         # the effect allele count c = copies * g (+ 2 for PLINK's A1 = 2 - 2 g)
         freq = mean_g * self.copies / 2.0 + (0.0 if self.emma else 1.0)
@@ -1351,7 +1442,7 @@ class ScanOutput:
                 else:
                     reason = "not_estimable"
                 self.not_tested[reason] += 1
-        nl10 = self._neg_log10(t_x, p, desc.n_used[:b])
+        nl10 = neg_log10_p_for(t_x, p, desc.n_used[:b] - self.q - 1, "lrt" if self.lrt else "wald")
         self.p_values.append(p.copy())
         self.neg_log10.append(nl10)
         if self._legacy_out is not None:
@@ -1365,6 +1456,11 @@ class ScanOutput:
             meta = variants[:b] if self.meta is None else self.meta[self.index : self.index + b]
             slope = 1.0 / (self.copies * desc.scale[:b])  # dx/dc for x = (g - m) / s
             beta, se, t = sumstats.per_allele_effects(beta_x, se_x, t_x, slope)
+            effect = meta.a2 if self.emma else meta.a1
+            if effect is not None and any(
+                a is not None and a not in sumstats.MISSING_ALLELES for a in effect
+            ):
+                self.alleles_known = True
             self._writer.write(
                 sumstats.SumStats.from_variants(
                     meta,
@@ -1383,22 +1479,18 @@ class ScanOutput:
             )
         self.index += b
 
-    def _neg_log10(self, t: FloatArray, p: FloatArray, n_used: FloatArray) -> FloatArray:
-        """``-log10 p``: from ``p`` where it is at least 1e-300, else from the statistic.
-
-        From ``t`` with ``n - q - 1`` degrees of freedom (the Wald test's,
-        `pylmm.lmm.neg_log10_pvalue`), or for ``--test lrt`` (``t`` the signed
-        root of a chi2(1) statistic) from the normal tail.
-        """
-        with np.errstate(divide="ignore", invalid="ignore"):
-            nl = -np.log10(p)
-        tiny = (p < sumstats.P_VALUE_DIRECT_MIN) & np.isfinite(t)
-        if tiny.any():
-            if self.lrt:
-                nl[tiny] = -(np.log(2.0) + stats.norm.logsf(np.abs(t[tiny]))) / np.log(10.0)
-            else:
-                nl[tiny] = neg_log10_pvalue(t[tiny], n_used[tiny] - self.q - 1)
-        return np.asarray(nl, dtype=np.float64)
+    def _not_tested(self) -> dict[str, int]:
+        """SNPs without a test, by reason (`pylmm.cli.run_record.ResultsInfo`)."""
+        collinear = int(self.counts.get("collinear", 0))
+        unbounded = int(self.counts.get("lrt_unbounded", 0))
+        other = int(self.not_tested.get("not_estimable", 0))
+        return {
+            "no_called_genotype": int(self.not_tested.get("no_called_genotype", 0)),
+            "monomorphic": int(self.not_tested.get("monomorphic", 0)),
+            "collinear_on_called": collinear,
+            "lrt_unbounded": unbounded,
+            "not_estimable": max(other - collinear - unbounded, 0),
+        }
 
     def results_info(self) -> dict[str, Any]:
         """The ``results`` part of the run record (`pylmm.cli.run_record.ResultsInfo`)."""
@@ -1407,8 +1499,14 @@ class ScanOutput:
         tested = np.isfinite(p)
         if self.legacy:
             effect = "A2 (BETA per SD of the A2 dosage; legacy)"
+        elif self.emma:
+            effect = "allele coded 1 (EMMA)"
         else:
-            effect = "allele coded 1 (EMMA)" if self.emma else "A1"
+            effect = "A1"
+        if not self.legacy and not self.alleles_known:
+            effect = "unknown: the input names no alleles (beta is per copy of the %s)" % (
+                "allele coded 1 of the EMMA file" if self.emma else "allele coded 1 of the TPED, A1"
+            )
         return {
             "path": None,
             "format": "legacy" if self.legacy else sumstats.SUMSTATS_FORMAT,
@@ -1416,10 +1514,7 @@ class ScanOutput:
             "effect_allele": effect,
             "n_variants": int(self.index),
             "n_tested": int(tested.sum()),
-            "not_tested": {
-                k: int(self.not_tested.get(k, 0))
-                for k in ("no_called_genotype", "monomorphic", "not_estimable")
-            },
+            "not_tested": self._not_tested(),
             "lambda_gc": (
                 run_record.finite_or_none(sumstats.lambda_gc(p[tested])) if tested.any() else None
             ),
@@ -1438,6 +1533,8 @@ def _test_snp(
     counts: dict[str, int],
 ) -> tuple[Any, Any, Any, Any] | None:
     """Test one SNP; ``(beta, beta_sd, t, p)``, or None if it is not estimable."""
+    # pylmm 1.0.0's code: the Wald test, without refit or with the per-SNP grid refit
+    old = args.test == "wald" and (not args.refit or args.no_batch or args.legacy_fit)
     n = inputs.K.shape[0]
     x = snp[inputs.keep].reshape((n, 1))
     missing = np.isnan(x).reshape((-1,))
@@ -1455,6 +1552,10 @@ def _test_snp(
             xs = (xs - xs.mean()) / np.sqrt(xs.var())
         ks = inputs.K[called, :][:, called]
         ls = LMM(ys, ks, X0=x0s, verbose=L.verbose, validate=False, legacy_fit=L.legacy_fit)
+        if not old:
+            if args.test != "lrt" and not args.refit:
+                ls.fit(reml=args.reml)
+            return _first(_tests(ls, xs, args, counts))
         if args.refit:
             ls.fit(X=xs, reml=args.reml)
         else:
@@ -1463,10 +1564,28 @@ def _test_snp(
     else:
         if not snp_estimable(x, inputs.X0, Q=Q0):
             return None
+        if not old:
+            return _first(_tests(L, x, args, counts))
         if args.refit:
             L.fit(X=x, reml=args.reml)
         ts, ps, beta, beta_var = L.association(x, reml=args.reml, return_beta=True)
     return beta, np.sqrt(beta_var), ts, ps
+
+
+def _tests(
+    L: LMM, X: FloatArray, args: argparse.Namespace, counts: dict[str, int]
+) -> AssociationResult:
+    """The ``--test`` of the SNP columns of ``X`` (`pylmm.lmm.LMM.association_tests`)."""
+    if args.test == "wald" and not args.refit:
+        return L.association_batch(X, reml=args.reml)
+    return L.association_tests(
+        X, args.test, args.reml, args.refit, batch=not args.no_batch, counts=counts
+    )
+
+
+def _first(r: AssociationResult) -> SnpResult:
+    """The ``(beta, beta_sd, t, p)`` of the first SNP of ``r``."""
+    return r.beta[0], np.sqrt(r.beta_var[0]), r.t[0], r.p[0]
 
 
 def iter_block_results(
@@ -1498,14 +1617,16 @@ def iter_block_results(
 
     Notes
     -----
-    Unless ``--no-batch`` or ``--refit``, the complete SNPs of the block
-    (no missing call) that are estimable (`pylmm.lmm.snp_estimable_columns`)
-    are tested together with `LMM.association_batch`, the first time one of
-    them is reached; every other SNP is tested on its own (`_test_snp`) when
-    it is reached.  Nothing is computed twice.  If testing a SNP raises,
+    Unless ``--no-batch`` (or ``--refit --legacy-fit``), the complete SNPs
+    of the block (no missing call) that are estimable
+    (`pylmm.lmm.snp_estimable_columns`) are tested together with
+    `LMM.association_batch` (or, for ``--refit`` and ``--test lrt``,
+    `LMM.association_tests`), the first time one of them is reached; every
+    other SNP is tested on its own (`_test_snp`) when it is reached.
+    Nothing is computed twice.  If testing a SNP raises,
     every SNP before it has been yielded and no later one is.
     """
-    use_batch = not (args.no_batch or args.refit)
+    use_batch = not (args.no_batch or (args.refit and args.legacy_fit))
     X = G[inputs.keep, :]
     complete: NDArray[np.bool_] = np.zeros(X.shape[1], dtype=bool)
     if use_batch:
@@ -1520,12 +1641,14 @@ def iter_block_results(
             cols = np.where(complete)[0]
             cols = cols[snp_estimable_columns(X[:, cols], inputs.X0, Q0)]
             batched = {int(c): k for k, c in enumerate(cols)}
-            result = L.association_batch(X[:, cols], reml=args.reml)
+            result = _tests(L, X[:, cols], args, counts)
         k = batched.get(j)
         if k is None:  # constant or collinear with the covariates
             yield None
         elif np.isfinite(result.t[k]):
             yield result.beta[k], np.sqrt(result.beta_var[k]), result.t[k], result.p[k]
+        elif args.test == "lrt":  # no ML maximum with the SNP: nan by design (counted)
+            yield None
         else:  # not expected for an estimable SNP; keep the per-SNP answer
             yield _test_snp(G[:, j], inputs, L, Q0, args, counts)
 
@@ -1579,7 +1702,7 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: ScanOutput) 
     """
     X0 = inputs.X0
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
-    counts: dict[str, int] = {}
+    counts = out.counts
     count = 0
 
     error: Exception | None = None
@@ -1629,7 +1752,16 @@ _READ_ERRORS = (samples.InputError, OSError)
 
 
 def _finish(count: int, counts: dict[str, int]) -> int:
-    """Log the count of SNPs that are nan for lack of rank; return ``count``."""
+    """Log the counts of SNPs that are nan for lack of rank or of an ML maximum; return ``count``."""
+    if counts.get("lrt_unbounded"):
+        log.warning(
+            "%d of %d SNPs are nan for --test lrt: with the SNP in the model the ML likelihood "
+            "has no maximum (the SNP and the covariates fit the phenotype exactly in every null "
+            "direction of the kinship, e.g. a SNP whose calls differ between animals of one "
+            "strain); use the Wald test for them",
+            counts["lrt_unbounded"],
+            count,
+        )
     if counts.get("collinear"):
         log.info(
             "%d of %d SNPs are nan because, on the individuals with a called genotype, "
@@ -2078,11 +2210,35 @@ def _loco_model(inputs: GwasInputs, args: argparse.Namespace, chrom: str) -> tup
 
 
 def _null_fit_record(L: LMM, args: argparse.Namespace) -> dict[str, Any] | None:
-    """The run record's ``null_fit`` of ``L``, or None if it has no null fit (``--refit``)."""
-    if getattr(L, "opt_h", None) is None or (args.refit and getattr(args, "test", "wald") != "lrt"):
+    """The run record's ``null_fit`` of ``L`` (`pylmm.cli.run_record.NullFit`).
+
+    None with ``--refit`` and the Wald test (every SNP has its own fit).
+    With ``--test lrt``, the LRT's null fit: ML on the reduced model
+    (`pylmm.lmm.LMM.lrt_null_fit`), with the number of null directions of
+    the kinship dropped from it.
+    """
+    per_snp = bool(args.remove_missing_genotypes)
+    if args.test == "lrt":
+        M = L._lrt_model()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # lrt_null_fit has warned already
+            h, _, sigma2, ll = M._fit_copy(None, False)
+        return dict(
+            run_record.null_fit(h, sigma2, ll, False, "lrt-reduced-ml", int(M._dropped), per_snp)
+        )
+    if args.refit or getattr(L, "opt_h", None) is None:
         return None
-    reml = bool(args.reml) and getattr(args, "test", "wald") != "lrt"
-    return dict(run_record.null_fit(L.opt_h, L.opt_sigma, L.opt_ll, reml))
+    return dict(
+        run_record.null_fit(
+            L.opt_h,
+            L.opt_sigma,
+            L.opt_ll,
+            bool(args.reml),
+            "reml" if args.reml else "ml",
+            0,
+            per_snp,
+        )
+    )
 
 
 def _loco_record(
@@ -2107,7 +2263,7 @@ def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: ScanOutput) -> 
     in file order, with the columns of `scan`.  When a chromosome starts, its
     kinship ``K_{-c}`` (`pylmm.loco.LocoKinship.kinship`, restricted to the
     tested individuals) is eigendecomposed and the null model fitted
-    (`fit_null_model`, so ``--ml``, ``--refit`` and the fit options apply
+    (`fit_null_model`, so ``--ml``, ``--refit``, ``--test`` and the fit options apply
     per chromosome); the SNPs are then tested as by `scan`
     (`iter_block_results`).  Unlike `scan`, a reader error is raised as is,
     without a one-SNP-at-a-time retry; in practice the kinship pass
@@ -2124,7 +2280,7 @@ def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: ScanOutput) -> 
     assert inputs.chroms is not None
     X0 = inputs.X0
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
-    counts: dict[str, int] = {}
+    counts = out.counts
     count = 0
     current: str | None = None
     inputs_c: GwasInputs = inputs
@@ -2158,6 +2314,31 @@ def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: ScanOutput) -> 
     return _finish(count, counts)
 
 
+def _regular_output(path: str) -> bool:
+    """Whether ``path`` is (or will be created as) a regular file, not a device or a pipe."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return True  # it does not exist yet: a regular file will be created
+    return stat.S_ISREG(st.st_mode)
+
+
+def record_path(args: argparse.Namespace) -> str | None:
+    """Where the run record goes: ``--run-record``, none with ``--no-run-record``, else the default.
+
+    The default is `pylmm.cli.run_record.sidecar_path` of ``-o`` when ``-o``
+    is a regular file, and none when it is not (``/dev/stdout``, a FIFO, a
+    process substitution ``>(...)``).
+    """
+    if getattr(args, "no_run_record", False):
+        return None
+    if getattr(args, "run_record", None):
+        return str(args.run_record)
+    if not _regular_output(args.out):
+        return None
+    return run_record.sidecar_path(args.out)
+
+
 def run(args: argparse.Namespace) -> None:
     """Run ``pylmm gwas`` with parsed options.
 
@@ -2171,10 +2352,19 @@ def run(args: argparse.Namespace) -> None:
     UsageError
         On a usage or input error.
     """
-    record_path = run_record.sidecar_path(args.out)
+    rec_path = record_path(args)
     check_writable("--out", args.out)
-    check_writable("--out (its run record)", record_path)
-    record = run_record.new_record(getattr(args, "argv", None) or run_record.command_line())
+    if rec_path is None:
+        if not args.no_run_record:
+            log.info("-o %s is not a regular file: no run record (--run-record PATH)", args.out)
+    else:
+        if os.path.exists(rec_path):
+            log.warning("overwriting the existing run record %s", rec_path)
+        check_writable("--run-record" if args.run_record else "--out (its run record)", rec_path)
+    argv = getattr(args, "argv", None) or run_record.command_line()
+    if not args.run_record_full_paths:
+        argv = run_record.basenames(argv)
+    record = run_record.new_record(argv)
     collector = run_record.WarningCollector()
     log.addHandler(collector)
     timings: dict[str, float] = {}
@@ -2191,23 +2381,31 @@ def run(args: argparse.Namespace) -> None:
         record["timings_s"] = {k: round(v, 3) for k, v in timings.items()}
         record["warnings"] = collector.messages
         record["finished_at"] = run_record.utc_now()
-        try:
-            run_record.write_record(record_path, record)
-        except OSError as e:  # e.g. the disk filled up; the results are written
-            log.error("--out: cannot write the run record %s (%s)", record_path, e)
-        else:
-            log.info("Wrote the run record to %s", record_path)
+        if rec_path is not None:
+            # Never fails the run: the results are written by now.
+            try:
+                run_record.write_record(rec_path, record)
+            except Exception as e:
+                log.warning(
+                    "cannot write the run record %s (%s: %s)", rec_path, type(e).__name__, e
+                )
+            else:
+                log.info("Wrote the run record to %s", rec_path)
 
 
 def _run(args: argparse.Namespace, record: dict[str, Any], timings: dict[str, float]) -> None:
     """`run`, filling the run ``record`` and ``timings`` as it goes."""
-    record["inputs"] = {role: run_record.file_info(path) for role, path in _input_files(args)}
+    record["inputs"] = {
+        role: run_record.file_info(path, full_path=args.run_record_full_paths)
+        for role, path in _input_files(args)
+    }
     record["model"] = _model_record(args)
     begin = time.time()
     inputs = load_inputs(args)
     timings["read_inputs"] = time.time() - begin
     record["samples"] = inputs.sample_counts
     record["model"]["q"] = int(inputs.X0.shape[1])
+    record["model"]["covariates"] = inputs.covariate_names
     record["kinship"] = _kinship_record(args, inputs)
     # With --loco the null model is fitted per chromosome (scan_loco).
     begin = time.time()
@@ -2228,7 +2426,8 @@ def _run(args: argparse.Namespace, record: dict[str, Any], timings: dict[str, fl
     finally:
         out.close()
         timings["scan"] = time.time() - begin
-        record["results"] = {**out.results_info(), "path": args.out}
+        out_name = args.out if args.run_record_full_paths else os.path.basename(args.out)
+        record["results"] = {**out.results_info(), "path": out_name}
         if inputs.loco is not None:
             record["loco"] = out.loco_fits
     log.info("Wrote the results for %d SNPs to %s", n, args.out)
@@ -2279,7 +2478,7 @@ def _model_record(args: argparse.Namespace) -> dict[str, Any]:
     test = getattr(args, "test", "wald")
     return {
         "test": test,
-        "reml": bool(args.reml),
+        "reml": bool(args.reml) and test != "lrt",
         "refit": bool(args.refit),
         "legacy_fit": bool(args.legacy_fit),
         "batch": not args.no_batch,

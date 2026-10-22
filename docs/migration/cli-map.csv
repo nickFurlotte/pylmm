@@ -18,7 +18,7 @@ pylmmGWAS,--noMean,no,pylmm gwas,--no-intercept,no,renamed,
 pylmmGWAS,--kfile,yes,pylmm gwas,--kinship,yes,renamed,"required (or --grm, or --loco without either); its rows are aligned by the IDs of FILE.id if that exists; a plink2 .rel/.rel.gz/.rel.bin is read with its .rel.id (after 1.0.0)"
 pylmmGWAS,--eigen,yes,pylmm gwas,--eigen,yes,behaviour-changed,"after 1.0.0: a decomposition with sample IDs (.npz fid/iid, or PATH.id / PATH.grm.id for text) is matched to the tested individuals: an error if one is missing, reordered if permuted; one without IDs is used as before, with a warning"
 pylmmGWAS,--removeMissingGenotypes,no,pylmm gwas,--remove-missing-genotypes,no,renamed,
-pylmmGWAS,--refit,no,pylmm gwas,--refit,no,unchanged,
+pylmmGWAS,--refit,no,pylmm gwas,--refit,no,behaviour-changed,"the exact per-SNP fit (LMM.fit_snps: Newton-Raphson on the likelihood's derivatives, a block of SNPs at a time; the same maximum, 11-61x faster); with --no-batch or --legacy-fit the grid search per SNP, as before"
 pylmmGWAS,--REML,no,pylmm gwas,--reml,no,renamed,"REML is the default, so the flag can be dropped; --reml and --ml are mutually exclusive"
 pylmmGWAS,--ML,no,pylmm gwas,--ml,no,renamed,
 pylmmGWAS,-v/--verbose,no,pylmm gwas,-v/--verbose,no,behaviour-changed,"logs INFO messages as `pylmm: info: ...`; the null fit line is now `null model: heritability=..., sigma=...`; the library's own eigendecomposition diagnostics need --debug"
@@ -44,6 +44,7 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm gwas,--block-size,yes,new,"SNPs read and tested together (batched Wald tests), default 1024 (pylmm.genotypes.DEFAULT_BLOCK_SIZE); added after 1.0.0"
 ,,,pylmm gwas,--no-batch,no,new,"test one SNP at a time, the 1.0.0 code path; added after 1.0.0"
 ,,,pylmm gwas,--legacy-fit,no,new,"fit h as pylmm 1.0.0 did (grid 0..0.99, first local maximum, sigma^2 = Q/(n-p) under --ml); with --no-batch the 1.0.0 output; added after 1.0.0"
+,,,pylmm gwas,--test,yes,new,"{wald,lrt}; default wald; lrt = likelihood ratio of ML fits with and without the SNP (chi2(1); reduced ML: the kinship's null directions spanned by the covariates left out); F_STAT is then the signed root of the statistic; added after 1.0.0"
 ,,,pylmm kinship,--kinship-type,yes,new,"{standardized,centered,ibs}; default standardized (1.0.0's formula; now m = the SNPs used and the library uses the CLI's missing-call convention); ibs = EMMA's IBS kinship; added after 1.0.0"
 ,,,pylmm kinship,--legacy-kinship,no,new,"the K of pylmm kinship 1.0.0, which counted skipped constant and all-missing SNPs in m (bug 8); added after 1.0.0"
 ,,,pylmm gwas,--grm,yes,new,"a GCTA binary GRM PREFIX.grm.bin/.grm.id instead of --kinship (GCTA's --grm), aligned by ID; float32; added after 1.0.0"
@@ -52,5 +53,8 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,pylmm gwas,--kinship-type,yes,new,"{standardized,centered,ibs}; with --loco only: the kinship built, as pylmm kinship --kinship-type; default standardized; added after 1.0.0"
 ,,,pylmm gwas,--emma-map,yes,new,"with --emma-geno: the marker map of the EMMA rows (a header naming a chr column and optionally bp/pos and allele0/allele1, or a PLINK .map): the chromosomes --loco needs, and the chromosome, position and allele columns of the output; added after 1.0.0"
 ,,,pylmm gwas,--emma-coding,yes,new,"{fraction,count}; default fraction: an --emma-geno value is the fraction (0/0.5/1) or the count (0/1/2) of copies of the allele coded 1; only the per-allele output columns depend on it; added after 1.0.0"
+,,,pylmm gwas,--run-record,yes,new,"PATH of the JSON run record (default: the -o name without .gz and .tsv/.txt, plus .json, when -o is a regular file; none when it is not); added after 1.0.0"
+,,,pylmm gwas,--no-run-record,no,new,"write no JSON run record; added after 1.0.0"
+,,,pylmm gwas,--run-record-full-paths,no,new,"record input paths and the command line as typed (default: base names only); added after 1.0.0"
 ,,,pylmm gwas,--output-format,yes,new,"{sumstats,legacy}; default sumstats: a GWAS-SSF-ordered table of per-allele effects of A1 (gzip if -o ends in .gz) plus a JSON run record; legacy writes the 1.0.0 columns SNP_ID BETA BETA_SD F_STAT P_VALUE; added after 1.0.0"
 ,,,pylmm gwas,--loco-max-chroms,yes,new,"with --loco: refuse more than N chromosomes (default 100); added after 1.0.0"

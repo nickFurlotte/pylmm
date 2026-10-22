@@ -163,6 +163,9 @@ def test_format_p_values_never_zero():
     # the mantissa never rounds to 10
     assert sumstats.format_p_values([0.0], [400.0000000001]) == ["1e-400"]
     assert sumstats.format_p_values([0.0], [400.9999999999]) == ["1e-401"]
+    assert sumstats.format_p_values([0.0], [math.inf]) == ["0.0"]  # an infinite statistic only
+    with pytest.raises(ValueError, match="inconsistent"):
+        sumstats.format_p_values([1e-310], [np.nan])
 
 
 def test_lambda_gc():
@@ -443,7 +446,8 @@ def test_p_value_below_double_range(tmp_path):
     _run([*argv, "-o", leg, "--output-format", "legacy"])
     cols, _ = _read_table(out)
     _, L = h.load_gwas_out(leg)
-    assert L[3, 3] == 0.0  # the legacy P_VALUE underflows
+    # the legacy P_VALUE underflows: to 0, or to a subnormal (scipy 1.9's t.sf)
+    assert L[3, 3] < 1e-300
     text = cols["p_value"][3]
     assert text != "0.0" and "e-" in text
     nl = _num(cols["neg_log_10_p_value"])[3]
@@ -588,7 +592,8 @@ def test_run_record_counts_and_warnings(tmp_path, synth):
     assert s["n_analysed"] == 75
     assert rec["model"]["q"] == 2
     assert any("not in" in w or "dropped" in w for w in rec["warnings"]), rec["warnings"]
-    assert rec["inputs"]["covar"]["path"] == cov
+    assert rec["inputs"]["covar"]["path"] == "cov"  # the base name only (privacy)
+    assert rec["model"]["covariates"] == ["column 1"]  # no header, no --covar-name
 
 
 def test_run_record_on_error(tmp_path, synth):
@@ -674,10 +679,10 @@ def test_emma_coding(tmp_path, coding):
     slopes = [np.polyfit(C[:, j], y, 1)[0] for j in range(6)]
     np.testing.assert_allclose(_num(cols["beta"]), slopes, rtol=1e-10)
     np.testing.assert_allclose(_num(cols["effect_allele_frequency"]), C.mean(axis=0) / 2)
-    if coding == "count":  # the default (fraction) on counts: warned, beta halved
-        log = _run(argv)
+    if coding == "count":  # the default (fraction) on counts: an input error, exit 2
+        log = _run(argv, rc=2)
         assert "outside 0..1" in log and "--emma-coding count" in log
-        np.testing.assert_allclose(_num(_read_table(out)[0]["beta"]), np.array(slopes) / 2)
+        _run([*argv, "--output-format", "legacy"])  # no per-allele columns: fine
 
 
 def test_emma_coding_needs_emma_input(synth, tmp_path):
@@ -783,4 +788,199 @@ def test_library_table_matches_the_cli(synth, tmp_path):
     t_c = sumstats.SumStats.from_genotypes(res_c, C, variants, coding="a1_count")
     h.assert_close(t_c.beta, a["beta"], rtol=h.SUMSTATS_LIB_CLI_RTOL, atol=0, what="a1_count")
     with pytest.raises(ValueError, match=r"outside 0\.\.1"):
-        sumstats.SumStats.from_genotypes(res, (G - 0.5) * 3, variants)
+        sumstats.SumStats.from_genotypes(res, (G - 0.5) * 3, variants, coding="a2_fraction")
+
+
+def test_from_genotypes_refuses_a_scan_of_other_genotypes(synth):
+    # the reviewer's trap: a scan of standardised genotypes (PlinkReader's default) converted
+    # with the raw ones gave beta 0.103 instead of 0.346, silently
+    from pylmm.lmm import gwas
+    from pylmm.plink_io import PlinkReader
+
+    base = synth["base"]
+    with PlinkReader(base, norm_genotype=False, pheno_file=base + ".pheno") as r:
+        G = np.hstack([g for g, _ in r.iter_blocks(1000)])[:, :20]
+        y = r.phenos[:, 0]
+    with PlinkReader(base, pheno_file=base + ".pheno") as r:
+        Z = np.hstack([g for g, _ in r.iter_blocks(1000)])[:, :20]  # standardised
+    res_z = gwas(y, Z, synth["K"], return_details=True)
+    with pytest.raises(ValueError, match="not the genotype matrix the scan tested"):
+        sumstats.SumStats.from_genotypes(res_z, G, coding="a2_fraction")
+    res_g = gwas(y, G, synth["K"], return_details=True)
+    ok = sumstats.SumStats.from_genotypes(res_g, G, coding="a2_fraction")
+    assert np.isfinite(ok.beta).sum() > 15
+    # a scan that dropped individuals (missing phenotype) needs Y
+    y2 = y.copy()
+    y2[:5] = np.nan
+    res2 = gwas(y2, G, synth["K"], return_details=True)
+    with pytest.raises(ValueError, match="and Y if"):
+        sumstats.SumStats.from_genotypes(res2, G, coding="a2_fraction")
+    t2 = sumstats.SumStats.from_genotypes(res2, G, coding="a2_fraction", Y=y2)
+    np.testing.assert_array_equal(t2.n[np.isfinite(t2.p_value)] <= 75, True)
+    with pytest.raises(TypeError):
+        sumstats.SumStats.from_genotypes(res_g, G)  # coding is required
+
+
+# ---------------------------------------------------------------------------
+# review round 1 (PR #32): the run record's robustness, location and privacy; LRT
+# ---------------------------------------------------------------------------
+
+
+def test_record_with_non_finite_numbers_is_valid_json(synth, tmp_path):
+    # the reviewer's case: a phenotype scaled by 1e300 makes the null log-likelihood nan
+    base = synth["base"]
+    ids = _fam_ids(base)
+    ph = str(tmp_path / "huge.pheno")
+    with open(ph, "w") as f:
+        f.writelines("%s %s %.17g\n" % (a, b, v * 1e300) for (a, b), v in zip(ids, synth["y"]))
+    out = str(tmp_path / "huge.tsv.gz")
+    _run(["--bfile", base, "--pheno", ph, "--kinship", base + ".kin", "-o", out])  # exit 0
+    with open(run_record.sidecar_path(out)) as f:
+        text = f.read()
+    rec = json.loads(text)  # valid JSON: no NaN or Infinity tokens
+    assert "NaN" not in text and "Infinity" not in text
+    assert rec["status"] == "ok"
+    assert all(
+        v is None or math.isfinite(v)
+        for v in rec["null_fit"].values()
+        if not isinstance(v, (bool, str))
+    )
+
+
+def test_record_write_failure_does_not_fail_the_run(synth, tmp_path, monkeypatch):
+    def broken(path, record):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(run_record, "write_record", broken)
+    base = synth["base"]
+    out = str(tmp_path / "r.tsv.gz")
+    log = _run(["--bfile", base, "--pheno", base + ".pheno", "--kinship", base + ".kin", "-o", out])
+    assert "cannot write the run record" in log and os.path.exists(out)
+    assert not os.path.exists(run_record.sidecar_path(out))
+
+
+def test_record_is_written_atomically(tmp_path):
+    path = str(tmp_path / "r.json")
+    run_record.write_record(path, {"a": 1})
+    with pytest.raises(TypeError):
+        run_record.write_record(path, {"a": object()})  # not serialisable
+    with open(path) as f:
+        assert json.load(f) == {"a": 1}  # the old file, intact
+    assert os.listdir(str(tmp_path)) == ["r.json"]  # no temporary file left
+
+
+def test_record_location_options(synth, tmp_path):
+    base = synth["base"]
+    argv = ["--bfile", base, "--pheno", base + ".pheno", "--kinship", base + ".kin"]
+    out = str(tmp_path / "a.tsv.gz")
+    other = str(tmp_path / "elsewhere" / "run.json")
+    os.makedirs(os.path.dirname(other))
+    _run([*argv, "-o", out, "--run-record", other])
+    assert os.path.exists(other) and not os.path.exists(str(tmp_path / "a.json"))
+    _run([*argv, "-o", out, "--no-run-record"])
+    assert not os.path.exists(str(tmp_path / "a.json"))
+    _run([*argv, "-o", out])
+    log = _run([*argv, "-o", str(tmp_path / "a.tsv")])  # the same record name: a.json
+    assert "overwriting the existing run record" in log
+    _run([*argv, "-o", out, "--run-record", "x.json", "--no-run-record"], rc=2)
+
+
+def test_stdout_output_writes_no_record(synth, tmp_path):
+    import subprocess
+    import sys
+
+    base = synth["base"]
+    argv = ["--bfile", base, "--pheno", base + ".pheno", "--kinship", base + ".kin"]
+    for fmt, first in (("legacy", "SNP_ID"), ("sumstats", "chromosome")):
+        p = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pylmm",
+                "gwas",
+                *argv,
+                "--output-format",
+                fmt,
+                "-o",
+                "/dev/stdout",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            check=False,
+            env={**os.environ, "PYTHONPATH": h.REPO},
+        )
+        assert p.returncode == 0, p.stderr
+        assert p.stdout.startswith(first) and len(p.stdout.splitlines()) == 301
+    assert os.listdir(str(tmp_path)) == []  # no record anywhere
+
+
+def test_record_paths_are_base_names_unless_asked(synth, tmp_path):
+    base = synth["base"]
+    argv = ["--bfile", base, "--pheno", base + ".pheno", "--kinship", base + ".kin"]
+    out = str(tmp_path / "r.tsv.gz")
+    _run([*argv, "-o", out])
+    text = open(run_record.sidecar_path(out)).read()
+    assert str(tmp_path) not in text and os.path.dirname(base) not in text
+    rec = json.loads(text)
+    assert rec["inputs"]["bed"]["path"] == "g.bed" and rec["results"]["path"] == "r.tsv.gz"
+    assert rec["command"][rec["command"].index("--bfile") + 1] == "g"
+    _run([*argv, "-o", out, "--run-record-full-paths"])
+    rec = _record(out)
+    assert rec["inputs"]["bed"]["path"] == base + ".bed"
+
+
+def test_record_says_when_the_effect_allele_is_unknown(tmp_path):
+    tped = h.write_tped_subset(tmp_path, 30)  # .map only: no allele names
+    out = str(tmp_path / "t.tsv.gz")
+    _run(["--tfile", tped, "--kinship", h.README_KIN, "--pheno", h.FAKE_PHENOS, "-o", out])
+    cols, _ = _read_table(out)
+    assert set(cols["effect_allele"]) == {"NA"}
+    assert _record(out)["results"]["effect_allele"].startswith("unknown")
+
+
+def test_lrt_table_record_and_library(synth, tmp_path):
+    from pylmm.lmm import gwas, neg_log10_p_for
+
+    base = synth["base"]
+    out = str(tmp_path / "lrt.tsv.gz")
+    _run(
+        [
+            "--bfile",
+            base,
+            "--pheno",
+            base + ".pheno",
+            "--kinship",
+            base + ".kin",
+            "--test",
+            "lrt",
+            "-o",
+            out,
+        ]
+    )
+    rec = _record(out)
+    nf = rec["null_fit"]
+    assert nf["kind"] == "lrt-reduced-ml" and nf["reml"] is False and rec["model"]["reml"] is False
+    assert nf["h"] is not None and nf["log_likelihood"] is not None
+    assert isinstance(nf["dropped_null_directions"], int)
+    assert "lrt_unbounded" in rec["results"]["not_tested"]
+    res = sumstats.read_sumstats(out)
+    ok = np.isfinite(res["p_value"])
+    # t_stat is the signed root of the chi2(1) statistic, the sign of beta
+    chi2 = stats.chi2.isf(res["p_value"][ok], 1)
+    np.testing.assert_allclose(res["t_stat"][ok] ** 2, chi2, rtol=1e-6)
+    assert np.all(np.sign(res["t_stat"][ok]) == np.sign(res["beta"][ok]))
+    # library: -log10 p of the LRT from the chi2(1) tail where p underflows
+    nl = neg_log10_p_for([45.0], [0.0], [100.0], test="lrt")[0]
+    assert nl == pytest.approx(-stats.norm.logsf(45.0) / math.log(10) - math.log10(2), rel=1e-12)
+    r = gwas(synth["y"], synth["C"], synth["K"], test="lrt", return_details=True)
+    assert r.test == "lrt"
+    fin = np.isfinite(r.p)
+    np.testing.assert_allclose(r.neg_log10_p[fin], -np.log10(r.p[fin]), rtol=1e-12)
+
+
+def test_neg_log10_p_is_never_negative_zero():
+    from pylmm.lmm import neg_log10_p_for
+
+    v = neg_log10_p_for([0.0], [1.0], [10.0])
+    assert v[0] == 0.0 and math.copysign(1.0, v[0]) == 1.0

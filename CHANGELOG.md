@@ -23,10 +23,14 @@ maps them).
   t_stat neg_log_10_p_value missing_rate beta_std`. Missing values: `nan` -> `NA`.
 - **Effect allele and scale (the sign flips).** Old: `BETA` per SD of the standardised **A2** dosage
   (`.bim` column 6, REF for plink2-written files), `F_STAT` its t. New: `beta` / `standard_error` per
-  **copy of A1** (`.bim` column 5; ALT for plink2 files; for EMMA input the allele coded 1), the convention
-  of plink2 `--glm`, REGENIE, GEMMA and GWAS-SSF; `t_stat` is signed for A1 (= -F_STAT for PLINK input);
-  `beta_std` is `beta` times the SD of the A1 count. With K = identity, `beta`, SE, t, p, frequency and `n`
-  equal plink2 `--glm omit-ref` to its printed precision (tests/test_sumstats.py).
+  **copy of A1** (`.bim` column 5; ALT for plink2 files; for EMMA input the allele coded 1), the allele
+  REGENIE and GWAS-SSF (effect allele = ALT) report, and plink2 `--glm` with `omit-ref` (plink2's default
+  A1 is the *minor* allele: compare alleles, not columns); `t_stat` is signed for A1 (= -F_STAT for PLINK
+  input; `--test lrt`: the signed square root of the chi2(1) statistic); `beta_std` is `beta` times the SD
+  of the A1 count over the called genotypes of the individuals tested (not -BETA, which is per SD over all
+  genotyped individuals). With K = identity, `beta`, SE, t, p, frequency and `n` equal plink2 `--glm
+  omit-ref` to its printed precision (tests/test_sumstats.py). Deviations from GWAS-SSF (untested SNPs as
+  `NA` rows, alleles and chromosomes as in the input, `variant_id` = the input's ID): `pylmm.sumstats`.
 - **`--remove-missing-genotypes` (6.3d).** Old: `BETA` per 0 -> 1 step of the A2 fraction for SNPs without
   a missing call and per SD for the others. New: `beta` is per copy of A1 for every SNP.
 - **p-values.** New `neg_log_10_p_value`, finite where p underflows; `p_value` is then written from it in
@@ -34,13 +38,23 @@ maps them).
 - **Files.** `-o FILE` is gzip-compressed if FILE ends in `.gz` (e.g. `-o results.tsv.gz`; the gzip header
   has no time stamp, so a rerun gives the same bytes). New: a JSON run record next to it (`results.tsv.gz`
   -> `results.json`): command line, inputs with size, time and SHA-256, samples dropped by reason, model,
-  kinship scale, the null fit (per chromosome with `--loco`), lambda_GC, SNPs not tested by reason, the
-  warnings logged and timings (`pylmm.cli.run_record`, schema `pylmm.gwas.run/1`). It is written on errors
-  too (`"status": "error"`).
+  kinship scale, the null fit (per chromosome with `--loco`; the reduced ML fit with `--test lrt`),
+  lambda_GC, SNPs not tested by reason, the warnings logged and timings (`pylmm.cli.run_record`, schema
+  `pylmm.gwas.run/1`). It is written on errors too (`"status": "error"`), atomically, with non-finite
+  numbers as `null`, and a failure to write it never fails the run. It keeps only the base names of the
+  inputs and of the paths on the command line (no directories, host or user name), so it can be shared;
+  `--run-record-full-paths` keeps them as typed. `--run-record PATH` / `--no-run-record` choose where or
+  whether; there is none by default when `-o` is not a regular file (`-o /dev/stdout` works as before).
+  `x.tsv.gz`, `x.tsv` and `x` all have the record `x.json` (an existing one is overwritten, with a
+  warning).
 - **`--emma-map`** no longer needs `--loco`: with `--emma-geno` it fills the chromosome, position and allele
   columns (header columns `chr`, `bp`/`bp_<build>`/`pos`, `allele0`, `allele1`); without it they are `NA`.
-- **Library.** `pylmm.sumstats`: `SumStats` (the table; `SumStats.from_genotypes` from a `gwas` scan and the
-  raw genotypes), `write_sumstats`, `read_sumstats`, `SumstatsWriter`, `per_allele_effects`, `allele_count_stats`,
+  `--emma-coding {fraction,count}` (default fraction, 0/0.5/1) says what an EMMA value counts; a value
+  outside its range (e.g. 0/1/2 counts under the default) is an input error (exit 2) naming `--emma-coding
+  count`.
+- **Library.** `pylmm.sumstats`: `SumStats` (the table; `SumStats.from_genotypes` from a
+  `gwas(..., return_details=True)` scan and the same raw genotypes, `coding=` required; it refuses genotypes
+  other than those the scan tested, e.g. raw ones for a scan of standardised ones), `write_sumstats`, `read_sumstats`, `SumstatsWriter`, `per_allele_effects`, `allele_count_stats`,
   `format_p_values`, `lambda_gc`. `pylmm.genotypes.normalize_block` standardises a raw block in place, bit
   for bit as the readers do.
 - `--output-format legacy` is byte for byte the previous default output (checked on the README data and
@@ -134,6 +148,34 @@ maps them).
   `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
   matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
 - `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
+- The likelihood-ratio test: `gwas(..., test="wald" | "lrt")` and `pylmm gwas --test {wald,lrt}` (default
+  `wald`, unchanged). `lrt`: ML fits with and without each SNP, chi2(1), always ML (`--reml`, `--ml` and
+  `--refit` do not apply; logged), by **reduced ML**: the null directions of the kinship that the
+  covariates span are left out of both fits (`LMM.lrt_batch`, `LMM.lrt_null_fit`). With pylmm's centred
+  kinship and an intercept that is one direction, along which the plain ML likelihood grows without bound
+  as h -> 1 (bug 17): plain ML fits sat at h = 1 in 90-100% of S9's replicates at n = 100 whatever the true
+  h², and their LRT was anti-conservative (λ_GC up to 1.14, 2.4x at 1e-5); the reduced-ML LRT is calibrated
+  like the refitted Wald test (λ_GC 0.99-1.03, 1.2-1.35x at 1e-4 / 1e-5 at n = 100). The output columns are
+  unchanged: `F_STAT` is the signed square root of the statistic, `BETA` / `BETA_SD` the ML fit's.
+  `LMM.association_tests(X, test, reml, refit, batch)` dispatches; `pylmm.lmm.TESTS`, `check_test`;
+  `pylmm.loco.gwas_loco(..., test=)` and `pylmm gwas --loco --test lrt` (one LRT null fit per chromosome).
+  On a kinship with no such null direction the p-values equal GEMMA 0.98.5's `-lmm 2` to its 6 printed
+  digits (and `--refit` its `-lmm 1`); GEMMA centres every K and keeps the plain ML, so with a centred K
+  and an intercept they differ. Not every unbounded case is cured by the reduction: where the covariates'
+  rows in K's null block have full rank without spanning a null direction (e.g. strains of one animal
+  except a few pairs, with a covariate), `lrt_null_fit` warns that the null model has no ML maximum
+  (use the Wald test); a SNP that completes that rank (its calls differ within a strain) gets a `nan`
+  LRT, counted in one warning (`gwas`; `pylmm gwas` logs it) and in `LMM.lrt_unbounded`.
+- `LMM.score_batch(X, h=None, reml=True)`: the score test at the null fit, for comparison with GEMMA's
+  `-lmm 3` (`reml=False`). Library only: it is a monotone function of the null-fit Wald statistic (the
+  same ranking) and its p-value has a floor (t² <= n - q: about 9.7e-6 at n = 30, 7.4e-9 at n = 50).
+- `LMM.fit_snps(X, reml=True, ngrids=100)` -> `SnpFitResult(h, ll, t, p, beta, beta_var)`: the exact
+  per-SNP fit for a block of SNPs (below).
+- `sims/bench/refit.py` (`just bench refit [--quick]`) and `sims/studies/s9_tests.py`
+  (`just sim s9_tests [--quick]`; write-up `sims/studies/s9_tests.md`): the refit's speed and agreement,
+  and the calibration, power and cost of the Wald, refitted Wald, LRT (reduced and plain ML) and score
+  tests.
+
 - Leave-one-chromosome-out (LOCO) scans. Library: `pylmm.loco.LocoKinship` builds every `K_{-c}` (the
   kinship of all chromosomes but `c`) in one pass over the raw genotypes, for each kind (standardized,
   centered, ibs; not `legacy`), keeping one n × n sum per chromosome; `K_{-c}` equals `calculate_kinship`
@@ -199,6 +241,23 @@ maps them).
   PVE 0.423 both); t and p do not move for a pure rescaling (the CLI's change), and move slightly with the
   library's missing-call convention (the two 1.0.0 conventions differed by max |Δt| 0.03 on HMDP, study S4). 1.0.0's kinships: `legacy=True`, `--legacy-kinship`.
 
+#### Exact per-SNP refit
+- `gwas(refit=True)` / `pylmm gwas --refit`: `LMM.fit(X=x)` per SNP (a 101-point grid and a bounded Brent
+  search per peak, ~130 scalar likelihood evaluations per SNP) -> `LMM.fit_snps`, a block of SNPs at a
+  time: the grid of every SNP as matrix products, then a vectorised safeguarded Newton-Raphson on the
+  analytic first and second derivatives of the rotated likelihood (Zhou & Stephens 2012) inside each grid
+  peak's bracket, falling back to the scalar search for a bracket without a sign change of the
+  derivative or a Newton run that does not converge. Same candidates and tie rule, so the same maximum:
+  |dh| <= 3.6e-7 and |d log-likelihood| <= 2.9e-12 against the per-SNP search on 28,800 fits of S9, and
+  within 3.3e-10 of the dense oracle's maximum; t and p move by at most ~6e-7 relative (the grid search's
+  stopping error). Memory: about 5 arrays of n x block size (per-SNP terms in chunks of 256 SNPs).
+  Speedup over the per-SNP search (`sims/bench/refit.py`, single-threaded BLAS, arm64): 50-61x at n = 300 (2000 SNPs), 17-23x at n = 1000, 11-14x at n = 2000; the refit then costs 6.5-10x a default scan (the LRT 8-8.5x).
+- `--refit --no-batch` / `gwas(refit=True, batch=False)` and `--legacy-fit --refit` keep the per-SNP grid
+  search, so `--legacy-fit --no-batch` is still 1.0.0's output byte for byte.
+- `association_batch`'s docstring: "batched vs per SNP <= 1.3e-15 of max |t|" -> that holds for a centred
+  kinship; with many null directions (strain means expanded to animals) at h >= 1 - 1e-7 the per-SNP path
+  drifts by up to ~3e-10 of max |t| and the batched values are the accurate ones.
+
 #### Batched association tests (faster scans)
 - `gwas()` and `pylmm gwas` (without `--refit`) test the SNPs without missing calls in blocks: one matrix
   product rotates a block of SNPs into the eigenbasis of K, and each SNP's GLS fit is computed in closed form
@@ -222,8 +281,8 @@ maps them).
   the same and both paths are then accurate.
 - Which SNPs are tested (nan for constant, collinear or untestable SNPs) is unchanged: the block check makes
   exactly the decisions of `snp_estimable`.
-- SNPs with missing calls (tested on their called individuals) and `refit=True` / `--refit` still test one SNP
-  at a time.
+- SNPs with missing calls (tested on their called individuals) still test one SNP at a time; `refit=True`
+  / `--refit` did too (until the exact refit, above).
 - `pylmm gwas` writes each result line, in file order, as soon as it is known. If a SNP's test fails, every
   SNP before it has its line and no later one does, as in 1.0.0 (byte for byte with `--no-batch`); if the
   reader fails mid-file, the SNPs read before the failure are tested and written first. No SNP is tested

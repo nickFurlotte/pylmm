@@ -156,6 +156,70 @@ BATCH_REF_ATOL_SCALE = 1e-10
 # up to 4e-4 on the same data; before the fix the default differed by 0.14.)
 H_REPARAM_ATOL = 1e-6
 
+# Phase 6.5: the exact per-SNP refit (LMM.fit_snps: the grid as matrix products,
+# then a safeguarded Newton-Raphson on the analytic derivatives, stopping at a step
+# of 1e-12 in h) vs the per-SNP grid search LMM.fit(X=x) (bounded Brent, xatol
+# 1e-10, whose stopping rule is about sqrt(eps) |h| ~ 1.5e-8 |h|).  Both maximise
+# the same likelihood; they differ by where each stops, so the differences are the
+# grid search's imprecision.  Measurement (macOS arm64, numpy 2.5 / Accelerate;
+# the scenarios of tests/test_association_tests.py with 8 seeds each: centred GRM
+# at h2 0, 0.5, 0.8, 0.98 with 0-3 covariates of scales 1 to 1000, a
+# strain-expanded singular K at h2 = 1, a positive definite K; REML and ML; 1440
+# fits; plus the first 300 HMDP SNPs on the 94-strain K, REML and ML):
+#   max |dh|                                   8.9e-8
+#   max |d log-likelihood|                     1.8e-12
+#   t, p, beta, beta_var: max |a - b| / max|b|  5.8e-8;
+#       max |a - b| / |b| for |b| >= 1% of max|b|  6.0e-7  (HMDP, ML)
+# The full S9 run (sims/studies/s9_tests.py: 720 replicates x 20 SNPs x REML and ML,
+# 28,800 fits) stayed within: max |dh| 3.6e-7 (flat profiles), LL 2.9e-12.
+# REFIT_H_ATOL is ~28x the worst |dh|, REFIT_LL_ATOL ~350x the worst LL difference,
+# REFIT_RTOL ~17x and REFIT_ATOL_SCALE ~17x the worst statistics.
+REFIT_H_ATOL = 1e-5
+REFIT_LL_ATOL = 1e-9
+# The exact refit's maximum vs the dense oracle's (sims/oracle.py: Cholesky of the
+# n x n H per h, pylmm's eigenvalue floor applied densely): the oracle's own
+# log-likelihood carries ~1e-10 of rounding at n = 100 with h near 1 (cond(H) up to
+# 1e6).  Measured in the full S9 run (760 replicates, REML and ML, n = 100-300):
+# largest shortfall of the exact fit below the oracle 3.3e-10 (n = 100); 9.2e-12 at
+# n = 300.  ORACLE_LL_ATOL is ~30x the worst.
+ORACLE_LL_ATOL = 1e-8
+# The LRT's reduced ML (LMM._lrt_model, lrt_null_fit, lrt_batch) vs a dense
+# reference (tests/test_association_tests.py: Z = null directions of the floored K in
+# span(X0) found densely, the likelihood of Q'y with Q the complement of Z, a
+# 401-point grid and Brent).  Measured: 30 null fits (n = 80; centred GRM at h2 0,
+# 0.3, 0.8, 0.95 with 0-2 covariates, and a centred strain-expanded K; 6 seeds; 5 at
+# h = 1) max |d log-likelihood| 4.4e-13, max |dh| 1.0e-7; 120 LRT statistics max
+# |d stat| 7.6e-13.  REDUCED_ML_LL_ATOL is ~230x the worst.
+REDUCED_ML_LL_ATOL = 1e-10
+REFIT_RTOL = 1e-5
+REFIT_ATOL_SCALE = 1e-6
+# The analytic first and second derivatives of the log-likelihood in h
+# (LMM._snp_terms) vs a fourth-order central difference (one-sided second-order at
+# h = 0), step 1e-5, at h in {0, 0.2, 0.55, 0.9, 0.99}: max |error| / (max
+# |derivative| + 1), same measurement setup (4 seeds, 0 and 2 covariates, REML and
+# ML): 3.2e-9 (first), 4.2e-10 (second).  DERIV_RTOL is ~30x the worst.  (A
+# second-order difference at that step is off by up to 1e-4 near h = 1, where the
+# ML profile curves sharply: it measures the difference formula, not the
+# derivative.)
+DERIV_RTOL = 1e-7
+# The REML second derivative at exactly h = 1 with a centred K: the floored direction
+# the intercept spans gives ~1e12-sized terms in tr(P0 D P0 D) that cancel (see
+# LMM._snp_terms), so l'' is off by ~1e-5 relative there (the PR #31 review: 1.5e-5
+# against a 60-digit reference).  Measured against a second-order backward difference
+# (steps 1e-4 to 1e-6, 4 seeds, 0 and 2 covariates): l' 9.1e-8, l'' 9.0e-6 of (max
+# |derivative| + 1).  DERIV_H1_RTOL is ~11x the worst l''.  Harmless: only Newton's
+# step uses l''.
+DERIV_H1_RTOL = 1e-4
+# pylmm's statistics vs GEMMA's formulas (Zhou & Stephens 2012) computed on the
+# dense n x n matrices in tests/test_association_tests.py, where each likelihood is
+# maximised by its own bounded Brent search (xatol 1e-12, but Brent's rule stops at
+# ~sqrt(eps) |h|): relative differences in p of 2.6e-8 (score, through the null
+# ML h), 2.7e-13 (LRT), 2.9e-9 (refit Wald), and 6.6e-7 in lambda = h / (1 - h)
+# (a flat profile: the reference's own stopping error).  GEMMA_RTOL is ~40x and
+# GEMMA_LAMBDA_RTOL ~15x the worst.
+GEMMA_RTOL = 1e-6
+GEMMA_LAMBDA_RTOL = 1e-5
+
 # Kinship files (pylmm.kinship_io, tests/test_kinship_io.py).
 #
 # FLOAT32_ROUND_RTOL: a float64 value rounded to float32 (round to nearest, normal
@@ -317,6 +381,15 @@ def assert_ref_close(actual, reference, what=""):
     assert_close(
         actual, reference, rtol=BATCH_REF_RTOL, atol=BATCH_REF_ATOL_SCALE * scale, what=what
     )
+
+
+def assert_refit_close(actual, expected, what=""):
+    """Exact refit vs the per-SNP grid search (t, p, beta, beta_var): see REFIT_RTOL."""
+    expected_arr = np.asarray(expected, dtype=np.float64)
+    ok = ~np.isnan(expected_arr)
+    scale = np.abs(expected_arr[ok]).max() if ok.any() else 0.0
+    _record_batch_diff(actual, expected_arr, scale, "refit " + what)
+    assert_close(actual, expected_arr, rtol=REFIT_RTOL, atol=REFIT_ATOL_SCALE * scale, what=what)
 
 
 def assert_pvalues_valid(ps, what=""):

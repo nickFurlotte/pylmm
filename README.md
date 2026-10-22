@@ -49,7 +49,8 @@ uses to match samples. `results.tsv.gz` is a summary-statistics table, one row p
 of the GWAS Catalog format (GWAS-SSF): `chromosome`, `base_pair_location`, `effect_allele`, `other_allele`,
 `beta`, `standard_error`, `effect_allele_frequency`, `p_value`, then `variant_id`, `rsid`, `n`, `t_stat`,
 `neg_log_10_p_value`, `missing_rate` and `beta_std`. `beta` is the effect of one copy of the effect allele,
-A1 (the `.bim`'s 5th column; ALT for plink2 files), as in plink2 `--glm`. `results.json` records the run:
+A1 (the `.bim`'s 5th column; ALT for plink2 files), as plink2 `--glm omit-ref` reports it (plink2's default
+A1 is the minor allele). `results.json` records the run:
 inputs and their checksums, samples, the null fit, λ_GC, warnings. The first lines on the example data
 (fake phenotypes), the first eight columns:
 
