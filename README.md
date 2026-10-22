@@ -41,12 +41,28 @@ on the PATH after `pip install`, or prefix it with `uv run` after `uv sync`. It 
 ```bash skip-ci: full dataset, see just readme-example
 pylmm kinship --bfile data/snps.132k.clean.noX -o snps.kin
 pylmm gwas --bfile data/snps.132k.clean.noX --kinship snps.kin \
-  --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv
+  --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv.gz
 ```
 
 `pylmm kinship` writes the kinship matrix `snps.kin` and its sample IDs `snps.kin.id`, which `pylmm gwas`
-uses to match samples. `results.tsv` has one row per SNP: `SNP_ID`, `BETA`, `BETA_SD`, `F_STAT` (the
-signed t) and `P_VALUE`. `pylmm gwas --help` lists every option, with examples.
+uses to match samples. `results.tsv.gz` is a summary-statistics table, one row per SNP, in the column order
+of the GWAS Catalog format (GWAS-SSF): `chromosome`, `base_pair_location`, `effect_allele`, `other_allele`,
+`beta`, `standard_error`, `effect_allele_frequency`, `p_value`, then `variant_id`, `rsid`, `n`, `t_stat`,
+`neg_log_10_p_value`, `missing_rate` and `beta_std`. `beta` is the effect of one copy of the effect allele,
+A1 (the `.bim`'s 5th column; ALT for plink2 files), as in plink2 `--glm`. `results.json` records the run:
+inputs and their checksums, samples, the null fit, λ_GC, warnings. The first lines on the example data
+(fake phenotypes), the first eight columns:
+
+```text
+chromosome  base_pair_location  effect_allele  other_allele  beta                   standard_error        effect_allele_frequency  p_value
+1           3125499             1              2             -0.006020305306603742  0.043678365296861414  0.1640625                0.8903954716467897
+1           3125701             1              2             0.07467021988242327    0.05271942942485441   0.09499575911789648      0.15692309125031273
+```
+
+(This file's `.bim` names its alleles `1` and `2`; the table is tab-separated, aligned here.)
+
+`pylmm gwas --help` lists every option, with examples; `--output-format legacy` writes the five columns of
+pylmm 1.0.0 (`SNP_ID BETA BETA_SD F_STAT P_VALUE`).
 
 ### Python
 

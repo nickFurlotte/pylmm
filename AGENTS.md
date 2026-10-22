@@ -18,7 +18,8 @@ This file is for coding agents working in this repo or with pylmm; humans should
 | `pylmm/samples.py` | sample IDs `(FID, IID)`, `align_samples`, `.id` files, `InputError` |
 | `pylmm/loco.py` | leave-one-chromosome-out: `LocoKinship` (every K_{-c} in one pass), `gwas_loco` |
 | `pylmm/misc.py` | `fit_two`, two-kinship variance components |
-| `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship` |
+| `pylmm/sumstats.py` | the summary-statistics table `pylmm gwas` writes: `SumStats`, `write_sumstats`, `read_sumstats`, per-allele conversion |
+| `pylmm/cli/` | the `pylmm` command: `pylmm gwas`, `pylmm kinship`; `run_record.py`, the JSON run record of `pylmm gwas` |
 | `tests/` | pytest suite; `tests/golden/` = reference outputs of the original Python 2 code; `tests/helpers.py` = all tolerances |
 | `sims/` | simulation framework (genotype/phenotype generators, oracle, studies); `sims/bench/`: Phase 6 speed benchmarks (`just bench <name> [--quick]`, e.g. `gwas_batch`, `bed_blocks`) |
 | `docs/` | [guide.md](docs/guide.md) (library user guide), [replication.md](docs/replication.md) (two published mouse GWAS reanalysed: one partially replicated, one replicated), conventions, reports on the Python 2 baseline, the port and the simulation studies, `migration/` maps |
@@ -115,10 +116,14 @@ use `skills/` directly, or copy it to `.claude/skills`.
 
 ## Known caveats (read before trusting a number)
 
-* **Genotype coding**: a BED genotype is the *fraction of copies of A2* (`.bim` column 6): 0, 0.5, 1, nan.
-  plink2-written `.bim` files have A2 = REF, so pylmm's effect allele is REF, opposite to plink2 `--glm`.
-  Output `BETA` is per SD of the standardised genotype, `BETA_SD` is its standard error, `F_STAT` is the
-  signed t. See `interpret-gwas-results`.
+* **Genotype coding and effect allele**: the reader's genotype is the *fraction of copies of A2*
+  (`.bim` column 6): 0, 0.5, 1, nan. `pylmm gwas` output (default: the summary-statistics table,
+  `pylmm.sumstats`) reports `beta`/`standard_error` **per copy of A1** (`effect_allele`, `.bim` column 5;
+  ALT for plink2-written files, as plink2 `--glm omit-ref`), `t_stat` signed for A1, `beta_std` per SD.
+  The library is different: `gwas`/`LMM.association` give the effect per unit of the column you pass (per
+  0 -> 1 of the A2 fraction for raw reader genotypes: opposite sign, 2x scale), and
+  `--output-format legacy` keeps 1.0.0's `BETA` per SD of A2. Check the allele before the sign. See
+  `interpret-gwas-results`.
 * **Add the intercept to library `X0`.** `LMM`/`gwas` use `X0` exactly as given (default: an intercept
   alone); `read_covariates` returns no intercept column: `X0 = np.column_stack([np.ones(n), cov])`.
   `pylmm gwas --covar` adds it (unless `--no-intercept`).

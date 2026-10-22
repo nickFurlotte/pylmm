@@ -110,7 +110,11 @@ Behaviour changes with no rename (check numbers, not just that the code runs):
   the individual instead of failing.
 * Untestable SNPs (constant, collinear, all missing) give `nan` instead of `t ≈ 1e-8` or a crash.
 * Messages go to the `pylmm` logger (`pylmm: warning: ...`), errors exit 2 with one line.
-* The default GWAS output (`SNP_ID BETA BETA_SD F_STAT P_VALUE`) is byte-identical for the same inputs.
+* The GWAS output of pylmm 1.0.0 (`SNP_ID BETA BETA_SD F_STAT P_VALUE`) is now
+  `--output-format legacy`; `pylmm gwas --output-format legacy --legacy-fit --no-batch` writes 1.0.0's
+  bytes for the same inputs. The default output is now a summary-statistics table with `beta` per copy of
+  A1 (the opposite allele to the old BETA, and per allele instead of per SD), see
+  `interpret-gwas-results`. A script that parses the old columns: add `--output-format legacy`.
 
 ## 4. When the script is not enough
 

@@ -5,11 +5,46 @@ Entries read "old -> new". "Default CLI output" (the GWAS output file of `pylmm 
 without `--refit`, `--remove-missing-genotypes` or `--ml`) is unchanged by every entry below, except in
 [Unreleased] by the batched tests (last-digit differences for well-conditioned covariates, up to a few 1e-6
 relative with a badly scaled covariate, where the new numbers are the more accurate) and by the new h search
-(*Variance-component fit*; `--legacy-fit --no-batch` gives the 1.0.0 output); see there. Entries written
+(*Variance-component fit*; `--legacy-fit --no-batch` gives the 1.0.0 output); see there. **In [Unreleased] the
+output file itself changed: `pylmm gwas` writes a summary-statistics table by default (*Output format*
+below); `--output-format legacy` writes the old columns.** Entries written
 before the single `pylmm` command use the command and flag names of their time ([`docs/migration/cli-map.csv`](docs/migration/cli-map.csv)
 maps them).
 
 ## [Unreleased]
+
+### Output format (changed default; read this first)
+
+`pylmm gwas` writes a new table by default; `--output-format legacy` keeps the old one.
+
+- **Columns.** Old: `SNP_ID BETA BETA_SD F_STAT P_VALUE`. New: a tab-separated table in the column order
+  of the GWAS Catalog summary-statistics format (GWAS-SSF v1.1.0): `chromosome base_pair_location
+  effect_allele other_allele beta standard_error effect_allele_frequency p_value`, then `variant_id rsid n
+  t_stat neg_log_10_p_value missing_rate beta_std`. Missing values: `nan` -> `NA`.
+- **Effect allele and scale (the sign flips).** Old: `BETA` per SD of the standardised **A2** dosage
+  (`.bim` column 6, REF for plink2-written files), `F_STAT` its t. New: `beta` / `standard_error` per
+  **copy of A1** (`.bim` column 5; ALT for plink2 files; for EMMA input the allele coded 1), the convention
+  of plink2 `--glm`, REGENIE, GEMMA and GWAS-SSF; `t_stat` is signed for A1 (= -F_STAT for PLINK input);
+  `beta_std` is `beta` times the SD of the A1 count. With K = identity, `beta`, SE, t, p, frequency and `n`
+  equal plink2 `--glm omit-ref` to its printed precision (tests/test_sumstats.py).
+- **`--remove-missing-genotypes` (6.3d).** Old: `BETA` per 0 -> 1 step of the A2 fraction for SNPs without
+  a missing call and per SD for the others. New: `beta` is per copy of A1 for every SNP.
+- **p-values.** New `neg_log_10_p_value`, finite where p underflows; `p_value` is then written from it in
+  scientific notation (6 significant digits, e.g. `3.16228e-401`) instead of `0.0`.
+- **Files.** `-o FILE` is gzip-compressed if FILE ends in `.gz` (e.g. `-o results.tsv.gz`; the gzip header
+  has no time stamp, so a rerun gives the same bytes). New: a JSON run record next to it (`results.tsv.gz`
+  -> `results.json`): command line, inputs with size, time and SHA-256, samples dropped by reason, model,
+  kinship scale, the null fit (per chromosome with `--loco`), lambda_GC, SNPs not tested by reason, the
+  warnings logged and timings (`pylmm.cli.run_record`, schema `pylmm.gwas.run/1`). It is written on errors
+  too (`"status": "error"`).
+- **`--emma-map`** no longer needs `--loco`: with `--emma-geno` it fills the chromosome, position and allele
+  columns (header columns `chr`, `bp`/`bp_<build>`/`pos`, `allele0`, `allele1`); without it they are `NA`.
+- **Library.** `pylmm.sumstats`: `SumStats` (the table; `SumStats.from_genotypes` from a `gwas` scan and the
+  raw genotypes), `write_sumstats`, `read_sumstats`, `SumstatsWriter`, `per_allele_effects`, `allele_count_stats`,
+  `format_p_values`, `lambda_gc`. `pylmm.genotypes.normalize_block` standardises a raw block in place, bit
+  for bit as the readers do.
+- `--output-format legacy` is byte for byte the previous default output (checked on the README data and
+  ten other configurations), and `--output-format legacy --legacy-fit --no-batch` the 1.0.0 output.
 
 ### Added
 - Variant metadata: `PlinkReader.variants` -> the `.bim` columns of every SNP (`chrom`, `snp`, `cm`, `bp`,

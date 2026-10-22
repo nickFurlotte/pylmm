@@ -85,7 +85,7 @@ plink_tools.write_pheno("geno.pheno", ids, np.column_stack([y_raw, y_log, y_rint
 
 ```bash
 pylmm kinship --bfile geno -o geno.kin -v
-pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name log -o log.tsv -v
+pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name log -o log.tsv.gz -v
 ```
 
 ## SNP QC
@@ -125,20 +125,20 @@ Build the kinship from the QC'd SNPs as well (`pylmm kinship --bfile geno_qc`).
 
 A scan reports SNPs; results are loci. `skills/interpret-gwas-results/scripts/summarize_gwas.py` defines
 them by distance (`--clump-kb KB`: the best SNP, then every SNP within KB of it on its chromosome, then
-the best SNP left), with `--per-allele` effects for each lead (see `interpret-gwas-results` sections 2
+the best SNP left), with the per-allele effect of each lead (see `interpret-gwas-results` sections 2
 and 6):
 
 ```bash
-pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name rint -o rint.tsv -v
-uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py rint.tsv --bfile geno --per-allele --clump-kb 2000 --clump-p 1e-5 --top 5
+pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name rint -o rint.tsv.gz -v
+uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py rint.tsv.gz --clump-kb 2000 --clump-p 1e-5 --top 5
 ```
 
 An LD-based interval around a lead SNP: the SNPs within the window whose genotypes correlate with the
 lead's at r² ≥ 0.8 (a common choice; inbred panels often need a stricter one, as LD is long):
 
 ```python
-res = summarize_gwas.read_results("rint.tsv")
-bim = summarize_gwas.read_bim("geno")
+res = summarize_gwas.read_results("rint.tsv.gz")
+bim = summarize_gwas.positions(res)                              # chrom, pos, alleles of the table
 lead = summarize_gwas.rank(res)[0]
 with PlinkReader("geno") as r:                                   # standardised, missing -> 0
     W = np.column_stack([g for g, _ in r])
@@ -146,7 +146,7 @@ window = np.flatnonzero((bim["chrom"] == bim["chrom"][lead]) & (np.abs(bim["pos"
 r2 = np.array([np.corrcoef(W[:, lead], W[:, j])[0, 1] ** 2 for j in window])
 interval = window[r2 >= 0.8]
 print("lead %s chr%s:%d; r2 >= 0.8 interval %d-%d (%d SNPs)" % (
-    res["SNP_ID"][lead], bim["chrom"][lead], bim["pos"][lead],
+    res["id"][lead], bim["chrom"][lead], bim["pos"][lead],
     bim["pos"][interval].min(), bim["pos"][interval].max(), len(interval)))
 lo, hi = bim["pos"][interval].min(), bim["pos"][interval].max()
 assert lo <= bim["pos"][500] <= hi            # the planted SNP 500 lies in the lead's interval

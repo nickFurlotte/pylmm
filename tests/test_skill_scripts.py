@@ -189,7 +189,9 @@ def test_migrate_runs_through_either_path(script, tmp_path):
     p = _migrate(
         script, "--command", "pylmmGWAS --bfile x --kfile x.kin out.txt", cwd=str(tmp_path)
     )
-    assert p.stdout.strip() == "pylmm gwas --bfile x --kinship x.kin -o out.txt"
+    assert (
+        p.stdout.strip() == "pylmm gwas --bfile x --kinship x.kin --output-format legacy -o out.txt"
+    )
 
 
 def test_migrate_notes(tmp_path):
@@ -201,7 +203,10 @@ def test_migrate_notes(tmp_path):
     assert "old.py:3: Python 2 idiom True - np.isnan(...)" in p.stderr
     assert "use ~np.isnan(...)" in p.stderr
     p = _migrate(MIGRATE_REAL, "--command", "pylmmGWAS --bfile x --kfile x.kin --refit out.txt")
-    assert p.stdout.strip() == "pylmm gwas --bfile x --kinship x.kin --refit -o out.txt"
+    assert (
+        p.stdout.strip()
+        == "pylmm gwas --bfile x --kinship x.kin --refit --output-format legacy -o out.txt"
+    )
     assert "--refit: each SNP's fit is now by REML" in p.stderr
 
 
