@@ -26,6 +26,33 @@ Tab-separated, one line per `.bim` SNP, in `.bim` order:
 
 All four values are `nan` for an untestable SNP (constant, collinear with covariates, all missing).
 
+**The LRT** (`--test lrt`, `gwas(test="lrt")`): `F_STAT` is the signed square root of the
+likelihood-ratio statistic and `P_VALUE` is from chi2(1); `BETA` / `BETA_SD` come from the ML fit with the
+SNP, so `BETA / BETA_SD` is not `F_STAT`. Which to use:
+
+* **Wald, null fit (default)**: the genome-wide scan. Calibrated in the simulations (`sims/studies/s9_tests.md`).
+* **Wald with `--refit`**: at strong loci, where the null fit's h absorbed part of the SNP's effect and the
+  default p-value is conservative; and to compare with EMMA or GEMMA (`-lmm 1` is a refitted Wald test).
+  Slightly anti-conservative at n ~ 100 (1.2-1.4x the nominal rate at 1e-4 / 1e-5 in S9).
+* **LRT** (`--test lrt`): ML fits with and without each SNP, chi2(1). With pylmm's centred kinship
+  and an intercept the plain ML likelihood has no maximum (it grows as h -> 1), and both fits would sit at
+  h = 1 in most replicates whatever the true h², making the LRT anti-conservative (S9: λ_GC up to 1.14,
+  2.4x the nominal rate at 1e-5). pylmm's LRT therefore leaves out the kinship's null directions that the
+  covariates span (reduced ML): calibrated like the refitted Wald test (λ_GC 0.99-1.03; 1.2-1.35x at 1e-4 /
+  1e-5 at n = 100, no correction for the fitted variance component). It differs from GEMMA's `-lmm 2`,
+  which centres K and keeps the plain ML (its fits sit at its bound lambda = 1e5). In panels where most
+  strains have one animal and a few have two, the LRT can still be ill-posed: a warning that its null
+  model has no maximum (then its p-values are anti-conservative), or `nan` lines for SNPs whose calls
+  differ within a strain (counted in the log). Use the Wald test for such panels. A `nan` LRT line is a
+  "not tested", not a non-significant SNP.
+* **Score test**: not a `--test` option; `LMM.score_batch` reproduces GEMMA's `-lmm 3`. It is a monotone
+  function of the default Wald statistic (same ranking), conservative in the tail (n = 100: 0.1x the
+  nominal rate at 1e-5), and its p-value has a floor (t² <= n - q: about 9.7e-6 at n = 30, 7.4e-9 at n =
+  50), so a GEMMA `-lmm 3` scan of a small panel cannot reach genome-wide significance.
+
+A SNP significant under one test and far from it under another is a SNP to look at (a strong effect, a
+boundary h, few distinct genotypes).
+
 ```python
 import sys
 import numpy as np

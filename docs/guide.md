@@ -49,9 +49,10 @@ Y = X0 b + x a + u + e,    u ~ N(0, h s2 K),    e ~ N(0, (1 - h) s2 I)
 * `h` is the heritability (the share of the total variance `s2` carried by `K`; see section 5 for when
   that equals the h² of a paper), `s2` is called `sigma` in the code.
 * `x` is one SNP. `association` and `gwas` test `a = 0` with a Wald t test, `t = a_hat / se`, against a
-  t distribution with `n - q - 1` degrees of freedom.
+  t distribution with `n - q - 1` degrees of freedom. `gwas(test="lrt")` (`--test lrt`) uses the
+  likelihood-ratio test instead (section 7).
 * By default `h` and `s2` are fitted once without a SNP (the "null fit") and reused for every SNP (EMMAX /
-  P3D). `refit=True` (`--refit`) refits them per SNP.
+  P3D). `refit=True` (`--refit`) refits them per SNP, exactly (`LMM.fit_snps`).
 * REML is the default everywhere (`reml=True`, `--reml`); `reml=False` / `--ml` is maximum likelihood.
 
 The modules: `pylmm.lmm` (`LMM`, `gwas`), `pylmm.kinship` (`calculate_kinship`, `kinship_scale`), `pylmm.plink_io` (`PlinkReader`),
@@ -431,7 +432,8 @@ t_null, p_null = model.association(W[:, 1500])   # t and p only
 * `beta` is per unit of the column you pass: here per SD of the standardised genotype.
 * `association` does not check that the SNP is estimable (not constant, not collinear with `X0`):
   `pylmm.lmm.snp_estimable(x, X0)` does, as `gwas` does for you.
-* `fit(X=x)` followed by `association(x)` is the per-SNP refit.
+* `fit(X=x)` followed by `association(x)` is the per-SNP refit; `model.fit_snps(X)` does it for a block
+  of SNPs at once (section 7).
 
 `association_batch` runs the same test on many complete SNPs at once: it rotates the whole block with
 one matrix product and fits each SNP in closed form against the null model, so it is many times faster
@@ -485,16 +487,65 @@ as above. Other options: `reml=False` (ML everywhere), `refit=True`, and `ids=` 
 `gwas` check that Y and K list the same individuals in the same order.
 
 **Speed.** `gwas` tests the complete SNPs (no `nan`) in blocks of `block_size=1024` with
-`LMM.association_batch` (section 6); SNPs with missing calls, and every SNP with `refit=True`, are tested
-one at a time. `batch=False` tests every SNP one at a time, the code path of pylmm 1.0.0: slower, and the
-same numbers up to rounding for well-conditioned covariates (see section 6 for badly scaled ones). A block
-takes about 6-8 arrays of `n * block_size` floats. `pylmm gwas --block-size N` and `--no-batch` do the same
+`LMM.association_batch` (section 6), or `LMM.fit_snps` with `refit=True` (below); SNPs with missing calls
+are tested one at a time. `batch=False` tests every SNP one at a time, the code path of pylmm 1.0.0
+(with `refit=True`, `fit(X=x)` per SNP): slower, and the same numbers up to rounding for well-conditioned
+covariates (see section 6 for badly scaled ones). A block
+takes about 6-8 arrays of `n * block_size` floats, with `refit=True` and `test="lrt"` too. `pylmm gwas --block-size N` and `--no-batch` do the same
 on the command line, where the genotypes are also read a block at a time (`iter_blocks`, below), as in
 `pylmm kinship`.
 
 ```python
 ts_one, _ = gwas(Y, W[:, :200], K, kva, kve, batch=False)
 assert np.allclose(ts[:200], ts_one, rtol=1e-9, equal_nan=True)
+```
+
+**Which test.** `test="wald"` (the default) or `"lrt"`, and `refit=True` for the Wald test (GEMMA's
+`-lmm 1` is a refitted Wald test, `-lmm 2` an LRT):
+
+| test | variance components | cost (S9) | use it |
+|---|---|---|---|
+| Wald (default) | the null fit, reused (EMMAX / P3D) | one matrix product per block | genome-wide scans: calibrated, the fastest |
+| Wald, `refit=True` | REML (or ML) with each SNP in the model | 12-24x the default (`fit_snps`; 11-61x less than a per-SNP search) | strong-effect loci, where the null fit absorbs part of the SNP's effect and P3D is conservative; to match an EMMA / GEMMA analysis. Mildly anti-conservative at n ~ 100 (1.2-1.4x at 1e-4 / 1e-5) |
+| LRT, `test="lrt"` | (reduced) ML fits with and without each SNP | 7.5-15x the default | a likelihood-ratio statistic (chi2(1)): calibrated and powered like the refit, the same mild excess at n ~ 100 |
+
+`sims/studies/s9_tests.md` measures their calibration, power and cost. The LRT is always maximum
+likelihood (REML likelihoods of models with different fixed effects cannot be compared), whatever `reml`
+and `refit` say. Plain ML has a problem with pylmm's centred kinship (`K 1 = 0`) and an intercept: the
+intercept fits `y` exactly along K's null direction, the likelihood grows without bound as h -> 1 (section
+12), and both fits sit at h = 1 in most replicates at n <= 300, whatever the true h² (S9: 90-100% at n =
+100). An LRT of those fits is anti-conservative (λ_GC up to 1.14, 2.4x at 1e-5). So `test="lrt"` drops
+the null directions of K that the covariates span (here one) from both fits: the exact likelihood of the
+remaining n - 1 contrasts, the same for both models, so the comparison stays nested (`LMM.lrt_batch`,
+`LMM.lrt_null_fit`). Where K has no such direction it is the plain ML LRT, GEMMA's; GEMMA centres every K
+and keeps the plain ML, so with a centred K the two differ. `gwas` returns the signed square root of the LRT
+statistic in place of t.
+
+The reduction does not cure every unbounded case. **In panels where most strains have one animal and a
+few have two or more**, the pairs' null directions can be fitted exactly by a covariate (the null model
+has no ML maximum: `lrt_null_fit` warns) or by a SNP whose calls differ between the animals of a strain
+(that SNP's LRT is `nan`, counted in one warning, `LMM.lrt_unbounded`). Use the Wald test there: it is the
+safe choice for such panels. With `--remove-missing-genotypes` (or `gwas` on SNPs with missing calls) each
+such SNP is tested on its called individuals, whose kinship is no longer centred, so nothing is dropped
+and the null ML fit often reaches h = 1; its calibration stayed acceptable in the review's check (λ_GC
+1.04 at h² = 0, 0.99 at 0.3, n = 100, 3% missing calls).
+
+The score test (GEMMA `-lmm 3`) is the library function `LMM.score_batch`, not a `gwas` test: its
+statistic is a monotone function of the default Wald statistic (the same ranking, no new information), and
+it is bounded (t² <= n - q), so its p-value has a floor: about 9.7e-6 at n = 30, 7.4e-9 at n = 50.
+
+```python
+ts_rf, ps_rf = gwas(Y, W[:, :200], K, kva, kve, refit=True)       # Wald, each SNP's own h
+ts_lrt, ps_lrt = gwas(Y, W[:, :200], K, kva, kve, test="lrt")     # ML fits with and without each SNP
+print("SNP 100: -log10 p Wald %.1f, refit %.1f, LRT %.1f" % tuple(
+    -np.log10(p[100]) for p in (ps, ps_rf, ps_lrt)))
+assert max(ps_rf[100], ps_lrt[100]) < 1e-8
+model = LMM(Y, K, kva, kve)
+fits = model.fit_snps(W[:, 95:105])                        # h, ll and the Wald test, per SNP
+print("h with SNP 100 in the model: %.3f" % fits.h[5])
+print("the LRT's null fit (h, ML log-likelihood):", model.lrt_null_fit())
+model.fit(reml=False)
+score = model.score_batch(W[:, 95:105], reml=False)        # GEMMA's -lmm 3, for comparison
 ```
 
 **Leave one chromosome out (LOCO).** A K built from the tested SNPs partly explains them (proximal
@@ -608,6 +659,9 @@ The output is tab-separated, one line per SNP, in `.bim` order:
 | `F_STAT` | the signed **Wald t statistic**, `BETA / BETA_SD` (despite the name; t² is the F) |
 | `P_VALUE` | two-sided, from t(n - q - 1) |
 
+With `--test lrt`, `F_STAT` is the signed square root of the LRT statistic and `P_VALUE` its chi2(1)
+p-value; `BETA` and `BETA_SD` are those of the ML fit with the SNP (so `BETA / BETA_SD` is not `F_STAT`).
+
 `nan` in all four value columns marks a SNP that cannot be tested.
 
 ```python
@@ -655,7 +709,9 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
   (pylmm 1.0.0's, or `--eigen-text` without its `.id`) is used only when no individual is dropped or
   reordered, with a warning.
 * SNPs with missing calls under `--remove-missing-genotypes` (or library `gwas`) each cost an
-  eigendecomposition; `--refit` costs a likelihood search per SNP.
+  eigendecomposition; `--refit` and `--test lrt` fit each SNP's model (a block at a time: about 12-24x
+  and 7.5-15x the default scan, 11-61x faster than the per-SNP search of `--refit --no-batch`;
+  `sims/bench/refit.py`).
 * Process SNPs in blocks with `reader.iter_blocks(block_size)` rather than building a full genotype matrix;
   for a BED file it also decodes 2-6x faster than `iter_snps` (unstandardised; about 2x standardised, on
   1219 mice; `sims/bench/bed_blocks.py` measures it). `pylmm gwas` and
