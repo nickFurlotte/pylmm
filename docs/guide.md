@@ -490,6 +490,15 @@ remaining n - 1 contrasts, the same for both models, so the comparison stays nes
 and keeps the plain ML, so with a centred K the two differ. `gwas` returns the signed square root of the LRT
 statistic in place of t.
 
+The reduction does not cure every unbounded case. **In panels where most strains have one animal and a
+few have two or more**, the pairs' null directions can be fitted exactly by a covariate (the null model
+has no ML maximum: `lrt_null_fit` warns) or by a SNP whose calls differ between the animals of a strain
+(that SNP's LRT is `nan`, counted in one warning, `LMM.lrt_unbounded`). Use the Wald test there: it is the
+safe choice for such panels. With `--remove-missing-genotypes` (or `gwas` on SNPs with missing calls) each
+such SNP is tested on its called individuals, whose kinship is no longer centred, so nothing is dropped
+and the null ML fit often reaches h = 1; its calibration stayed acceptable in the review's check (λ_GC
+1.04 at h² = 0, 0.99 at 0.3, n = 100, 3% missing calls).
+
 The score test (GEMMA `-lmm 3`) is the library function `LMM.score_batch`, not a `gwas` test: its
 statistic is a monotone function of the default Wald statistic (the same ranking, no new information), and
 it is bounded (t² <= n - q), so its p-value has a floor: about 9.7e-6 at n = 30, 7.4e-9 at n = 50.

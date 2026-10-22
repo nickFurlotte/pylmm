@@ -112,7 +112,11 @@ maps them).
   `pylmm.loco.gwas_loco(..., test=)` and `pylmm gwas --loco --test lrt` (one LRT null fit per chromosome).
   On a kinship with no such null direction the p-values equal GEMMA 0.98.5's `-lmm 2` to its 6 printed
   digits (and `--refit` its `-lmm 1`); GEMMA centres every K and keeps the plain ML, so with a centred K
-  and an intercept they differ.
+  and an intercept they differ. Not every unbounded case is cured by the reduction: where the covariates'
+  rows in K's null block have full rank without spanning a null direction (e.g. strains of one animal
+  except a few pairs, with a covariate), `lrt_null_fit` warns that the null model has no ML maximum
+  (use the Wald test); a SNP that completes that rank (its calls differ within a strain) gets a `nan`
+  LRT, counted in one warning (`gwas`; `pylmm gwas` logs it) and in `LMM.lrt_unbounded`.
 - `LMM.score_batch(X, h=None, reml=True)`: the score test at the null fit, for comparison with GEMMA's
   `-lmm 3` (`reml=False`). Library only: it is a monotone function of the null-fit Wald statistic (the
   same ranking) and its p-value has a floor (t² <= n - q: about 9.7e-6 at n = 30, 7.4e-9 at n = 50).

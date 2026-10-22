@@ -40,7 +40,11 @@ SNP, so `BETA / BETA_SD` is not `F_STAT`. Which to use:
   2.4x the nominal rate at 1e-5). pylmm's LRT therefore leaves out the kinship's null directions that the
   covariates span (reduced ML): calibrated like the refitted Wald test (λ_GC 0.99-1.03; 1.2-1.35x at 1e-4 /
   1e-5 at n = 100, no correction for the fitted variance component). It differs from GEMMA's `-lmm 2`,
-  which centres K and keeps the plain ML (its fits sit at its bound lambda = 1e5).
+  which centres K and keeps the plain ML (its fits sit at its bound lambda = 1e5). In panels where most
+  strains have one animal and a few have two, the LRT can still be ill-posed: a warning that its null
+  model has no maximum (then its p-values are anti-conservative), or `nan` lines for SNPs whose calls
+  differ within a strain (counted in the log). Use the Wald test for such panels. A `nan` LRT line is a
+  "not tested", not a non-significant SNP.
 * **Score test**: not a `--test` option; `LMM.score_batch` reproduces GEMMA's `-lmm 3`. It is a monotone
   function of the default Wald statistic (same ranking), conservative in the tail (n = 100: 0.1x the
   nominal rate at 1e-5), and its p-value has a floor (t² <= n - q: about 9.7e-6 at n = 30, 7.4e-9 at n =
