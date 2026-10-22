@@ -38,7 +38,7 @@ Supported formats
 
 ``type="pgen"``: PLINK 2 binary (PGEN/PVAR/PSAM)
     ``<fbase>.pgen``, ``<fbase>.pvar`` (or ``.pvar.zst``) and ``<fbase>.psam``,
-    read with the optional package pgenlib (``pip install 'pylmm[pgen]'``);
+    read with the optional package pgenlib (``pip install pgenlib``);
     see :mod:`pylmm.pgen`.  The genotype is the fraction of copies of REF
     (the A2 of the ``.bim`` plink2 writes for the file), dosages included
     unless ``dosage=False``; multiallelic variants are an error.
@@ -1289,7 +1289,7 @@ class PlinkReader:
         if not found.any():
             raise InputError(
                 "none of the %d individuals of the genotype file appear in the %s file %s "
-                "(matched on %s; e.g. %s %s)"
+                "(matched on %s; e.g. %s %s)%s"
                 % (
                     len(indivs),
                     what,
@@ -1299,6 +1299,7 @@ class PlinkReader:
                     else "the first two columns, FID and IID",
                     indivs[0][0],
                     indivs[0][1],
+                    self._iid_hint(indivs, keys),
                 )
             )
         out = np.full((len(indivs), P.shape[1]), np.nan)
@@ -1318,6 +1319,26 @@ class PlinkReader:
                 stacklevel=3,
             )
         return out
+
+    def _iid_hint(self, indivs: list[SampleID], keys: list[SampleID]) -> str:
+        """A hint to use IID matching, when FID+IID matched nobody but the IIDs alone would.
+
+        The usual cause: a plink2 ``.psam`` (or ``.fam``) without FIDs, which
+        pylmm reads as FID ``0``, and a phenotype file with FID = IID.
+        """
+        if self.id_match != "fid_iid":
+            return ""
+        try:
+            n = int((samples.match_index(indivs, keys, match="iid") >= 0).sum())
+        except ValueError:  # duplicate IIDs: IID matching would not work either
+            return ""
+        if not n:
+            return ""
+        zero = all(fid == "0" for fid, _ in indivs)
+        return ".  On the IID alone, %d of them match%s: use --id-match iid (id_match='iid')" % (
+            n,
+            " (the genotype file has no FIDs, so they are 0)" if zero else "",
+        )
 
     def _read_fam(self, base: str, type: str = "b") -> list[SampleID]:
         """Read ``(FID, IID)`` of each individual from ``.tfam`` ("t") or ``.fam``; sets ``N``."""

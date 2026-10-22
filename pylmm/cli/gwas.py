@@ -44,6 +44,7 @@ from pylmm.cli._common import (
     check_pfile_args,
     check_writable,
     genotype_source,
+    hardcalls_hint,
     log,
     positive_int,
 )
@@ -1692,7 +1693,8 @@ def compute_loco_kinship(
             loco.add_block(G, chroms[start : start + b])
         except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
             raise UsageError(
-                "--kinship-type %s, SNPs %d-%d: %s" % (kind, start + 1, start + b, e)
+                "--kinship-type %s, SNPs %d-%d: %s%s"
+                % (kind, start + 1, start + b, e, hardcalls_hint(reader))
             ) from e
         start += b
         del G

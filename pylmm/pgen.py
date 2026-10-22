@@ -7,7 +7,8 @@
 """PLINK 2 PGEN genotypes (``.pgen`` / ``.pvar`` or ``.pvar.zst`` / ``.psam``).
 
 Reading the ``.pgen`` file needs the optional package ``pgenlib``, plink2's own
-reader (LGPL-3.0), installed with ``pip install 'pylmm[pgen]'``.  It is
+reader (LGPL-3.0-only), installed with ``pip install pgenlib``
+(from a clone of pylmm: ``uv sync --extra pgen``).  It is
 imported only when genotypes are read, so the rest of pylmm, and the ``.psam``
 and plain-text ``.pvar`` parsers of this module, work without it.
 
@@ -59,7 +60,16 @@ Sample IDs
 From the ``.psam`` header (``#FID IID ...`` or ``#IID ...``; a file without a
 header line has the ``.fam`` columns ``FID IID ...``).  Without an FID column
 the FID is ``0``, as plink2 writes it to a ``.fam``, so PGEN and BED files of
-the same samples match by ``(FID, IID)``.
+the same samples match by ``(FID, IID)``; a phenotype file that repeats the IID
+as FID (plink 1.9's ``--double-id``) then matches only with ``id_match="iid"``
+(``--id-match iid``).  The SID column is ignored, and a sample listed twice
+(the same FID and IID) is an `InputError`.
+
+Variant IDs
+-----------
+The ``.pvar`` ID column is used as it is, as the ``.bim``'s is.  plink2 keeps a
+VCF's missing ID ``.``, so every such variant is named ``.`` in the output: give
+them IDs when converting (``plink2 ... --set-all-var-ids '@:#:$r:$a'``).
 
 Examples
 --------
@@ -104,7 +114,7 @@ from pylmm.genotypes import (
 )
 from pylmm.samples import InputError, SampleID
 
-INSTALL_HINT = "pip install 'pylmm[pgen]'"
+INSTALL_HINT = "pip install pgenlib (from a clone of pylmm: uv sync --extra pgen)"
 """How to install the optional reader (pgenlib)."""
 
 # pgenlib's code for a missing hard call or dosage.
@@ -161,8 +171,8 @@ def read_psam(path: str) -> list[SampleID]:
     Raises
     ------
     InputError
-        If the header has no IID column, a line has too few fields, or the
-        file lists no sample.
+        If the header has no IID column, a line has too few fields, the
+        file lists no sample, or a sample (FID, IID) twice.
 
     Examples
     --------
@@ -210,7 +220,17 @@ def read_psam(path: str) -> list[SampleID]:
             ids.append(("0" if i_fid is None else v[i_fid], v[i_iid]))
     if not ids:
         raise InputError("%s lists no samples" % path)
-    return ids
+    seen: set[SampleID] = set()
+    for dup in ids:
+        if dup in seen:
+            break
+        seen.add(dup)
+    else:
+        return ids
+    raise InputError(
+        "%s: the sample %s is listed twice (pylmm identifies samples by FID and IID; the SID "
+        "column is ignored)" % (path, samples.format_id(dup))
+    )
 
 
 def _check_biallelic(fn: str, ids: Sequence[str], alt: Sequence[str]) -> None:
@@ -323,7 +343,7 @@ def _read_pvar_pgenlib(path: str) -> Variants:
     try:
         pr = pgenlib.PvarReader(path.encode())
     except RuntimeError as e:
-        raise InputError("%s: %s" % (path, str(e).strip())) from e
+        raise InputError("%s: %s" % (path, _message(e))) from e
     try:
         m = pr.get_variant_ct()
         ids = [pr.get_variant_id(k).decode() for k in range(m)]
@@ -342,6 +362,14 @@ def _read_pvar_pgenlib(path: str) -> Variants:
     return Variants(snp=ids, chrom=chrom, bp=bp, a1=alt, a2=ref)  # type: ignore[arg-type]
 
 
+def _message(e: BaseException) -> str:
+    """The text of a pgenlib error (its argument may be ``bytes``), stripped."""
+    arg = e.args[0] if e.args else ""
+    if isinstance(arg, bytes):
+        arg = arg.decode("utf-8", "replace")
+    return str(arg).strip()
+
+
 def _open_reader(pgen: str, n_file: int, m: int | None, subset: NDArray[np.uint32] | None) -> Any:
     """A ``pgenlib.PgenReader`` of `pgen` (`n_file` samples, `m` variants or None), on `subset`."""
     pgenlib = _pgenlib()
@@ -350,15 +378,15 @@ def _open_reader(pgen: str, n_file: int, m: int | None, subset: NDArray[np.uint3
             pgen.encode(), raw_sample_ct=n_file, variant_ct=m, sample_subset=subset
         )
     except RuntimeError as e:
-        raise InputError(
-            "%s: %s (does it have the %d samples of the .psam%s?)"
-            % (
-                pgen,
-                str(e).strip(),
-                n_file,
-                "" if m is None else " and the %d variants of the .pvar" % m,
+        text = _message(e)
+        hint = ""
+        if "raw_sample_ct" in text:
+            hint = (
+                " (the .psam lists %d samples: are the .pgen and .psam of one file set?)" % n_file
             )
-        ) from e
+        elif "raw_variant_ct" in text and m is not None:
+            hint = " (the .pvar lists %d variants: are the .pgen and .pvar of one file set?)" % m
+        raise InputError("%s: %s%s" % (pgen, text, hint)) from e
 
 
 def check_pgen(pgen: str, n_file: int) -> None:
@@ -434,7 +462,8 @@ def iter_pgen_blocks(
                     R = _HARDCALL_VALUES[codes.astype(np.intp) + 9]
             except RuntimeError as e:
                 raise InputError(
-                    "%s: reading variants %d-%d failed: %s" % (pgen, start + 1, start + b, e)
+                    "%s: reading variants %d-%d failed (%s): is the file truncated or corrupt?"
+                    % (pgen, start + 1, start + b, _message(e))
                 ) from e
             if perm is not None:
                 R = R[:, perm]
@@ -470,7 +499,7 @@ class PgenSource:
 
     Reads ``prefix.pgen``, ``prefix.pvar`` (or ``prefix.pvar.zst``) and
     ``prefix.psam``.  Needs the optional package pgenlib
-    (``pip install 'pylmm[pgen]'``).  See the module docstring for the
+    (``pip install pgenlib``).  See the module docstring for the
     genotype coding (fraction of REF copies; ``a2`` is REF), dosages, sample
     IDs and multiallelic variants.
 
@@ -631,7 +660,7 @@ def write_pgen(
         Output prefix.
     G : array_like
         ``(n, m)`` genotypes.  Hard calls (``dosage=False``) must be 0, 0.5,
-        1 or nan.
+        1 or nan; dosages must be in [0, 1] or nan.
     sample_ids : sequence of (FID, IID)
         One per row; written as ``#FID IID``.
     variants : Variants
@@ -643,8 +672,9 @@ def write_pgen(
     Raises
     ------
     ValueError
-        If the shapes do not match, a column is missing from `variants`, or a
-        hard call is not 0, 0.5, 1 or nan.
+        If the shapes do not match, a column is missing from `variants`, a
+        hard call is not 0, 0.5, 1 or nan, or a dosage is not in [0, 1] or
+        nan (+-inf included).
     ImportError
         If pgenlib is not installed.
     """
@@ -658,11 +688,18 @@ def write_pgen(
     if variants.chrom is None or variants.bp is None or variants.a1 is None or variants.a2 is None:
         raise ValueError("write_pgen needs the chrom, bp, a1 and a2 columns of variants")
     n, m = A.shape
+    called = ~np.isnan(A)
+    if dosage:
+        bad = called & ~((A >= 0.0) & (A <= 1.0))  # inf is called and out of range
+        if bad.any():
+            i, k = np.argwhere(bad)[0]
+            raise ValueError(
+                "dosages must be in [0, 1] (fraction of REF copies) or nan, got %r at row %d, "
+                "column %d (%d such values)" % (float(A[i, k]), i, k, int(bad.sum()))
+            )
+    elif not np.isin(A[called], (0.0, 0.5, 1.0)).all():
+        raise ValueError("hard calls must be 0, 0.5, 1 or nan (fraction of REF copies)")
     alt = 2.0 - 2.0 * A  # copies of ALT
-    if not dosage:
-        called = ~np.isnan(alt)
-        if not np.isin(alt[called], (0.0, 1.0, 2.0)).all():
-            raise ValueError("hard calls must be 0, 0.5, 1 or nan (fraction of REF copies)")
     with open(prefix + ".psam", "w") as f:
         f.write("#FID\tIID\n")
         for fid, iid in sample_ids:

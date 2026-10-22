@@ -6,7 +6,7 @@ that a PGEN reads exactly as the BED plink2 converts it to or from (genotypes bi
 missing calls, allele orientation, sample IDs), that dosages are those of the VCF, and
 that ``pylmm gwas`` / ``pylmm kinship`` give byte-identical output from either.
 
-The genotype tests need the optional pgenlib (``pip install 'pylmm[pgen]'``) and are
+The genotype tests need the optional pgenlib (``pip install pgenlib``) and are
 skipped without it (the lowest-direct CI job); the .psam / .pvar parsers and the
 missing-pgenlib errors are tested everywhere.
 """
@@ -30,7 +30,9 @@ from pylmm.samples import InputError
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pgen")
 HAVE_PGENLIB = importlib.util.find_spec("pgenlib") is not None
-needs_pgenlib = pytest.mark.skipif(not HAVE_PGENLIB, reason="pgenlib not installed (pylmm[pgen])")
+needs_pgenlib = pytest.mark.skipif(
+    not HAVE_PGENLIB, reason="pgenlib not installed (pip install pgenlib)"
+)
 
 SWAPPED = [0, 3, 4, 8, 13, 21, 30, 39]  # swap.pgen: REF is hc.bed's A1 (make_inputs.SWAPPED)
 SNP12 = 11  # hc.bim's A1 is PLINK 1's missing allele "0"; plink2 writes "."
@@ -86,6 +88,7 @@ def test_read_psam_headers(tmp_path):
         ("#FID\tIID\nf1\n", "line 2: expected at least 2 fields"),
         ("#IID\n", "lists no samples"),
         ("", "lists no samples"),
+        ("#FID\tIID\tSID\nf1\ti1\ta\nf1\ti1\tb\n", r"the sample f1 i1 is listed twice .*SID"),
     ],
 )
 def test_read_psam_errors(tmp_path, text, match):
@@ -143,9 +146,13 @@ def test_pgen_paths(tmp_path):
 
 def test_missing_pgenlib_says_how_to_install(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "pgenlib", None)  # import pgenlib -> ImportError
-    with pytest.raises(ImportError, match=r"pip install 'pylmm\[pgen\]'"):
+    with pytest.raises(
+        ImportError, match=r"pip install pgenlib \(from a clone of pylmm: uv sync --extra pgen\)"
+    ):
         PgenSource(p("hc"))
-    with pytest.raises(ImportError, match=r"pip install 'pylmm\[pgen\]'"):
+    with pytest.raises(
+        ImportError, match=r"pip install pgenlib \(from a clone of pylmm: uv sync --extra pgen\)"
+    ):
         PlinkReader(p("hc"), type="pgen")
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
@@ -282,8 +289,19 @@ def test_pgen_errors(tmp_path):
     shutil.copy(p("hc.pvar"), bad + ".pvar")
     with open(p("hc.psam")) as f, open(bad + ".psam", "w") as g:
         g.writelines(f.readlines()[:-1])
-    with pytest.raises(InputError, match=r"does it have the 52 samples of the \.psam"):
+    with pytest.raises(
+        InputError, match=r"contains 53 samples\. \(the \.psam lists 52 samples"
+    ) as e:
         PgenSource(bad)
+    assert "b'" not in str(e.value) and 'b"' not in str(e.value)  # pgenlib's bytes decoded
+    # not a .pgen: the message is pgenlib's, without the sample-count hint
+    notpgen = str(tmp_path / "notpgen")
+    shutil.copy(p("hc.pvar"), notpgen + ".pgen")
+    shutil.copy(p("hc.pvar"), notpgen + ".pvar")
+    shutil.copy(p("hc.psam"), notpgen + ".psam")
+    with pytest.raises(InputError, match=r"is not a \.pgen file") as e:
+        PgenSource(notpgen)
+    assert ".psam lists" not in str(e.value) and 'b"' not in str(e.value)
     # multiallelic variants: an error as soon as the variants are needed
     src = PgenSource(p("multi"))
     with pytest.raises(InputError, match="multiallelic"):
@@ -294,7 +312,7 @@ def test_pgen_errors(tmp_path):
         shutil.copy(p("hc" + ext), short + ext)
     with open(p("hc.pvar")) as f, open(short + ".pvar", "w") as g:
         g.writelines(f.readlines()[:-3])
-    with pytest.raises(InputError, match=r"and the 37 variants of the \.pvar"):
+    with pytest.raises(InputError, match=r"contains 40 variants\. \(the \.pvar lists 37 variants"):
         list(PgenSource(short).iter_blocks())
 
 
@@ -328,6 +346,19 @@ def test_write_pgen_round_trip(tmp_path, dosage):
     assert np.array_equal(bits(blocks(norm)), bits(blocks(ArraySource(G))))
     with pytest.raises(ValueError, match=r"hard calls must be 0, 0\.5, 1 or nan"):
         write_pgen(prefix, G + 0.1, ids, v)
+
+
+@needs_pgenlib
+@pytest.mark.parametrize("bad", [1.2, -0.1, np.inf, -np.inf])
+def test_write_pgen_rejects_dosages_out_of_range(tmp_path, bad):
+    G = np.array([[0.2, 0.3], [0.5, np.nan], [0.7, 1.0]])
+    G[2, 0] = bad
+    ids = [("f", "i%d" % i) for i in range(3)]
+    v = Variants(snp=["a", "b"], chrom=["1", "1"], bp=[1, 2], a1=["A", "A"], a2=["C", "C"])
+    with pytest.raises(ValueError, match=r"dosages must be in \[0, 1\].*row 2, column 0"):
+        write_pgen(str(tmp_path / "w"), G, ids, v, dosage=True)
+    G[2, 0] = 0.0
+    write_pgen(str(tmp_path / "w"), G, ids, v, dosage=True)  # nan and 0..1 are fine
 
 
 @needs_pgenlib
@@ -467,6 +498,65 @@ def test_kinship_dosage_pgen(tmp_path):
     with contextlib.redirect_stderr(err):
         rc = cli.main(["kinship", "--pfile", p("dos"), "--kinship-type", "ibs", "-o", dos])
     assert rc == 2 and "--kinship-type ibs" in err.getvalue()
+    assert "add --hardcalls" in err.getvalue()
+    _run(["kinship", "--pfile", p("dos"), "--hardcalls", "--kinship-type", "ibs", "-o", dos])
+    # the same hint for --loco --kinship-type ibs
+    pheno = str(tmp_path / "y.txt")
+    with open(pheno, "w") as f:
+        f.writelines(
+            "%s %s %d\n" % (fid, iid, i) for i, (fid, iid) in enumerate(read_psam(p("dos.psam")))
+        )
+    with contextlib.redirect_stderr(err):
+        rc = cli.main(
+            [
+                "gwas",
+                "--pfile",
+                p("dos"),
+                "--loco",
+                "--kinship-type",
+                "ibs",
+                "--pheno",
+                pheno,
+                "-o",
+                dos,
+            ]
+        )
+    assert rc == 2 and err.getvalue().count("add --hardcalls") == 2
+
+
+@needs_pgenlib
+def test_iid_only_psam_suggests_id_match_iid(tmp_path):
+    """dos.psam has IIDs only (FID 0); a phenotype file with FID = IID needs --id-match iid."""
+    ids = read_psam(p("dos.psam"))
+    pheno, kin = str(tmp_path / "y.txt"), str(tmp_path / "k")
+    with open(pheno, "w") as f:
+        f.writelines("%s %s %.3f\n" % (iid, iid, 0.1 * i) for i, (_, iid) in enumerate(ids))
+    _run(["kinship", "--pfile", p("dos"), "-o", kin])
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        rc = cli.main(
+            ["gwas", "--pfile", p("dos"), "--kinship", kin, "--pheno", pheno, "-o", kin + ".tsv"]
+        )
+    assert rc == 2
+    assert (
+        "On the IID alone, 21 of them match (the genotype file has no FIDs, so they are 0): use --id-match iid"
+        in err.getvalue()
+    )
+    _run(
+        [
+            "gwas",
+            "--pfile",
+            p("dos"),
+            "--kinship",
+            kin,
+            "--pheno",
+            pheno,
+            "--id-match",
+            "iid",
+            "-o",
+            kin + ".tsv",
+        ]
+    )
 
 
 @needs_pgenlib

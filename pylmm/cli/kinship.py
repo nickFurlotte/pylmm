@@ -55,6 +55,7 @@ from pylmm.cli._common import (
     check_pfile_args,
     check_writable,
     genotype_source,
+    hardcalls_hint,
     log,
     positive_int,
 )
@@ -337,7 +338,9 @@ def compute_kinship(
         try:
             acc.add(snp)
         except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
-            raise UsageError("--kinship-type %s, SNP %d: %s" % (kind, acc.n_snps, e)) from e
+            raise UsageError(
+                "--kinship-type %s, SNP %d: %s%s" % (kind, acc.n_snps, e, hardcalls_hint(reader))
+            ) from e
         # Progress at INFO every 10000 SNPs, else at DEBUG every block.
         if acc.n_snps >= next_report:
             log.info("Processing first %d SNPs", acc.n_snps)
