@@ -423,7 +423,7 @@ def _inprocess(tmp_path, tag, flags, patch=None):
                 return orig(*a, **kw)
 
             mp.setattr(obj, name, fail_on_kth_call)
-        rc = main(argv)
+        rc = main(h.legacy_output(argv))
     with open(out) as f:
         return rc, f.read().splitlines(), calls[0]
 
@@ -598,7 +598,7 @@ def _main(argv, out):
     """Run ``pylmm <argv> -o out`` in this process; (rc, output lines or None)."""
     from pylmm.cli import main
 
-    rc = main([*argv, "-o", out])
+    rc = main(h.legacy_output([*argv, "-o", out]))
     if not os.path.exists(out):
         return rc, None
     with open(out) as f:
@@ -629,15 +629,17 @@ def test_cli_clean_run_takes_the_block_path(tmp_path, monkeypatch, kind, flags):
     assert rc == 0 and len(lines) > 1
 
 
+@pytest.mark.parametrize("output", ["legacy", "sumstats"])
 @pytest.mark.parametrize("flags", [["--block-size", "7"], ["--block-size", "20"]])
-def test_cli_transient_bed_decode_error_is_recovered(tmp_path, monkeypatch, flags):
+def test_cli_transient_bed_decode_error_is_recovered(tmp_path, monkeypatch, flags, output):
     """An OSError while decoding the 2nd BED block, once: exit 0, a warning, the clean bytes.
 
     (The fallback stacks per-SNP vectors, C-ordered, where blocks are F-ordered views:
-    the same numbers and the same bytes.)"""
+    the same numbers and the same bytes; in the summary-statistics table the SNPs read
+    one at a time keep their positions and alleles.)"""
     from pylmm.plink_io import PlinkReader
 
-    argv = [*_clean_inputs(tmp_path)["bed"], *flags]
+    argv = [*_clean_inputs(tmp_path)["bed"], *flags, "--output-format", output]
     rc, clean = _main(argv, str(tmp_path / "clean"))
     assert rc == 0
     orig = PlinkReader._decode_bed_block.__func__

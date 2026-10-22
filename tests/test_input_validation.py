@@ -10,6 +10,7 @@ import contextlib
 import io
 import warnings
 
+import helpers as h
 import numpy as np
 import pytest
 
@@ -98,7 +99,7 @@ def _write_emma(tmp_path, rows, y, K):
 def _run(argv, rc=0):
     """`pylmm gwas <argv>` in-process, stderr silenced; check the exit code."""
     with quiet():
-        assert cli.main(["gwas", *argv]) == rc
+        assert cli.main(h.legacy_output(["gwas", *argv])) == rc
 
 
 def _read(fn):

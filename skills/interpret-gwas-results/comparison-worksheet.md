@@ -22,7 +22,8 @@ VARIANCE FIT         paper: per-SNP refit (EMMA, GEMMA -lmm exact) | null only (
                      ours:  per-SNP refit (gwas(refit=True) / --refit) | null only (default)
                      REML | ML; test: Wald t | F | LRT | score
 GENOME BUILD         paper <mm9/NCBI37 ...>  ours <..>   lifted over? <tool, chain>
-EFFECT ALLELE        paper names <allele / not given>  ours counts <A2 / allele coded 1>  -> same? flip?
+EFFECT ALLELE        paper names <allele / not given>  ours: effect_allele column <A1 / allele coded 1;
+                     legacy output: A2>  -> same? flip?
 SNP SET / QC         paper: <n SNPs>, MAF <..>, missing <..>, source <..>
                      ours:  <n SNPs>, MAF <..> over <strains / animals>, missing <..>, imputed over <..>
 SAMPLES              paper <n strains, n animals>  ours <..>; strains missing from ours <list, why>
@@ -116,9 +117,10 @@ the Bennett lead from 172.4 to 173.1 Mb inside the same interval). Use the paper
 **Genome build.** Compare positions on one build; the HMDP map is build 37 (mm9), most current mouse
 resources are GRCm38/39. Lift over before matching; never match by rsID alone.
 
-**Named effect allele.** A sign is comparable only for the same named base. pylmm counts A2 (BED) or the
-allele coded 1 (EMMA; `allele1` of the HMDP map). If the paper names no allele, direction is "not
-assessed", not "agrees".
+**Named effect allele.** A sign is comparable only for the same named base. pylmm's table names it in
+`effect_allele`: A1 for PLINK input (`.bim` column 5), the allele coded 1 for EMMA input (`allele1` of
+the HMDP map, with `--emma-map`). pylmm 1.0.0 and `--output-format legacy` report BETA for A2 instead
+(the sign is flipped). If the paper names no allele, direction is "not assessed", not "agrees".
 
 **SNP set and QC.** Different SNP sources, MAF and missingness filters, and imputation (over strains vs
 over animals, `inbred-strain-panels` section 5) change the best SNP in a region and its p-value.

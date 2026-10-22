@@ -606,7 +606,8 @@ def run_cli(P, remove):
             args += ["--covar", pre + ".cov"]
         if remove:
             args += ["--remove-missing-genotypes"]
-        args += ["-o", os.path.join(d, "out.txt")]
+        # the 1.0.0 columns (read below: F_STAT, the 4th)
+        args += ["--output-format", "legacy", "-o", os.path.join(d, "out.txt")]
         env = dict(
             os.environ,
             OMP_NUM_THREADS="1",

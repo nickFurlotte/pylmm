@@ -3,6 +3,7 @@
 import contextlib
 import io
 
+import helpers as h
 import numpy as np
 import pytest
 
@@ -35,7 +36,7 @@ def _err(argv, rc=0):
     """Run `pylmm <argv>` in-process; check the exit code; return its stderr."""
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
-        got = cli.main(argv)
+        got = cli.main(h.legacy_output(argv))
     assert got == rc, err.getvalue()
     return err.getvalue()
 

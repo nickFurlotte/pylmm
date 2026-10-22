@@ -423,6 +423,27 @@ _ROWS_MATCH: dict[int, bool] = {}
 _PROBE_WARNED = False
 
 
+def normalize_block(G: NDArray[np.float64]) -> None:
+    """Standardise each column (one SNP) of the ``(n, b)`` float64 block `G` in place.
+
+    Column ``j`` becomes ``normalize_genotype(G[:, j])``, bit for bit: the
+    standardisation `iter_blocks` applies with ``norm_genotype=True``, for a
+    block read raw (so that its raw values can be used first, e.g. for
+    allele frequencies).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pylmm.genotypes import normalize_block, normalize_genotype
+    >>> G = np.array([[0.0, 1.0], [0.5, np.nan], [1.0, 0.0]])
+    >>> expected = normalize_genotype(G[:, 1])
+    >>> normalize_block(G)
+    >>> bool(np.array_equal(G[:, 1], expected))
+    True
+    """
+    _normalize_rows(G.T)
+
+
 def _normalize_rows(R: NDArray[np.float64]) -> None:
     """Standardise each row (one SNP) of the ``(b, n)`` float64 array `R` in place.
 

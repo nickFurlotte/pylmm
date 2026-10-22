@@ -18,10 +18,12 @@ Blocks marked `skip-ci` need plink2 (≥ 2.0 alpha 6; checked with v2.0.0-a.7.13
 ## Which allele pylmm counts
 
 pylmm reads a BED genotype as the **fraction of copies of A2**, the 6th `.bim` column (0, 0.5, 1; nan
-missing), and reports `BETA` for that allele (per SD). plink2 writes **A1 = ALT, A2 = REF**, so after a
-plink2 conversion pylmm's effect allele is **REF**, the opposite of plink2 `--glm` (which counts A1 =
-ALT). plink 1.9 sets A1 to the *minor* allele unless you pass `--keep-allele-order`. After converting,
-always look at the `.bim` and record which allele is A2.
+missing). `pylmm gwas` reports `beta` per copy of the other allele, **A1** (the 5th column; its
+`effect_allele` column names it). plink2 writes **A1 = ALT, A2 = REF**, so after a plink2 conversion the
+effect allele is **ALT**, as in plink2 `--glm omit-ref`, REGENIE and GWAS-SSF. (pylmm 1.0.0 and
+`--output-format legacy` report BETA for A2 = REF instead.) plink 1.9 sets A1 to the *minor* allele unless
+you pass `--keep-allele-order`. After converting, always look at the `.bim` and record which allele is
+A1.
 
 A PGEN read with `--pfile` follows the same rule: pylmm counts **REF** (the genotype is `1 - ALT dosage /
 2`, and `variants.a2` is REF, `a1` ALT), so a PGEN reads exactly as `plink2 --pfile X --make-bed` of it,
@@ -204,7 +206,7 @@ assert k_ids == fam and np.allclose(K_other, K_true, rtol=1e-7)
 ```
 
 ```bash
-pylmm gwas --bfile table --grm other --pheno table.pheno -o other.tsv -q
+pylmm gwas --bfile table --grm other --pheno table.pheno -o other.tsv.gz -q
 ```
 
 * Without a `.grm.id` / `.rel.id` / `K.id`, nothing names the rows: write one (`samples.write_id_file`) or
@@ -220,7 +222,7 @@ pylmm gwas --bfile table --grm other --pheno table.pheno -o other.tsv -q
 
 ```bash
 pylmm kinship --bfile table -o table.kin -v
-pylmm gwas --bfile table --kinship table.kin --pheno table.pheno -o table.tsv -v 2>&1 | grep -i "individuals\|null model"
+pylmm gwas --bfile table --kinship table.kin --pheno table.pheno -o table.tsv.gz -v 2>&1 | grep -i "individuals\|null model"
 ```
 
 1. `.bim`: SNP IDs not `.`, A1/A2 as expected, no duplicate IDs; `.fam`: the IDs your phenotype uses.

@@ -5,7 +5,7 @@ python -m pylmm.cli.gwas,,,pylmm gwas,,,removed,a tombstone: exits 2 with `pylmm
 pylmmKinship,,,pylmm kinship,,,renamed,the program; also `python -m pylmm kinship`. No alias for the old name
 python scripts/pylmmKinship.py,,,pylmm kinship,,,removed,the scripts/ shim is removed; from a source checkout use `uv run pylmm kinship`
 python -m pylmm.cli.kinship,,,pylmm kinship,,,removed,a tombstone: exits 2 with `pylmm: error: python -m pylmm.cli.kinship was removed; use pylmm kinship ...`. Use `python -m pylmm kinship`
-pylmmGWAS,,yes,pylmm gwas,-o/--out,yes,renamed,was the positional OUTFILE argument; the output file is a required option now
+pylmmGWAS,,yes,pylmm gwas,-o/--out,yes,renamed,"was the positional OUTFILE argument; the output file is a required option now. Since the summary-statistics output (after 1.0.0) the file has other columns (--output-format legacy for the old ones), is gzip-compressed if its name ends in .gz, and a JSON run record is written next to it"
 pylmmGWAS,--bfile,yes,pylmm gwas,--bfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
 pylmmGWAS,--tfile,yes,pylmm gwas,--tfile,yes,unchanged,one of --bfile/--tfile/--emma-geno is required
 pylmmGWAS,--emmaSNP,yes,pylmm gwas,--emma-geno,yes,renamed,
@@ -53,5 +53,10 @@ pylmmKinship,-h/--help,no,pylmm kinship,-h/--help,no,unchanged,
 ,,,"pylmm gwas, pylmm kinship",--hardcalls,no,new,"with --pfile: the hard calls instead of the dosages (what plink2 --make-bed writes); added after 1.0.0"
 ,,,pylmm gwas,--loco,no,new,"leave one chromosome out: each chromosome's SNPs tested with a kinship built from the other chromosomes' SNPs (GCTA --mlma-loco), computed from the genotypes; replaces --kinship/--grm/--eigen; added after 1.0.0"
 ,,,pylmm gwas,--kinship-type,yes,new,"{standardized,centered,ibs}; with --loco only: the kinship built, as pylmm kinship --kinship-type; default standardized; added after 1.0.0"
-,,,pylmm gwas,--emma-map,yes,new,"with --loco and --emma-geno: the chromosome of each EMMA row (a header naming a chr column, or a PLINK .map); added after 1.0.0"
+,,,pylmm gwas,--emma-map,yes,new,"with --emma-geno: the marker map of the EMMA rows (a header naming a chr column and optionally bp/pos and allele0/allele1, or a PLINK .map): the chromosomes --loco needs, and the chromosome, position and allele columns of the output; added after 1.0.0"
+,,,pylmm gwas,--emma-coding,yes,new,"{fraction,count}; default fraction: an --emma-geno value is the fraction (0/0.5/1) or the count (0/1/2) of copies of the allele coded 1; only the per-allele output columns depend on it; added after 1.0.0"
+,,,pylmm gwas,--run-record,yes,new,"PATH of the JSON run record (default: the -o name without .gz and .tsv/.txt, plus .json, when -o is a regular file; none when it is not); added after 1.0.0"
+,,,pylmm gwas,--no-run-record,no,new,"write no JSON run record; added after 1.0.0"
+,,,pylmm gwas,--run-record-full-paths,no,new,"record input paths and the command line as typed (default: base names only); added after 1.0.0"
+,,,pylmm gwas,--output-format,yes,new,"{sumstats,legacy}; default sumstats: a GWAS-SSF-ordered table of per-allele effects of A1 (gzip if -o ends in .gz) plus a JSON run record; legacy writes the 1.0.0 columns SNP_ID BETA BETA_SD F_STAT P_VALUE; added after 1.0.0"
 ,,,pylmm gwas,--loco-max-chroms,yes,new,"with --loco: refuse more than N chromosomes (default 100); added after 1.0.0"

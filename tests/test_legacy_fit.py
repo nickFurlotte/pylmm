@@ -104,11 +104,16 @@ def test_legacy_fit_no_batch_is_v100_byte_for_byte(v100, tmp_path, case):
     inputs = make_inputs(tmp_path)
     old, new, batched = (str(tmp_path / n) for n in ("old.tsv", "new.tsv", "batched.tsv"))
     run(v100, ["gwas", "-q", *inputs, *flags, "-o", old], tmp_path)
-    run(h.REPO, ["gwas", "-q", "--legacy-fit", "--no-batch", *inputs, *flags, "-o", new], tmp_path)
+    legacy = ["--output-format", "legacy"]  # 1.0.0's columns (the v1.0.0 tree has no such flag)
+    run(
+        h.REPO,
+        ["gwas", "-q", "--legacy-fit", "--no-batch", *legacy, *inputs, *flags, "-o", new],
+        tmp_path,
+    )
     with open(old, "rb") as f_old, open(new, "rb") as f_new:
         assert f_old.read() == f_new.read(), "%s: --legacy-fit --no-batch differs from 1.0.0" % case
     # batched (the default path) with the legacy fit: 1.0.0 up to rounding
-    run(h.REPO, ["gwas", "-q", "--legacy-fit", *inputs, *flags, "-o", batched], tmp_path)
+    run(h.REPO, ["gwas", "-q", "--legacy-fit", *legacy, *inputs, *flags, "-o", batched], tmp_path)
     ids_o, got_o = h.load_gwas_out(old)
     ids_b, got_b = h.load_gwas_out(batched)
     assert ids_o == ids_b

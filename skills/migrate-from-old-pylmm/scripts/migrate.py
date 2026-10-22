@@ -294,6 +294,12 @@ def rewrite_command(cmd: str, cli: CliMap) -> tuple[str, list[str]]:
             out.append(a if a in forms else forms[-1])
             if takes_value:
                 out.append(value)
+    if prog == "pylmmGWAS":
+        out += ["--output-format", "legacy"]
+        notes.append(
+            "--output-format legacy keeps the old output columns (SNP_ID BETA BETA_SD F_STAT "
+            "P_VALUE); drop it for the summary-statistics table (beta per copy of A1)"
+        )
     if positional:
         out += ["-o", positional[-1]]
         if len(positional) > 1:

@@ -8,8 +8,11 @@
 
 Reads genotypes (PLINK BED or TPED, or an EMMA matrix), a phenotype, optional
 covariates and a precomputed kinship (``pylmm kinship``), fits the null model
-once (or per SNP with ``--refit``) and writes one tab-separated line per SNP:
-``SNP_ID BETA BETA_SD F_STAT P_VALUE``.  With ``--loco`` the kinships are
+once (or per SNP with ``--refit``) and writes one line per SNP: by default a
+summary-statistics table of per-allele effects (`pylmm.sumstats`; gzip if the
+``-o`` file ends in ``.gz``), with ``--output-format legacy`` the 1.0.0 columns
+``SNP_ID BETA BETA_SD F_STAT P_VALUE``; and a JSON run record next to it
+(`pylmm.cli.run_record`).  With ``--loco`` the kinships are
 built from the genotypes instead, one per chromosome, leaving that
 chromosome out (`pylmm.loco`; `scan_loco`).
 
@@ -25,8 +28,10 @@ import argparse
 import dataclasses
 import gzip
 import os
+import stat
 import time
 import warnings
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import IO, Any
@@ -35,7 +40,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
 
-from pylmm import kinship_io, plink_io, samples
+from pylmm import kinship_io, plink_io, samples, sumstats
+from pylmm.cli import run_record
 from pylmm.cli._common import (
     UsageError,
     add_logging_options,
@@ -48,7 +54,7 @@ from pylmm.cli._common import (
     log,
     positive_int,
 )
-from pylmm.genotypes import DEFAULT_BLOCK_SIZE, Variants, check_block_size
+from pylmm.genotypes import DEFAULT_BLOCK_SIZE, Variants, check_block_size, normalize_block
 from pylmm.kinship import KINSHIP_KINDS, KinshipKind, kinship_scale
 from pylmm.lmm import (
     LMM,
@@ -56,6 +62,7 @@ from pylmm.lmm import (
     AssociationResult,
     check_covariates,
     check_test,
+    neg_log10_p_for,
     snp_estimable,
     snp_estimable_columns,
     subset_testable,
@@ -73,7 +80,11 @@ SnpResult = tuple[Any, Any, Any, Any]
 """One SNP's ``(beta, beta_sd, t, p)``."""
 
 OUTPUT_COLUMNS = ("SNP_ID", "BETA", "BETA_SD", "F_STAT", "P_VALUE")
-"""The header of the output file (tab-separated)."""
+"""The header of the ``--output-format legacy`` output file (tab-separated)."""
+
+OUTPUT_FORMATS = ("sumstats", "legacy")
+"""``--output-format`` values: the summary-statistics table (`pylmm.sumstats`), the default,
+or pylmm 1.0.0's five columns."""
 
 ID_MATCH_CHOICES = {"fid-iid": "fid_iid", "iid": "iid"}
 """``--id-match`` values and the `pylmm.plink_io.PlinkReader` ``id_match`` they select."""
@@ -86,15 +97,26 @@ The kinship (--kinship, computed with `pylmm kinship`, or a GCTA GRM with
 matched to the genotype file by sample ID (FID and IID, or IID alone with
 --id-match iid), never by position; the kinship IDs come from its
 `<kinship>.id` file (`<prefix>.grm.id` for --grm).
-The output has one tab-separated line per SNP:
-SNP_ID, BETA, BETA_SD, F_STAT and P_VALUE."""
+
+The output (-o FILE; gzip-compressed if FILE ends in .gz) is a tab-separated
+summary-statistics table, one line per SNP, in the column order of the GWAS
+Catalog format (GWAS-SSF): chromosome, base_pair_location, effect_allele,
+other_allele, beta, standard_error, effect_allele_frequency, p_value, then
+variant_id, rsid, n, t_stat, neg_log_10_p_value, missing_rate and beta_std.
+beta is the effect of one copy of the effect allele, the .bim A1 allele (ALT
+for plink2 files; for EMMA input the allele coded 1).  Missing values are NA.
+A JSON run record (inputs and their checksums, samples, null fit, lambda_GC,
+warnings, timings) is written next to it: FILE without .gz/.tsv, plus .json.
+--output-format legacy writes pylmm 1.0.0's columns instead: SNP_ID, BETA
+(per SD of the A2 allele's dosage), BETA_SD (its standard error), F_STAT (the
+t statistic) and P_VALUE."""
 
 _EPILOG = """\
 examples:
-  # BED genotypes, the README example data
+  # BED genotypes, the README example data: results.tsv.gz and results.json
   pylmm gwas --bfile data/snps.132k.clean.noX \\
       --kinship data/snps.132k.clean.noX.pylmm.kin \\
-      --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv
+      --pheno data/snps.132k.clean.noX.fake.phenos -o results.tsv.gz
 
   # a named phenotype column and two named covariates, IDs matched on IID
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
@@ -113,12 +135,13 @@ examples:
       --no-batch -o results.tsv
 
   # the Wald test at each SNP's own h, or a likelihood-ratio test (GEMMA's -lmm 1, 2)
-  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --refit -o refit.tsv
-  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --test lrt -o lrt.tsv
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --refit -o refit.tsv.gz
+  pylmm gwas --bfile study --kinship study.kin --pheno study.phen --test lrt -o lrt.tsv.gz
 
-  # the exact output of pylmm 1.0.0 (its h search and its one-SNP-at-a-time path)
+  # the exact output of pylmm 1.0.0 (its columns, its h search and its
+  # one-SNP-at-a-time path)
   pylmm gwas --bfile study --kinship study.kin --pheno study.phen \\
-      --legacy-fit --no-batch -o results.tsv
+      --output-format legacy --legacy-fit --no-batch -o results.tsv
 
   # leave-one-chromosome-out: no --kinship, K_{-c} built from the genotypes
   pylmm gwas --bfile study --pheno study.phen --loco -o results.tsv
@@ -167,6 +190,16 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
     )
     add_pfile_options(source, geno)
+
+    geno.add_argument(
+        "--emma-coding",
+        choices=("fraction", "count"),
+        default="fraction",
+        help="what an --emma-geno value counts, for the per-allele output columns: the "
+        "fraction of copies of the allele coded 1, 0 / 0.5 / 1 as in EMMA and pylmm's "
+        "example data (the default), or the number of copies, 0 / 1 / 2.  The test does "
+        "not depend on it",
+    )
 
     pheno = p.add_argument_group("phenotype")
     pheno_file = pheno.add_mutually_exclusive_group()
@@ -295,9 +328,12 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
     loco.add_argument(
         "--emma-map",
         metavar="FILE",
-        help="with --loco and --emma-geno: the chromosome of each EMMA row, one line per row "
-        "in order: a header line naming a chr (or chrom, CHR, #CHROM) column, as "
-        "data/hmdp.liver.snps.map.tsv, or no header and the chromosome first, as a PLINK .map",
+        help="with --emma-geno: the marker map of the EMMA rows, one line per row in order: "
+        "a header line naming a chr (or chrom, CHR, #CHROM) column and optionally a position "
+        "(bp, bp_b37, pos, POS, base_pair_location) and the alleles coded 0 and 1 (allele0, "
+        "allele1), as data/hmdp.liver.snps.map.tsv; or no header, as a PLINK .map (chromosome, "
+        "ID, cM, position).  Needed by --loco (the chromosomes); otherwise it fills the "
+        "chromosome, position and allele columns of the output",
     )
 
     model = p.add_argument_group("model")
@@ -333,8 +369,8 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "-lmm 1) or lrt (likelihood ratio of ML fits with and without the SNP, chi2(1), with "
         "the null directions of the kinship that the covariates span left out, so that ML "
         "has a maximum; it always fits each SNP's model by ML, so --reml, --ml and --refit do "
-        "not apply).  With lrt, F_STAT is the signed square root of the statistic and BETA, "
-        "BETA_SD are the ML fit's",
+        "not apply).  With lrt, t_stat (legacy F_STAT) is the signed square root of the "
+        "statistic (the sign of beta) and beta, standard_error (BETA, BETA_SD) are the ML fit's",
     )
     model.add_argument(
         "--legacy-fit",
@@ -381,7 +417,40 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "--out",
         metavar="FILE",
         required=True,
-        help="(required) write the results to FILE (overwritten)",
+        help="(required) write the results to FILE (overwritten; gzip-compressed if FILE ends "
+        "in .gz, e.g. results.tsv.gz), and the JSON run record to FILE without .gz and "
+        ".tsv/.txt, plus .json (results.json)",
+    )
+    output.add_argument(
+        "--output-format",
+        choices=OUTPUT_FORMATS,
+        default="sumstats",
+        help="sumstats (the default): the GWAS-SSF-ordered table of per-allele effects of the "
+        "A1 allele described above; legacy: pylmm 1.0.0's SNP_ID BETA BETA_SD F_STAT P_VALUE, "
+        "with BETA per SD of the A2 allele's dosage (as before; with "
+        "--remove-missing-genotypes per 0-1 step of the A2 fraction for SNPs without a missing "
+        "call)",
+    )
+    record = output.add_mutually_exclusive_group()
+    record.add_argument(
+        "--run-record",
+        metavar="PATH",
+        help="write the JSON run record to PATH (default: FILE without .gz and .tsv/.txt, "
+        "plus .json, when FILE is a regular file; none when it is not, e.g. /dev/stdout or a "
+        "pipe).  -o x.tsv.gz, -o x.tsv and -o x all have the record x.json; an existing "
+        "record is overwritten, with a warning",
+    )
+    record.add_argument(
+        "--no-run-record",
+        action="store_true",
+        help="do not write the JSON run record",
+    )
+    output.add_argument(
+        "--run-record-full-paths",
+        action="store_true",
+        help="record the input file names and the command line as typed (full paths); by "
+        "default the record keeps only their base names, so it can be shared without "
+        "revealing your directory layout (it has no host or user name either)",
     )
     add_logging_options(p)
     return p
@@ -434,11 +503,12 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     else:
         for flag, value in (
             ("--kinship-type", args.kinship_type),
-            ("--emma-map", args.emma_map),
             ("--loco-max-chroms", args.loco_max_chroms),
         ):
             if value is not None:
                 parser.error("%s applies only to --loco" % flag)
+    if args.emma_coding != "fraction" and not args.emma_geno:
+        parser.error("--emma-coding applies only to --emma-geno")
     if args.emma_map and not args.emma_geno:
         parser.error(
             "--emma-map applies only to --emma-geno (PLINK input has a .bim, .map or .pvar)"
@@ -455,6 +525,14 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     except ValueError:
         parser.error("--test %s: --legacy-fit (pylmm 1.0.0) has only the Wald test" % args.test)
     check_log_file(parser, args)
+    record = record_path(args)
+    if record is not None and os.path.realpath(record) == os.path.realpath(args.out):
+        parser.error("--run-record %s is also the -o/--out file" % record)
+    same_as_log = args.log_file and os.path.realpath(args.log_file) == os.path.realpath(
+        record or ""
+    )
+    if record is not None and same_as_log:
+        parser.error("--log-file %s is also the run record" % args.log_file)
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +826,11 @@ class GwasInputs:
         ``reader.indivs``.
     chroms : numpy.ndarray or None
         With ``--loco``: the chromosome of each SNP, in file order.
+    emma_variants : pylmm.genotypes.Variants or None
+        For ``--emma-geno`` with ``--emma-map``: the map's SNP metadata (``a2``
+        is the allele coded 1, ``a1`` the allele coded 0).
+    sample_counts : dict
+        The ``samples`` part of the run record (`pylmm.cli.run_record.SampleCounts`).
     """
 
     reader: plink_io.PlinkReader
@@ -759,6 +842,9 @@ class GwasInputs:
     kve: FloatArray | None
     loco: LocoKinship | None = None
     chroms: NDArray[np.object_] | None = None
+    emma_variants: Variants | None = None
+    sample_counts: dict[str, Any] = dataclasses.field(default_factory=dict)
+    covariate_names: list[str] | None = None
 
 
 def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
@@ -772,7 +858,10 @@ def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
 def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
     """Open the genotype input (``--bfile``, ``--tfile``, ``--pfile`` or ``--emma-geno``).
 
-    The reader also reads the ``--pheno`` file (or ``PREFIX.phenos``).
+    The reader also reads the ``--pheno`` file (or ``PREFIX.phenos``).  It
+    returns raw genotypes (``norm_genotype=False``): the scan standardises
+    each block itself (`pylmm.genotypes.normalize_block`, the same values),
+    after reading the allele frequencies from it.
 
     Raises
     ------
@@ -785,7 +874,7 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
             base,
             type=kind,
             pheno_file=args.pheno,
-            norm_genotype=not args.remove_missing_genotypes,
+            norm_genotype=False,
             id_match=ID_MATCH_CHOICES[args.id_match],
             dosage=not args.hardcalls,
         )
@@ -867,6 +956,20 @@ def _pheno_column(args: argparse.Namespace, reader: plink_io.PlinkReader) -> int
     return col - 1
 
 
+def _covariate_names(
+    args: argparse.Namespace, reader: plink_io.PlinkReader, P: FloatArray | None
+) -> list[str] | None:
+    """The covariates used (without the intercept), for the run record; None without any."""
+    if P is None:
+        return None
+    if args.covar_name:
+        return list(args.covar_name)
+    names = reader.covariate_names if args.covar else None
+    if names is not None and len(names) == P.shape[1]:
+        return list(names)
+    return ["column %d" % (k + 1) for k in range(P.shape[1])]
+
+
 def _design_matrix(n: int, P: FloatArray | None, no_intercept: bool) -> FloatArray:
     """The covariate matrix X0: an intercept (unless ``no_intercept``), then the covariates ``P``."""
     if P is None:
@@ -877,11 +980,12 @@ def _design_matrix(n: int, P: FloatArray | None, no_intercept: bool) -> FloatArr
 
 
 def _drop_incomplete(
-    Y: FloatArray, X0: FloatArray, K: FloatArray
+    Y: FloatArray, X0: FloatArray, K: FloatArray, dropped_counts: dict[str, int] | None = None
 ) -> tuple[FloatArray, FloatArray, FloatArray, NDArray[np.bool_]]:
     """Drop the individuals with a missing phenotype or covariate, with a warning.
 
-    (Before 1.0.0 a missing covariate was a fatal error.)
+    (Before 1.0.0 a missing covariate was a fatal error.)  The counts are
+    added to ``dropped_counts`` (``missing_phenotype``, ``missing_covariate``).
 
     Returns
     -------
@@ -900,6 +1004,9 @@ def _drop_incomplete(
     missing_cov = np.isnan(X0).any(axis=1)
     dropped = missing_y | missing_cov
     keep = ~dropped
+    if dropped_counts is not None:
+        dropped_counts["missing_phenotype"] = int(missing_y.sum())
+        dropped_counts["missing_covariate"] = int((missing_cov & ~missing_y).sum())
     if missing_y.sum():
         log.warning(
             "%d of %d individuals have a missing phenotype and are dropped", missing_y.sum(), len(Y)
@@ -943,6 +1050,10 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
     log.info("Reading SNP input...")
     reader = open_genotypes(args)
     _check_input_files(args, reader)
+    n_genotyped = len(reader.indivs)
+    emma_variants = None
+    if args.emma_map:
+        emma_variants = _usage(read_emma_map_variants, args.emma_map, len(reader.variants))
 
     # The kinship is read before the covariates: when it has IDs, the
     # genotype individuals that are not in it are dropped from the reader
@@ -973,7 +1084,8 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
     n_all = reader.phenos.shape[0]
     X0 = _design_matrix(n_all, P, args.no_intercept)
 
-    Y, X0, K, keep = _drop_incomplete(reader.phenos[:, column], X0, K)
+    dropped: dict[str, int] = {}
+    Y, X0, K, keep = _drop_incomplete(reader.phenos[:, column], X0, K, dropped)
     name = "the covariates" + (
         ""
         if args.no_intercept or (P is None)
@@ -984,8 +1096,27 @@ def load_inputs(args: argparse.Namespace) -> GwasInputs:
         loco = compute_loco_kinship(args, reader, chroms)
 
     kva, kve = _eigen(args, K, reader, keep, kinship_aligned)
+    names = reader.pheno_names
+    sample_counts = {
+        "id_match": None if reader.type == "emma" else ID_MATCH_CHOICES[args.id_match],
+        "n_genotyped": n_genotyped,
+        "n_analysed": len(Y),
+        "dropped": {"not_in_kinship": n_genotyped - n_all, **dropped},
+        "phenotype": names[column] if names is not None and not args.emma_pheno else None,
+    }
     return GwasInputs(
-        reader=reader, Y=Y, X0=X0, K=K, keep=keep, kva=kva, kve=kve, loco=loco, chroms=chroms
+        reader=reader,
+        Y=Y,
+        X0=X0,
+        K=K,
+        keep=keep,
+        kva=kva,
+        kve=kve,
+        loco=loco,
+        chroms=chroms,
+        emma_variants=emma_variants,
+        sample_counts=sample_counts,
+        covariate_names=_covariate_names(args, reader, P),
     )
 
 
@@ -1147,8 +1278,260 @@ def write_header(out: IO[str]) -> None:
 
 
 def write_result(out: IO[str], snp_id: str, beta: Any, beta_sd: Any, ts: Any, ps: Any) -> None:
-    """Write one SNP's result line; the values are formatted with `str`."""
+    """Write one SNP's legacy result line; the values are formatted with `str`."""
     out.write("\t".join([str(x) for x in [snp_id, beta, beta_sd, ts, ps]]) + "\n")
+
+
+@dataclass
+class BlockStats:
+    """What the output needs from a block's raw genotypes, per SNP (`ScanOutput.describe`).
+
+    Attributes
+    ----------
+    scale : (b,) array
+        ``s`` of the tested column ``x = (g - m) / s`` (``g`` the raw
+        genotype): the SD over the reader's individuals for a standardised
+        SNP; with ``--remove-missing-genotypes``, 1 for a SNP called in every
+        tested individual (tested raw) and the SD over the called tested
+        individuals otherwise (as `_test_snp` standardises it).
+    n_used : (b,) array
+        The individuals the SNP is tested on: all tested individuals (missing
+        calls mean-imputed), or the called ones with ``--remove-missing-genotypes``.
+    n_called : (b,) array
+        Tested individuals with a called genotype.
+    effect_freq, effect_sd : (b,) array
+        Mean / 2 and SD of the effect allele count over the called tested
+        individuals (nan without any).
+    missing_rate : (b,) array
+        Share of the tested individuals without a call.
+    """
+
+    scale: FloatArray
+    n_used: FloatArray
+    n_called: FloatArray
+    effect_freq: FloatArray
+    effect_sd: FloatArray
+    missing_rate: FloatArray
+
+
+class ScanOutput:
+    """The results file of a scan, and the per-SNP tallies the run record needs.
+
+    ``--output-format sumstats`` (`pylmm.sumstats`): per-allele effects of the
+    effect allele.  pylmm's genotype ``g`` is the fraction of copies of the
+    counted allele (A2; for EMMA input the allele coded 1), tested as
+    ``x = (g - m) / s`` (`BlockStats.scale`).  The effect allele is A1, the
+    other allele, for PLINK input, and the counted allele for EMMA input, so
+    ``dx/dc = -1 / (2 s)`` (PLINK), ``+1 / (2 s)`` (EMMA, ``--emma-coding
+    fraction``) or ``+1 / s`` (``--emma-coding count``) per copy ``c`` of the
+    effect allele (`pylmm.sumstats.per_allele_effects`).
+    ``--output-format legacy``: 1.0.0's lines (`write_result`), unchanged.
+
+    Parameters
+    ----------
+    out : str
+        The results file (`pylmm.sumstats.SumstatsWriter` picks the compression).
+    inputs : GwasInputs
+    args : argparse.Namespace
+    """
+
+    def __init__(self, out: str, inputs: GwasInputs, args: argparse.Namespace) -> None:
+        self.legacy = args.output_format == "legacy"
+        self.remove_missing = bool(args.remove_missing_genotypes)
+        self.lrt = getattr(args, "test", "wald") == "lrt"
+        self.q = int(inputs.X0.shape[1])
+        self.emma = inputs.reader.type == "emma"
+        self.emma_coding = getattr(args, "emma_coding", "fraction")
+        # dc/dg: copies of the effect allele per unit of the raw genotype g.  PLINK: g is
+        # the fraction of A2, c = 2 - 2 g copies of A1.  EMMA: g counts the allele coded 1,
+        # as a fraction (c = 2 g) or as a count (c = g).
+        if not self.emma:
+            self.copies = -2.0
+        else:
+            self.copies = 2.0 if self.emma_coding == "fraction" else 1.0
+        # The metadata of every SNP of the file, in file order, when known: the --emma-map, or
+        # the .bim/.map (so that SNPs read one at a time after a failed block, which carry
+        # only their IDs, still get positions and alleles).  None: each block's own.
+        self.meta: Variants | None = inputs.emma_variants
+        if self.meta is None and not self.emma and not self.legacy:
+            try:
+                self.meta = inputs.reader.variants
+            except _READ_ERRORS:  # a .bim the metadata reader rejects: IDs only
+                self.meta = None
+        self.index = 0
+        self.p_values: list[FloatArray] = []
+        self.neg_log10: list[FloatArray] = []
+        self.not_tested: Counter[str] = Counter()
+        self.counts: dict[str, int] = {}  # the scan's counters (collinear, lrt_unbounded)
+        self.alleles_known = False
+        self.loco_fits: dict[str, dict[str, Any]] = {}
+        self._warned_range = False
+        self._legacy_out: IO[str] | None = None
+        self._writer: sumstats.SumstatsWriter | None = None
+        if self.legacy:
+            self._legacy_out = open(out, "w")
+            write_header(self._legacy_out)
+        else:
+            self._writer = sumstats.SumstatsWriter(out)
+
+    def close(self) -> None:
+        """Close the results file."""
+        if self._legacy_out is not None:
+            self._legacy_out.close()
+        if self._writer is not None:
+            self._writer.close()
+
+    def describe(self, G: FloatArray, keep: NDArray[np.bool_]) -> BlockStats:
+        """The `BlockStats` of a raw block ``G`` (all the reader's individuals; ``keep``: tested)."""
+        T = G[keep]
+        n_t = T.shape[0]
+        # g, the fraction of the counted allele, passed as if it were a count:
+        # g_half = mean(g) / 2, g_sd = sd(g)
+        g_half, g_sd, missing = sumstats.allele_count_stats(T)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            called = np.rint(n_t * (1.0 - missing)) if n_t else np.zeros(G.shape[1])
+            if self.remove_missing:
+                scale = np.where(called == n_t, 1.0, g_sd)
+                n_used = called
+            else:
+                # over the reader's individuals, as the standardisation; layout-independent sums
+                _, sd_all, _ = sumstats.allele_count_stats(G)
+                scale = np.where(sd_all > 0, sd_all, 1.0)
+                n_used = np.full(G.shape[1], float(n_t))
+        mean_g = 2.0 * g_half  # the mean raw value
+        top = 2.0 / abs(self.copies)  # the largest raw value: 1 (fraction) or 2 (count)
+        if self.emma and not self.legacy:
+            v = T[~np.isnan(T)]
+            if v.size and (v.min() < 0.0 or v.max() > top):
+                hint = (
+                    "; pass --emma-coding count for 0 / 1 / 2 allele counts"
+                    if self.emma_coding == "fraction" and v.min() >= 0.0 and v.max() <= 2.0
+                    else ""
+                )
+                raise samples.InputError(
+                    "EMMA genotypes outside 0..%g (SNPs %d-%d): --emma-coding %s reads them "
+                    "as %s copies of the allele coded 1%s (or --output-format legacy, which "
+                    "has no per-allele columns)"
+                    % (
+                        top,
+                        self.index + 1,
+                        self.index + T.shape[1],
+                        self.emma_coding,
+                        "the fraction 0 / 0.5 / 1 of"
+                        if self.emma_coding == "fraction"
+                        else "0 / 1 / 2",
+                        hint,
+                    )
+                )
+        # the effect allele count c = copies * g (+ 2 for PLINK's A1 = 2 - 2 g)
+        freq = mean_g * self.copies / 2.0 + (0.0 if self.emma else 1.0)
+        return BlockStats(
+            scale=scale,
+            n_used=n_used,
+            n_called=called,
+            effect_freq=freq,
+            effect_sd=abs(self.copies) * g_sd,
+            missing_rate=missing,
+        )
+
+    def write(self, variants: Variants, results: list[SnpResult | None], desc: BlockStats) -> None:
+        """Write the lines of the first ``len(results)`` SNPs of a block."""
+        b = len(results)
+        nan = np.nan
+        vals = np.array(
+            [(nan, nan, nan, nan) if r is None else tuple(float(x) for x in r) for r in results],
+            dtype=np.float64,
+        ).reshape(b, 4)
+        beta_x, se_x, t_x, p = vals.T
+        for k in range(b):
+            if not np.isfinite(p[k]):
+                if desc.n_called[k] == 0:
+                    reason = "no_called_genotype"
+                elif desc.effect_sd[k] == 0:
+                    reason = "monomorphic"
+                else:
+                    reason = "not_estimable"
+                self.not_tested[reason] += 1
+        nl10 = neg_log10_p_for(t_x, p, desc.n_used[:b] - self.q - 1, "lrt" if self.lrt else "wald")
+        self.p_values.append(p.copy())
+        self.neg_log10.append(nl10)
+        if self._legacy_out is not None:
+            for snp_id, r in zip(variants.snp[:b], results):
+                if r is None:
+                    write_result(self._legacy_out, snp_id, nan, nan, nan, nan)
+                else:
+                    write_result(self._legacy_out, snp_id, *r)
+        else:
+            assert self._writer is not None
+            meta = variants[:b] if self.meta is None else self.meta[self.index : self.index + b]
+            slope = 1.0 / (self.copies * desc.scale[:b])  # dx/dc for x = (g - m) / s
+            beta, se, t = sumstats.per_allele_effects(beta_x, se_x, t_x, slope)
+            effect = meta.a2 if self.emma else meta.a1
+            if effect is not None and any(
+                a is not None and a not in sumstats.MISSING_ALLELES for a in effect
+            ):
+                self.alleles_known = True
+            self._writer.write(
+                sumstats.SumStats.from_variants(
+                    meta,
+                    beta=beta,
+                    standard_error=se,
+                    t_stat=t,
+                    p_value=p,
+                    neg_log_10_p_value=nl10,
+                    effect_allele_frequency=desc.effect_freq[:b],
+                    n=np.where(np.isfinite(p), desc.n_used[:b], nan),
+                    missing_rate=desc.missing_rate[:b],
+                    beta_std=beta * desc.effect_sd[:b],
+                    effect_allele=meta.a2 if self.emma else meta.a1,
+                    other_allele=meta.a1 if self.emma else meta.a2,
+                )
+            )
+        self.index += b
+
+    def _not_tested(self) -> dict[str, int]:
+        """SNPs without a test, by reason (`pylmm.cli.run_record.ResultsInfo`)."""
+        collinear = int(self.counts.get("collinear", 0))
+        unbounded = int(self.counts.get("lrt_unbounded", 0))
+        other = int(self.not_tested.get("not_estimable", 0))
+        return {
+            "no_called_genotype": int(self.not_tested.get("no_called_genotype", 0)),
+            "monomorphic": int(self.not_tested.get("monomorphic", 0)),
+            "collinear_on_called": collinear,
+            "lrt_unbounded": unbounded,
+            "not_estimable": max(other - collinear - unbounded, 0),
+        }
+
+    def results_info(self) -> dict[str, Any]:
+        """The ``results`` part of the run record (`pylmm.cli.run_record.ResultsInfo`)."""
+        p = np.concatenate(self.p_values) if self.p_values else np.zeros(0)
+        nl = np.concatenate(self.neg_log10) if self.neg_log10 else np.zeros(0)
+        tested = np.isfinite(p)
+        if self.legacy:
+            effect = "A2 (BETA per SD of the A2 dosage; legacy)"
+        elif self.emma:
+            effect = "allele coded 1 (EMMA)"
+        else:
+            effect = "A1"
+        if not self.legacy and not self.alleles_known:
+            effect = "unknown: the input names no alleles (beta is per copy of the %s)" % (
+                "allele coded 1 of the EMMA file" if self.emma else "allele coded 1 of the TPED, A1"
+            )
+        return {
+            "path": None,
+            "format": "legacy" if self.legacy else sumstats.SUMSTATS_FORMAT,
+            "columns": list(OUTPUT_COLUMNS if self.legacy else sumstats.SUMSTATS_COLUMNS),
+            "effect_allele": effect,
+            "n_variants": int(self.index),
+            "n_tested": int(tested.sum()),
+            "not_tested": self._not_tested(),
+            "lambda_gc": (
+                run_record.finite_or_none(sumstats.lambda_gc(p[tested])) if tested.any() else None
+            ),
+            "max_neg_log_10_p_value": (
+                run_record.finite_or_none(float(np.max(nl[tested]))) if tested.any() else None
+            ),
+        }
 
 
 def _test_snp(
@@ -1286,16 +1669,19 @@ def _log_progress(count: int, b: int) -> None:
         log.info("At SNP %d", k)
 
 
-def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> int:
+def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: ScanOutput) -> int:
     """Test every SNP of ``inputs.reader`` and write a result line for each.
 
-    The SNPs are read in blocks of ``--block-size``
+    The SNPs are read raw in blocks of ``--block-size``
     (`pylmm.plink_io.PlinkReader.iter_blocks`; a BED file is decoded a block
-    at a time) and tested together (`iter_block_results`); each line is
-    written, in file order, as soon as its result is known.  The SNP IDs are
-    the block's ``variants.snp`` (``SNP_<k>`` for EMMA input).  A SNP that
-    cannot be tested (constant, collinear with the covariates, or too few
-    called individuals) gets a line of ``nan``.
+    at a time), described for the output (`ScanOutput.describe`: allele
+    frequencies, missing calls), standardised (unless
+    ``--remove-missing-genotypes``) and tested together
+    (`iter_block_results`); the lines are written in file order
+    (`ScanOutput.write`).  The SNP IDs are the block's ``variants.snp``
+    (``SNP_<k>`` for EMMA input).  A SNP that cannot be tested (constant,
+    collinear with the covariates, or too few called individuals) gets a
+    line of ``nan`` (``NA`` in the summary-statistics format).
 
     On an error, the lines written are those of 1.0.0's one-SNP-at-a-time
     scan: if the reader fails (e.g. a truncated file), the SNPs read before
@@ -1303,8 +1689,8 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     a SNP fails, every SNP before it has its line and no later one does
     (with ``--no-batch``, byte for byte the 1.0.0 output).  No SNP is tested
     twice and no line is written twice.  On an interrupt (Ctrl-C) or a failed
-    write, the lines already written stay; the SNPs of the current block that
-    were read but not yet written get none.
+    write, the lines already written stay; so do those of the SNPs of the
+    current block already tested, and the others get none.
 
     A block is read whole, so a reader error inside a block (an `InputError`
     such as a truncated BED file or a bad TPED or EMMA line, or an `OSError`)
@@ -1326,10 +1712,9 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
     """
     X0 = inputs.X0
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
-    counts: dict[str, int] = {}
+    counts = out.counts
     count = 0
 
-    write_header(out)
     error: Exception | None = None
     blocks: Iterator[tuple[FloatArray, Variants]] | None = None
     try:
@@ -1349,7 +1734,7 @@ def scan(inputs: GwasInputs, L: LMM, args: argparse.Namespace, out: IO[str]) -> 
                 break
             _log_progress(count, G.shape[1])
             count += G.shape[1]
-            _write_block(out, G, variants.snp, inputs, L, Q0, args, counts)
+            _write_block(out, G, variants, inputs, L, Q0, args, counts)
             del G, variants  # before the next block is decoded
     finally:
         close = getattr(blocks, "close", None)
@@ -1398,29 +1783,40 @@ def _finish(count: int, counts: dict[str, int]) -> int:
 
 
 def _write_block(
-    out: IO[str],
+    out: ScanOutput,
     G: FloatArray,
-    snp_ids: Any,
+    variants: Variants,
     inputs: GwasInputs,
     L: LMM,
     Q0: FloatArray,
     args: argparse.Namespace,
     counts: dict[str, int],
 ) -> None:
-    """Test the SNPs of a block (`iter_block_results`) and write their lines in order."""
-    results = iter_block_results(G, inputs, L, Q0, args, counts)
-    for snp_id, result in zip(snp_ids, results):
-        if result is None:
-            write_result(out, snp_id, np.nan, np.nan, np.nan, np.nan)
-        else:
-            write_result(out, snp_id, *result)
+    """Test the SNPs of a raw block (`iter_block_results`) and write their lines in order.
+
+    ``G`` (raw genotypes, all the reader's individuals) is described for the
+    output first (`ScanOutput.describe`), then standardised in place, unless
+    ``--remove-missing-genotypes`` (`pylmm.genotypes.normalize_block`: bit
+    for bit what the reader's ``norm_genotype=True`` gives).  If testing a
+    SNP raises, the lines of the SNPs before it are written first.
+    """
+    desc = out.describe(G, inputs.keep)
+    if not args.remove_missing_genotypes:
+        normalize_block(G)
+    results: list[SnpResult | None] = []
+    try:
+        for result in iter_block_results(G, inputs, L, Q0, args, counts):
+            results.append(result)  # noqa: PERF402 (kept if a later SNP raises)
+    finally:
+        if results:
+            out.write(variants, results, desc)
 
 
 def _scan_snps(
     inputs: GwasInputs,
     L: LMM,
     args: argparse.Namespace,
-    out: IO[str],
+    out: ScanOutput,
     Q0: FloatArray,
     counts: dict[str, int],
     start: int,
@@ -1449,7 +1845,8 @@ def _scan_snps(
     def test_and_write(block: list[tuple[FloatArray, str]]) -> None:
         if block:
             G = np.column_stack([snp for snp, _ in block])
-            _write_block(out, G, [snp_id for _, snp_id in block], inputs, L, Q0, args, counts)
+            names = Variants.from_names([snp_id for _, snp_id in block])
+            _write_block(out, G, names, inputs, L, Q0, args, counts)
 
     while True:
         block: list[tuple[FloatArray, str]] = []
@@ -1552,6 +1949,85 @@ def read_emma_map(fn: str, m: int) -> tuple[NDArray[np.object_], bool]:
                 "order)" % (fn, bad + 1, rows[bad][rc] if len(rows[bad]) > rc else "", bad + 1)
             )
     return np.array([r[col] for r in rows], dtype=object), rows is not lines
+
+
+_MAP_BP_COLUMNS = ("bp", "BP", "pos", "POS", "position", "base_pair_location")
+"""Header names of the position column of an ``--emma-map`` file (also ``bp_<build>``)."""
+
+_MAP_ID_COLUMNS = ("snp", "SNP", "id", "ID", "rsid", "variant_id")
+"""Header names of the SNP ID column of an ``--emma-map`` file."""
+
+
+def read_emma_map_variants(fn: str, m: int) -> Variants:
+    """The SNP metadata of the ``m`` rows of an EMMA genotype file, from ``--emma-map``.
+
+    The file is read as by `read_emma_map`.  With a header line, the
+    chromosome column (`_MAP_CHROM_COLUMNS`), a position column
+    (`_MAP_BP_COLUMNS`, or a name starting ``bp_`` such as ``bp_b37``), an ID
+    column (`_MAP_ID_COLUMNS`) and the alleles coded 0 and 1 (``allele0``,
+    ``allele1``) are used when present.  Without one it is a PLINK ``.map``
+    (or ``.bim``): chromosome, ID, then the position in the 4th column (3rd
+    of a 3-column ``.map``); no alleles.  The SNP IDs default to EMMA's
+    ``SNP_<row>``.
+
+    Returns
+    -------
+    pylmm.genotypes.Variants
+        ``a2`` is the allele coded 1 (the EMMA value counts it, as PLINK's
+        genotype counts A2) and ``a1`` the allele coded 0.
+
+    Raises
+    ------
+    pylmm.samples.InputError
+        As `read_emma_map`, and for a position that is not an integer.
+    """
+    chroms, has_header = read_emma_map(fn, m)
+    with open(fn) as f:
+        lines = [line.split() for line in f if line.strip()]
+    rows = lines[1:] if has_header else lines
+    names = ["SNP_%d" % (k + 1) for k in range(m)]
+
+    def column(c: int | None) -> list[str] | None:
+        if c is None:
+            return None
+        bad = next((k for k, r in enumerate(rows) if len(r) <= c), None)
+        if bad is not None:
+            raise samples.InputError(
+                "--emma-map %s, SNP line %d: %d fields, expected at least %d"
+                % (fn, bad + 1, len(rows[bad]), c + 1)
+            )
+        return [r[c] for r in rows]
+
+    id_col = bp_col = a0_col = a1_col = None
+    if has_header:
+        header = lines[0]
+        id_col = next((header.index(c) for c in _MAP_ID_COLUMNS if c in header), None)
+        bp_col = next((header.index(c) for c in _MAP_BP_COLUMNS if c in header), None)
+        if bp_col is None:
+            bp_col = next((k for k, c in enumerate(header) if c.startswith("bp_")), None)
+        if "allele0" in header and "allele1" in header:
+            a0_col, a1_col = header.index("allele0"), header.index("allele1")
+    else:
+        width = min(len(r) for r in rows) if rows else 0
+        id_col = 1 if width >= 2 else None
+        bp_col = 3 if width >= 4 else (2 if width == 3 else None)
+    ids = column(id_col) or names
+    bp_text = column(bp_col)
+    bp = None
+    if bp_text is not None:
+        try:
+            bp = [int(float(x)) for x in bp_text]
+        except ValueError as e:
+            raise samples.InputError(
+                "--emma-map %s: the position column has a value that is not a number (%s)" % (fn, e)
+            ) from e
+    return Variants(
+        snp=ids,  # type: ignore[arg-type]
+        chrom=list(chroms),  # type: ignore[arg-type]
+        bp=bp,  # type: ignore[arg-type]
+        a1=column(a0_col),  # type: ignore[arg-type]
+        a2=column(a1_col),  # type: ignore[arg-type]
+    )
 
 
 def loco_chromosomes(args: argparse.Namespace, reader: plink_io.PlinkReader) -> NDArray[np.object_]:
@@ -1744,7 +2220,54 @@ def _loco_model(inputs: GwasInputs, args: argparse.Namespace, chrom: str) -> tup
     return inputs_c, fit_null_model(inputs_c, args)
 
 
-def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: IO[str]) -> int:
+def _null_fit_record(L: LMM, args: argparse.Namespace) -> dict[str, Any] | None:
+    """The run record's ``null_fit`` of ``L`` (`pylmm.cli.run_record.NullFit`).
+
+    None with ``--refit`` and the Wald test (every SNP has its own fit).
+    With ``--test lrt``, the LRT's null fit: ML on the reduced model
+    (`pylmm.lmm.LMM.lrt_null_fit`), with the number of null directions of
+    the kinship dropped from it.
+    """
+    per_snp = bool(args.remove_missing_genotypes)
+    if args.test == "lrt":
+        M = L._lrt_model()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # lrt_null_fit has warned already
+            h, _, sigma2, ll = M._fit_copy(None, False)
+        return dict(
+            run_record.null_fit(h, sigma2, ll, False, "lrt-reduced-ml", int(M._dropped), per_snp)
+        )
+    if args.refit or getattr(L, "opt_h", None) is None:
+        return None
+    return dict(
+        run_record.null_fit(
+            L.opt_h,
+            L.opt_sigma,
+            L.opt_ll,
+            bool(args.reml),
+            "reml" if args.reml else "ml",
+            0,
+            per_snp,
+        )
+    )
+
+
+def _loco_record(
+    inputs: GwasInputs, inputs_c: GwasInputs, L: LMM, args: argparse.Namespace, chrom: str
+) -> dict[str, Any]:
+    """The run record's entry of chromosome ``chrom`` under ``--loco``."""
+    assert inputs.loco is not None
+    scale = kinship_scale(inputs_c.K)
+    fit = _null_fit_record(L, args) or {}
+    return {
+        **fit,
+        "n_snps_kinship": int(inputs.loco.snps_used(leave_out=chrom)),
+        "mean_diag": scale.mean_diag,
+        "centered_mean_diag": scale.centered_mean_diag,
+    }
+
+
+def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: ScanOutput) -> int:
     """`scan` with ``--loco``: each chromosome's SNPs tested with its own K and null fit.
 
     The SNPs are read once more, in blocks of ``--block-size``, and written
@@ -1768,12 +2291,11 @@ def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: IO[str]) -> int
     assert inputs.chroms is not None
     X0 = inputs.X0
     Q0 = linalg.qr(X0, mode="economic")[0] if X0.shape[1] else np.zeros((X0.shape[0], 0))
-    counts: dict[str, int] = {}
+    counts = out.counts
     count = 0
     current: str | None = None
     inputs_c: GwasInputs = inputs
     L: LMM | None = None
-    write_header(out)
     blocks = inputs.reader.iter_blocks(args.block_size)
     try:
         for G, variants in blocks:
@@ -1789,8 +2311,9 @@ def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: IO[str]) -> int
                     # release the previous chromosome's K and model first
                     inputs_c, L = inputs, None
                     inputs_c, L = _loco_model(inputs, args, current)
+                    out.loco_fits[current] = _loco_record(inputs, inputs_c, L, args, current)
                 assert L is not None
-                _write_block(out, G[:, a:e], variants.snp[a:e], inputs_c, L, Q0, args, counts)
+                _write_block(out, G[:, a:e], variants[a:e], inputs_c, L, Q0, args, counts)
                 a = e
             _log_progress(count, b)  # after the block's chromosome lines, not before
             count += b
@@ -1800,6 +2323,31 @@ def scan_loco(inputs: GwasInputs, args: argparse.Namespace, out: IO[str]) -> int
         if close is not None:
             close()
     return _finish(count, counts)
+
+
+def _regular_output(path: str) -> bool:
+    """Whether ``path`` is (or will be created as) a regular file, not a device or a pipe."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return True  # it does not exist yet: a regular file will be created
+    return stat.S_ISREG(st.st_mode)
+
+
+def record_path(args: argparse.Namespace) -> str | None:
+    """Where the run record goes: ``--run-record``, none with ``--no-run-record``, else the default.
+
+    The default is `pylmm.cli.run_record.sidecar_path` of ``-o`` when ``-o``
+    is a regular file, and none when it is not (``/dev/stdout``, a FIFO, a
+    process substitution ``>(...)``).
+    """
+    if getattr(args, "no_run_record", False):
+        return None
+    if getattr(args, "run_record", None):
+        return str(args.run_record)
+    if not _regular_output(args.out):
+        return None
+    return run_record.sidecar_path(args.out)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -1815,20 +2363,173 @@ def run(args: argparse.Namespace) -> None:
     UsageError
         On a usage or input error.
     """
+    rec_path = record_path(args)
     check_writable("--out", args.out)
-    inputs = load_inputs(args)
-    # With --loco the null model is fitted per chromosome (scan_loco).
-    L = fit_null_model(inputs, args) if inputs.loco is None else None
+    if rec_path is None:
+        if not args.no_run_record:
+            log.info("-o %s is not a regular file: no run record (--run-record PATH)", args.out)
+    else:
+        if os.path.exists(rec_path):
+            log.warning("overwriting the existing run record %s", rec_path)
+        check_writable("--run-record" if args.run_record else "--out (its run record)", rec_path)
+    argv = getattr(args, "argv", None) or run_record.command_line()
+    if not args.run_record_full_paths:
+        argv = run_record.basenames(argv, run_record.path_values(args.parser, args))
+    record = run_record.new_record(argv)
+    collector = run_record.WarningCollector()
+    log.addHandler(collector)
+    timings: dict[str, float] = {}
+    begin = time.time()
     try:
-        out = open(args.out, "w")
+        _run(args, record, timings)
+        record["status"] = "ok"
+    except BaseException as e:
+        record["error"] = "%s: %s" % (type(e).__name__, e) if str(e) else type(e).__name__
+        raise
+    finally:
+        log.removeHandler(collector)
+        timings["total"] = time.time() - begin
+        record["timings_s"] = {k: round(v, 3) for k, v in timings.items()}
+        record["warnings"] = collector.messages
+        record["finished_at"] = run_record.utc_now()
+        if rec_path is not None:
+            # Never fails the run: the results are written by now.
+            try:
+                run_record.write_record(rec_path, record)
+            except Exception as e:
+                log.warning(
+                    "cannot write the run record %s (%s: %s)", rec_path, type(e).__name__, e
+                )
+            else:
+                log.info("Wrote the run record to %s", rec_path)
+
+
+def _run(args: argparse.Namespace, record: dict[str, Any], timings: dict[str, float]) -> None:
+    """`run`, filling the run ``record`` and ``timings`` as it goes."""
+    record["inputs"] = {
+        role: run_record.file_info(path, full_path=args.run_record_full_paths)
+        for role, path in _input_files(args)
+    }
+    record["model"] = _model_record(args)
+    begin = time.time()
+    inputs = load_inputs(args)
+    timings["read_inputs"] = time.time() - begin
+    record["samples"] = inputs.sample_counts
+    record["model"]["q"] = int(inputs.X0.shape[1])
+    record["model"]["covariates"] = inputs.covariate_names
+    record["kinship"] = _kinship_record(args, inputs)
+    # With --loco the null model is fitted per chromosome (scan_loco).
+    begin = time.time()
+    L = fit_null_model(inputs, args) if inputs.loco is None else None
+    timings["null_fit"] = time.time() - begin
+    if L is not None:
+        record["null_fit"] = _null_fit_record(L, args)
+    try:
+        out = ScanOutput(args.out, inputs, args)
     except OSError as e:
         raise UsageError("--out %s: cannot write it (%s)" % (args.out, e)) from e
-    with out:
+    begin = time.time()
+    try:
         if L is None:
             n = scan_loco(inputs, args, out)
         else:
             n = scan(inputs, L, args, out)
+    finally:
+        out.close()
+        timings["scan"] = time.time() - begin
+        out_name = args.out if args.run_record_full_paths else os.path.basename(args.out)
+        record["results"] = {**out.results_info(), "path": out_name}
+        if inputs.loco is not None:
+            record["loco"] = out.loco_fits
     log.info("Wrote the results for %d SNPs to %s", n, args.out)
+
+
+def _input_files(args: argparse.Namespace) -> list[tuple[str, str]]:
+    """The input files of the run, ``(role, path)``, for the run record."""
+    files: list[tuple[str, str]] = []
+    if args.bfile:
+        files += [("bed", args.bfile + ".bed"), ("bim", args.bfile + ".bim")]
+        files += [("fam", args.bfile + ".fam")]
+    elif args.tfile:
+        files += [("tped", args.tfile + ".tped"), ("tfam", args.tfile + ".tfam")]
+        meta = args.tfile + (".bim" if os.path.isfile(args.tfile + ".bim") else ".map")
+        files.append(("map" if meta.endswith(".map") else "bim", meta))
+    else:
+        files.append(("emma_geno", args.emma_geno))
+    if args.emma_pheno:
+        files.append(("pheno", args.emma_pheno))
+    else:
+        base = args.bfile or args.tfile or args.emma_geno
+        files.append(("pheno", args.pheno or base + ".phenos"))
+    if args.covar or args.emma_covar:
+        files.append(("covar", args.covar or args.emma_covar))
+    if args.kinship and not args.loco:
+        files.append(("kinship", args.kinship))
+        fmt = kinship_io.kinship_format(args.kinship)
+        if fmt == "text":
+            id_file = samples.kinship_id_path(args.kinship)
+            if os.path.isfile(id_file):
+                files.append(("kinship_ids", id_file))
+        elif fmt == "rel":
+            files.append(("kinship_ids", kinship_io.rel_id_path(args.kinship)))
+        else:
+            files.append(("kinship_ids", kinship_io.grm_prefix(args.kinship) + ".grm.id"))
+    if args.eigen:
+        if os.path.isfile(args.eigen):
+            files.append(("eigen", args.eigen))
+        else:
+            files += [("eigen_values", args.eigen + ".kva"), ("eigen_vectors", args.eigen + ".kve")]
+    if args.emma_map:
+        files.append(("emma_map", args.emma_map))
+    return files
+
+
+def _model_record(args: argparse.Namespace) -> dict[str, Any]:
+    """The run record's ``model`` (`pylmm.cli.run_record.ModelInfo`)."""
+    test = getattr(args, "test", "wald")
+    return {
+        "test": test,
+        "reml": bool(args.reml) and test != "lrt",
+        "refit": bool(args.refit),
+        "legacy_fit": bool(args.legacy_fit),
+        "batch": not args.no_batch,
+        "block_size": int(args.block_size),
+        "loco": bool(args.loco),
+        "missing_genotypes": "remove" if args.remove_missing_genotypes else "mean-impute",
+        "emma_coding": args.emma_coding if args.emma_geno else None,
+        "intercept": not args.no_intercept,
+        "covariates": list(args.covar_name) if args.covar_name else None,
+        "q": None,
+    }
+
+
+def _kinship_record(args: argparse.Namespace, inputs: GwasInputs) -> dict[str, Any]:
+    """The run record's ``kinship`` (`pylmm.cli.run_record.KinshipInfo`)."""
+    if inputs.loco is not None:
+        return {
+            "source": "loco",
+            "format": None,
+            "has_ids": None,
+            "kind": args.kinship_type or "standardized",
+            "mean_diag": None,
+            "centered_mean_diag": None,
+        }
+    fmt = kinship_io.kinship_format(args.kinship)
+    if inputs.reader.type == "emma":
+        has_ids = False
+    elif fmt == "text":
+        has_ids = os.path.isfile(samples.kinship_id_path(args.kinship))
+    else:
+        has_ids = True
+    scale = kinship_scale(inputs.K) if inputs.K.shape[0] >= 2 else None
+    return {
+        "source": "file",
+        "format": "grm" if args.grm else fmt,
+        "has_ids": has_ids,
+        "kind": None,
+        "mean_diag": None if scale is None else scale.mean_diag,
+        "centered_mean_diag": None if scale is None else scale.centered_mean_diag,
+    }
 
 
 if __name__ == "__main__":  # the removed pre-5b.2 invocation; see removed_module_main
