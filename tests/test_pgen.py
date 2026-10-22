@@ -467,3 +467,52 @@ def test_kinship_dosage_pgen(tmp_path):
     with contextlib.redirect_stderr(err):
         rc = cli.main(["kinship", "--pfile", p("dos"), "--kinship-type", "ibs", "-o", dos])
     assert rc == 2 and "--kinship-type ibs" in err.getvalue()
+
+
+@needs_pgenlib
+@pytest.mark.parametrize("extra", [(), ("--kinship-type", "ibs"), ("--covar", "COVAR")])
+@pytest.mark.parametrize(("pgen", "bed"), [("hc", "hc"), ("hczst", "hc"), ("swap", "swap")])
+def test_gwas_loco_pfile_is_byte_identical_to_bfile(inputs, extra, pgen, bed):
+    """--loco takes each SNP's chromosome from the .pvar (chromosomes 1, 2, 22 here)."""
+    extra = tuple(inputs["covar"] if x == "COVAR" else x for x in extra)
+    out = {}
+    for flag, prefix in (("--bfile", p(bed)), ("--pfile", p(pgen))):
+        out[flag] = str(inputs["dir"] / ("loco%s.tsv" % flag))
+        _run(["gwas", flag, prefix, "--loco", "--pheno", inputs["pheno"], "-o", out[flag], *extra])
+    assert filecmp.cmp(out["--bfile"], out["--pfile"], shallow=False)
+    with open(out["--pfile"]) as f:
+        assert len(f.readlines()) == 41
+
+
+@needs_pgenlib
+def test_gwas_loco_dosage_pgen(tmp_path):
+    """--loco with dosages runs (chromosomes 1 and 2 of dos.pvar); --hardcalls is the BED's."""
+    ids = read_psam(p("dos.psam"))
+    y = np.random.default_rng(2).standard_normal(len(ids))
+    pheno = str(tmp_path / "y.txt")
+    with open(pheno, "w") as f:
+        f.writelines("%s %s %.6f\n" % (fid, iid, v) for (fid, iid), v in zip(ids, y))
+    out = {k: str(tmp_path / k) for k in ("bed", "hc", "dos")}
+    base = ["--loco", "--pheno", pheno, "-o"]
+    _run(["gwas", "--bfile", p("dos"), *base, out["bed"]])
+    _run(["gwas", "--pfile", p("dos"), "--hardcalls", *base, out["hc"]])
+    _run(["gwas", "--pfile", p("dos"), *base, out["dos"]])
+    assert filecmp.cmp(out["bed"], out["hc"], shallow=False)
+    snps, res = _results(out["dos"])
+    assert snps == ["v%d" % (k + 1) for k in range(12)]
+    assert not filecmp.cmp(out["hc"], out["dos"], shallow=False)
+    pv = res[:, 3][np.isfinite(res[:, 3])]
+    assert len(pv) >= 10 and np.all((pv > 0) & (pv <= 1))
+
+
+@needs_pgenlib
+@pytest.mark.parametrize(("pgen", "bed"), [("hc", "hc"), ("swap", "swap")])
+def test_gwas_grm_pfile_is_byte_identical_to_bfile(inputs, pgen, bed):
+    """--grm (a GCTA GRM from pylmm kinship --pfile) with --pfile, as with --bfile."""
+    grm = str(inputs["dir"] / "g")
+    _run(["kinship", "--pfile", p(pgen), "--out-format", "grm", "-o", grm])
+    out = {}
+    for flag, prefix in (("--bfile", p(bed)), ("--pfile", p(pgen))):
+        out[flag] = str(inputs["dir"] / ("grm%s.tsv" % flag))
+        _run(["gwas", flag, prefix, "--grm", grm, "--pheno", inputs["pheno"], "-o", out[flag]])
+    assert filecmp.cmp(out["--bfile"], out["--pfile"], shallow=False)
