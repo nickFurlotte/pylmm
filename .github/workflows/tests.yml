@@ -122,6 +122,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPENBLAS_NUM_THREADS: "1"
+      # numpy 1.23.2's OpenBLAS (0.3.20) picks a wrong or generic kernel on
+      # some newer AMD runners (SkylakeX on EPYC 9V74; Barcelona on EPYC 9V45),
+      # which gave wrong matrix products once and fails a GEMMA-formula test
+      # on Barcelona.  Pin one well-tested kernel so the job is deterministic.
+      OPENBLAS_CORETYPE: Haswell
     steps:
       # NOTE: clones the ~215MB example data too; see the pytest job.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -140,7 +145,7 @@ jobs:
       # Diagnostics for a one-off failure on this job (old numpy's OpenBLAS
       # returned wrong matrix products on one runner): record the CPU and the
       # BLAS build and core type, so a recurrence can be matched to hardware.
-      # If it recurs, set OPENBLAS_CORETYPE=Haswell for this job only.
+      # OPENBLAS_CORETYPE=Haswell is now pinned for this job (see env above).
       - name: Show CPU and BLAS
         run: |
           lscpu
