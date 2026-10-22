@@ -2363,7 +2363,7 @@ def run(args: argparse.Namespace) -> None:
         check_writable("--run-record" if args.run_record else "--out (its run record)", rec_path)
     argv = getattr(args, "argv", None) or run_record.command_line()
     if not args.run_record_full_paths:
-        argv = run_record.basenames(argv)
+        argv = run_record.basenames(argv, run_record.path_values(args.parser, args))
     record = run_record.new_record(argv)
     collector = run_record.WarningCollector()
     log.addHandler(collector)

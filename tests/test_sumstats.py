@@ -984,3 +984,52 @@ def test_neg_log10_p_is_never_negative_zero():
 
     v = neg_log10_p_for([0.0], [1.0], [10.0])
     assert v[0] == 0.0 and math.copysign(1.0, v[0]) == 1.0
+
+
+# ---------------------------------------------------------------------------
+# review round 2 (PR #32)
+# ---------------------------------------------------------------------------
+
+
+def test_record_has_no_directory_whatever_the_option_form(synth, tmp_path):
+    base = synth["base"]
+    out = str(tmp_path / "r.tsv.gz")
+    rec_path = str(tmp_path / "sub" / "rec.json")
+    os.makedirs(os.path.dirname(rec_path))
+    _run(
+        [
+            "--bfile=" + base,
+            "--pheno=" + base + ".pheno",
+            "--kinship",
+            base + ".kin",
+            "--run-record=" + rec_path,
+            "-o" + out,
+        ]
+    )
+    text = open(rec_path).read()
+    rec = json.loads(text)
+    bare = text.replace(sumstats.SUMSTATS_FORMAT, "").replace(run_record.RUN_RECORD_SCHEMA, "")
+    assert "/" not in bare, [line for line in bare.splitlines() if "/" in line]  # no directory
+    assert "--bfile=g" in rec["command"] and "-or.tsv.gz" in rec["command"]
+    assert "--run-record=rec.json" in rec["command"]
+
+
+def test_record_has_the_tables_permissions(synth, tmp_path):
+    base = synth["base"]
+    out = str(tmp_path / "r.tsv.gz")
+    old = os.umask(0o027)
+    try:
+        _run(["--bfile", base, "--pheno", base + ".pheno", "--kinship", base + ".kin", "-o", out])
+    finally:
+        os.umask(old)
+    mode = os.stat(run_record.sidecar_path(out)).st_mode & 0o777
+    assert mode == os.stat(out).st_mode & 0o777 == 0o640
+
+
+def test_a1_count_on_fraction_coded_genotypes_warns(synth):
+    from pylmm.lmm import gwas
+
+    G = np.nan_to_num(synth["G"][:, :10], nan=0.5)  # 0 / 0.5 / 1
+    res = gwas(synth["y"], G, synth["K"], return_details=True)
+    with pytest.warns(UserWarning, match="looks like the fraction coding"):
+        sumstats.SumStats.from_genotypes(res, G, coding="a1_count")

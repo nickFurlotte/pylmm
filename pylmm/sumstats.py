@@ -128,6 +128,7 @@ import gzip
 import io
 import math
 import re
+import warnings
 from dataclasses import dataclass, fields
 from typing import IO, Any, Literal
 
@@ -427,6 +428,15 @@ class SumStats:
                 "per-allele effects), and Y if the scan dropped individuals with a missing "
                 "phenotype" % (j, x_sd[j], scanned[j])
             )
+        if coding == "a1_count":
+            v = x_used[called]
+            if v.size and np.isin(v, (0.0, 0.5, 1.0)).all() and (v == 0.5).any():
+                warnings.warn(
+                    "coding='a1_count' but every called value is 0, 0.5 or 1: this looks like "
+                    "the fraction coding (coding='a2_fraction'); per-allele effects would be "
+                    "off by a factor of 2 and of the wrong sign",
+                    stacklevel=2,
+                )
         freq, sd, missing = allele_count_stats(counts)
         beta, se, t = per_allele_effects(result.beta, result.beta_se, result.t, slope)
         return cls.from_variants(

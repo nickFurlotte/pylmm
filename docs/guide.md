@@ -719,7 +719,24 @@ so this matches that run of `pylmm gwas`, to rounding.
 
 The legacy output (`--output-format legacy`) has pylmm 1.0.0's columns: `SNP_ID`, `BETA` (per SD of
 the standardised A2 genotype), `BETA_SD` (its standard error), `F_STAT` (the signed t) and `P_VALUE`
-(0.0 where it underflows); `beta = -BETA / (2 sd)` as above, `t_stat = -F_STAT`.
+(0.0 where it underflows). Per copy of A1, `beta = -BETA / (2 s)` with `s` the SD of the A2 fraction
+(0, 0.5, 1) over the called genotypes of every genotyped individual (the SD the scan standardised by;
+`sd_called` above is that of the 0/1/2 dosage, `2 s`), and `t_stat = -F_STAT`:
+
+```bash
+pylmm gwas --bfile mini --kinship data/snps.132k.clean.noX.pylmm.kin \
+    --pheno sim.pheno --pheno-name trait --covar sim.covar --covar-name sex age \
+    --output-format legacy -o trait_legacy.tsv
+```
+
+```python
+legacy = np.genfromtxt("trait_legacy.tsv", names=True, dtype=None, encoding="utf-8")
+with PlinkReader("mini", norm_genotype=False) as reader:
+    g_mini = np.hstack([g for g, _ in reader.iter_blocks(1000)])    # A2 fraction, all genotyped
+s = np.nanstd(g_mini, axis=0)
+assert np.allclose(-legacy["BETA"] / (2 * s), res["beta"], rtol=1e-10, equal_nan=True)
+assert np.array_equal(-legacy["F_STAT"], res["t_stat"], equal_nan=True)
+```
 
 The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when to distrust a scan.
 

@@ -45,6 +45,7 @@ leaves no partial file, and a failure to write it never fails the run.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import datetime
 import hashlib
@@ -54,6 +55,7 @@ import os
 import platform
 import sys
 import tempfile
+from collections.abc import Iterable
 from typing import Any, TypedDict
 
 import numpy as np
@@ -203,13 +205,56 @@ def utc_now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
 
-def basenames(argv: list[str]) -> list[str]:
-    """``argv`` with every argument that names a path cut to its base name.
+def basenames(argv: list[str], paths: Iterable[str] = ()) -> list[str]:
+    """``argv`` with every path in it cut to its base name.
 
-    >>> basenames(["--bfile", "/home/me/study/geno", "--pheno-col", "2", "-o", "out/r.tsv.gz"])
-    ['--bfile', 'geno', '--pheno-col', '2', '-o', 'r.tsv.gz']
+    ``paths`` are the values of the options that take a file or prefix (from
+    the parsed arguments, `path_values`); each is found as a token of its own
+    (``--bfile /a/b``), after ``=`` (``--bfile=/a/b``) or attached to a short
+    option (``-o/a/b``).  Any other token with a directory separator is cut
+    too, whatever its form, so no directory is left.
+
+    >>> basenames(["--bfile", "/home/me/geno", "--pheno=/home/me/p.txt", "-o/tmp/r.tsv.gz",
+    ...            "--pheno-col", "2"], paths=["/home/me/geno", "/home/me/p.txt", "/tmp/r.tsv.gz"])
+    ['--bfile', 'geno', '--pheno=p.txt', '-or.tsv.gz', '--pheno-col', '2']
     """
-    return [os.path.basename(a) if os.sep in a and not a.startswith("-") else a for a in argv]
+    known = {p for p in paths if p}
+    out = []
+    for a in argv:
+        if a in known:
+            out.append(os.path.basename(a))
+        elif a.startswith("--") and "=" in a:
+            key, value = a.split("=", 1)
+            out.append(key + "=" + os.path.basename(value) if os.sep in value else a)
+        elif (
+            a.startswith("-")
+            and not a.startswith("--")
+            and len(a) > 2
+            and (a[2:] in known or os.sep in a[2:])
+        ):
+            out.append(a[:2] + os.path.basename(a[2:]))
+        elif os.sep in a:
+            out.append(os.path.basename(a))
+        else:
+            out.append(a)
+    return out
+
+
+PATH_METAVARS = frozenset(("FILE", "PREFIX", "PATH"))
+"""The metavars of the options whose values are paths (`path_values`)."""
+
+
+def path_values(parser: argparse.ArgumentParser, args: argparse.Namespace) -> list[str]:
+    """The values of ``args`` for ``parser``'s options that take a path (by their metavar)."""
+    values: list[str] = []
+    for action in parser._actions:
+        if action.metavar in PATH_METAVARS:
+            v = getattr(args, action.dest, None)
+            if isinstance(v, str):
+                values.append(v)
+            elif isinstance(v, (list, tuple)):
+                values.extend(str(x) for x in v)
+    return values
 
 
 def file_info(path: str, full_path: bool = False) -> FileInfo:
@@ -335,6 +380,13 @@ def json_safe(obj: Any) -> Any:
     return obj
 
 
+def _umask() -> int:
+    """The process's umask (read by setting it and setting it back)."""
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
+
+
 def write_record(path: str, record: dict[str, Any]) -> None:
     """Write ``record`` as JSON (sorted keys, indent 2; non-finite numbers as null).
 
@@ -347,6 +399,8 @@ def write_record(path: str, record: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+        # mkstemp makes the file 0600; give it the permissions open() gives the table
+        os.chmod(tmp, 0o666 & ~_umask())
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
