@@ -1172,7 +1172,7 @@ def _test_snp(
         if not old:
             if args.test != "lrt" and not args.refit:
                 ls.fit(reml=args.reml)
-            return _first(_tests(ls, xs, args))
+            return _first(_tests(ls, xs, args, counts))
         if args.refit:
             ls.fit(X=xs, reml=args.reml)
         else:
@@ -1182,18 +1182,22 @@ def _test_snp(
         if not snp_estimable(x, inputs.X0, Q=Q0):
             return None
         if not old:
-            return _first(_tests(L, x, args))
+            return _first(_tests(L, x, args, counts))
         if args.refit:
             L.fit(X=x, reml=args.reml)
         ts, ps, beta, beta_var = L.association(x, reml=args.reml, return_beta=True)
     return beta, np.sqrt(beta_var), ts, ps
 
 
-def _tests(L: LMM, X: FloatArray, args: argparse.Namespace) -> AssociationResult:
+def _tests(
+    L: LMM, X: FloatArray, args: argparse.Namespace, counts: dict[str, int]
+) -> AssociationResult:
     """The ``--test`` of the SNP columns of ``X`` (`pylmm.lmm.LMM.association_tests`)."""
     if args.test == "wald" and not args.refit:
         return L.association_batch(X, reml=args.reml)
-    return L.association_tests(X, args.test, args.reml, args.refit, batch=not args.no_batch)
+    return L.association_tests(
+        X, args.test, args.reml, args.refit, batch=not args.no_batch, counts=counts
+    )
 
 
 def _first(r: AssociationResult) -> SnpResult:
@@ -1254,12 +1258,14 @@ def iter_block_results(
             cols = np.where(complete)[0]
             cols = cols[snp_estimable_columns(X[:, cols], inputs.X0, Q0)]
             batched = {int(c): k for k, c in enumerate(cols)}
-            result = _tests(L, X[:, cols], args)
+            result = _tests(L, X[:, cols], args, counts)
         k = batched.get(j)
         if k is None:  # constant or collinear with the covariates
             yield None
         elif np.isfinite(result.t[k]):
             yield result.beta[k], np.sqrt(result.beta_var[k]), result.t[k], result.p[k]
+        elif args.test == "lrt":  # no ML maximum with the SNP: nan by design (counted)
+            yield None
         else:  # not expected for an estimable SNP; keep the per-SNP answer
             yield _test_snp(G[:, j], inputs, L, Q0, args, counts)
 
@@ -1361,7 +1367,16 @@ _READ_ERRORS = (samples.InputError, OSError)
 
 
 def _finish(count: int, counts: dict[str, int]) -> int:
-    """Log the count of SNPs that are nan for lack of rank; return ``count``."""
+    """Log the counts of SNPs that are nan for lack of rank or of an ML maximum; return ``count``."""
+    if counts.get("lrt_unbounded"):
+        log.warning(
+            "%d of %d SNPs are nan for --test lrt: with the SNP in the model the ML likelihood "
+            "has no maximum (the SNP and the covariates fit the phenotype exactly in every null "
+            "direction of the kinship, e.g. a SNP whose calls differ between animals of one "
+            "strain); use the Wald test for them",
+            counts["lrt_unbounded"],
+            count,
+        )
     if counts.get("collinear"):
         log.info(
             "%d of %d SNPs are nan because, on the individuals with a called genotype, "

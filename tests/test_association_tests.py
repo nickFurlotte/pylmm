@@ -480,6 +480,75 @@ def test_lrt_has_no_ml_warning():
         gwas(y, X, K, test="lrt")
 
 
+def _strain_panel(n_strains, seed, centred, m=1500):
+    """Inbred strains with one animal each, except strain 0 with two (the last row).
+
+    K has one null direction for the pair (two animals with identical genotypes), and
+    one more for the intercept when centred.  Returns (rng, K, test SNPs over animals).
+    """
+    rng = np.random.default_rng(seed)
+    p = rng.uniform(0.1, 0.5, m + 200)
+    w_strains = 2.0 * rng.binomial(1, p, size=(n_strains, m + 200))
+    k_strains = (
+        calculate_kinship(w_strains[:, :m])
+        if centred
+        else w_strains[:, :m] @ w_strains[:, :m].T / m
+    )
+    idx = np.r_[np.arange(n_strains), 0]
+    K = k_strains[np.ix_(idx, idx)]
+    if centred:
+        P = np.eye(len(idx)) - 1.0 / len(idx)
+        K = P @ K @ P
+    G = w_strains[:, m:][idx]
+    return rng, K, G[:, G.std(axis=0) > 0]
+
+
+def test_lrt_null_model_without_ml_maximum_warns():
+    """Review design (a): an uncentred positive definite strain K, one strain with two
+    animals, an intercept and a covariate.  The covariate fits y exactly along the pair's
+    null direction without spanning it (nothing is dropped), so the null ML likelihood
+    has no maximum: lrt_null_fit warns (it used to stay silent)."""
+    rng, K, _ = _strain_panel(80, 0, centred=False)
+    n = K.shape[0]
+    X0 = np.column_stack([np.ones(n), rng.normal(size=n)])
+    L = LMM(rng.normal(size=n), K, X0=X0)
+    assert L._lrt_model() is L and L._check_ml_ill_posed()
+    with pytest.warns(UserWarning, match="null model has no maximum.*use the Wald test"):
+        L.lrt_null_fit()
+    # the default (centred K, intercept, distinct animals) does not warn: test_lrt_has_no_ml_warning
+
+
+@pytest.mark.parametrize("batch", [True, False])
+def test_lrt_snp_completing_the_null_rank_is_nan(batch):
+    """Review design (b): a centred strain K, one strain with two animals (null directions:
+    the intercept's, dropped, and the pair's).  A SNP whose calls differ between the two
+    animals fits the pair's direction exactly: with it the ML likelihood has no maximum.
+    Its LRT is nan (it used to be a tiny p-value), counted and reported once; the other
+    SNPs are tested as usual."""
+    rng, K, G = _strain_panel(60, 3, centred=True)
+    n = K.shape[0]
+    G = G[:, :60].copy()
+    diff = np.zeros(G.shape[1], dtype=bool)
+    diff[::3] = True
+    G[-1, diff] = 2.0 - G[0, diff]  # the second animal's call differs
+    y = rng.normal(size=n)
+    L = LMM(y, K)
+    M = L._lrt_model()
+    assert M._dropped == 1 and not M._check_ml_ill_posed()
+    np.testing.assert_array_equal(M._lrt_unbounded(G), diff)
+    counts: dict = {}
+    r = L.association_tests(G, "lrt", batch=batch, counts=counts)
+    assert np.isnan(r.p[diff]).all() and np.isfinite(r.p[~diff]).all()
+    assert counts == {"lrt_unbounded": int(diff.sum())} and L.lrt_unbounded == diff.sum()
+    with pytest.warns(
+        UserWarning,
+        match="%d of %d SNPs are nan for the likelihood-ratio" % (diff.sum(), G.shape[1]),
+    ):
+        t, p = gwas(y, G, K, test="lrt", batch=batch)
+    np.testing.assert_array_equal(np.isnan(p), diff)
+    h.assert_refit_close(np.asarray(p)[~diff], r.p[~diff], what="p")
+
+
 # ---------------------------------------------------------------------------
 # gwas(test=...) and LMM.association_tests
 # ---------------------------------------------------------------------------
@@ -585,6 +654,38 @@ def test_cli_refit_batched_vs_no_batch(tmp_path):
     assert ids_a == ids_b
     for j in range(4):
         h.assert_refit_close(got_a[:, j], got_b[:, j], what="column %d" % j)
+
+
+def test_cli_lrt_reports_snps_without_ml_maximum(tmp_path):
+    """Review design (b) on the command line: the SNPs whose calls differ between the
+    two animals of a strain are nan lines, and one warning gives their count."""
+    rng, K, G = _strain_panel(60, 3, centred=True)
+    G = G[:, :30].copy()
+    G[-1, ::3] = 2.0 - G[0, ::3]
+    geno, pheno, kin = (str(tmp_path / f) for f in ("g.emma", "y.emma", "K.txt"))
+    np.savetxt(geno, G.T / 2.0, fmt="%g")
+    np.savetxt(pheno, rng.normal(size=(1, K.shape[0])), fmt="%.17g")
+    np.savetxt(kin, K, fmt="%.17g")
+    out = str(tmp_path / "out")
+    log = h.run_cli(
+        [
+            "gwas",
+            "--emma-geno",
+            geno,
+            "--emma-pheno",
+            pheno,
+            "--kinship",
+            kin,
+            "--test",
+            "lrt",
+            "-o",
+            out,
+        ],
+        cwd=tmp_path,
+    )
+    assert "10 of 30 SNPs are nan for --test lrt" in log
+    _, got = h.load_gwas_out(out)
+    np.testing.assert_array_equal(np.isnan(got[:, 3]), np.arange(30) % 3 == 0)
 
 
 @pytest.mark.parametrize(

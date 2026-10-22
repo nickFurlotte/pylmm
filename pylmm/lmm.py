@@ -610,6 +610,27 @@ def check_test(test: str, refit: bool = False, legacy_fit: bool = False) -> None
         )
 
 
+LRT_ILL_POSED_MESSAGE = (
+    "the likelihood-ratio test's ML null model has no maximum: the kinship matrix has "
+    "null directions (e.g. animals with identical genotypes, as replicates of a few "
+    "strains) in which the covariates fit y exactly, so the ML fits sit at h = 1 and the "
+    "LRT is anti-conservative; use the Wald test (the default), or a design where those "
+    "directions are not fitted by the covariates (several animals of every strain, or "
+    "strain means)"
+)
+"""`LMM.lrt_null_fit`'s warning (the reduction of `LMM._lrt_model` does not cover the case)."""
+
+
+def _lrt_unbounded_message(k: int, m: int) -> str:
+    """The warning for ``k`` of ``m`` SNPs whose LRT is nan (`LMM._lrt_unbounded`)."""
+    return (
+        "%d of %d SNPs are nan for the likelihood-ratio test: with the SNP in the model the "
+        "ML likelihood has no maximum (the SNP and the covariates fit y exactly in every "
+        "null direction of the kinship matrix, e.g. a SNP whose calls differ between "
+        "animals of one strain); use the Wald test for them" % (k, m)
+    )
+
+
 def _lrt_result(
     ll1: FloatArray, ll0: float, beta: FloatArray, beta_var: FloatArray
 ) -> AssociationResult:
@@ -990,14 +1011,18 @@ def gwas(
             if test == "wald" and not refit:
                 r = L.association_batch(X[:, batched], reml=reml)
             else:
-                r = L.association_tests(X[:, batched], test, reml, refit)
+                r = L.association_tests(X[:, batched], test, reml, refit, counts=counts)
             for k, i in enumerate(batched):
                 if np.isfinite(r.t[k]):
                     t_stats[i], p_values[i] = r.t[k], r.p[k]
                 elif test == "wald" and not refit:  # not expected for an estimable SNP
                     t_stats[i], p_values[i] = L.association(X[:, i], reml=reml)
+                elif test == "lrt":
+                    pass  # nan by design: no ML maximum with the SNP (counted)
                 else:
-                    r1 = L.association_tests(X[:, [i]], test, reml, refit, batch=False)
+                    r1 = L.association_tests(
+                        X[:, [i]], test, reml, refit, batch=False, counts=counts
+                    )
                     t_stats[i], p_values[i] = r1.t[0], r1.p[0]
 
     if counts.get("collinear"):
@@ -1006,6 +1031,8 @@ def gwas(
             "the covariates are no longer of full rank" % (counts["collinear"], m),
             stacklevel=2,
         )
+    if counts.get("lrt_unbounded"):
+        warnings.warn(_lrt_unbounded_message(counts["lrt_unbounded"], m), stacklevel=2)
     return t_stats, p_values
 
 
@@ -1043,7 +1070,7 @@ def _gwas_one_snp(
         ls = LMM(ys, ks, X0=x0s, validate=False, legacy_fit=L.legacy_fit)
         if not old:
             _fit_null(ls, test, reml, refit)
-            r = ls.association_tests(xs, test, reml, refit, batch)
+            r = ls.association_tests(xs, test, reml, refit, batch, counts)
             return r.t[0], r.p[0]
         if refit:
             ls.fit(X=xs, reml=reml)
@@ -1053,7 +1080,7 @@ def _gwas_one_snp(
     if not snp_estimable(x, X0, Q=Q0):
         return None
     if not old:
-        r = L.association_tests(x, test, reml, refit, batch)
+        r = L.association_tests(x, test, reml, refit, batch, counts)
         return r.t[0], r.p[0]
     if refit:
         L.fit(X=x, reml=reml)
@@ -1197,6 +1224,10 @@ class LMM:
         After `fit`: ``sigma2`` at ``opt_h``.
     legacy_fit : bool
         The ``legacy_fit`` argument.
+    lrt_unbounded : int
+        The number of SNPs this model's likelihood-ratio tests set to ``nan``
+        because the model with the SNP has no ML maximum (`lrt_batch`): a
+        "not tested" count, as the collinear SNPs of `gwas` are.
 
     Raises
     ------
@@ -1269,6 +1300,7 @@ class LMM:
     opt_beta: FloatArray
     opt_sigma: float
     legacy_fit: bool
+    lrt_unbounded: int
 
     def __init__(
         self,
@@ -1296,6 +1328,7 @@ class LMM:
         self._lrt_cache: LMM | None = None  # _lrt_model
         self._lrt_null: tuple[float, float] | None = None  # lrt_null_fit
         self._dropped = 0  # directions _reduced_ml_model dropped (on the reduced model)
+        self.lrt_unbounded = 0  # SNPs the LRT set to nan: no ML maximum with them (lrt_batch)
         if X0 is None:
             n_y = len(np.asarray(Y))
             X0 = np.ones(n_y).reshape(n_y, 1)
@@ -2886,10 +2919,10 @@ class LMM:
         inside it keeps the covariance diagonal.  Let ``Z`` be the part of the
         covariates' span that lies in that block (``Z = U null(U_R)``, ``U`` the
         orthonormal rotated covariates, ``U_R`` its rows outside the block;
-        ``r = dim Z``).  The ML likelihood is unbounded as ``h -> 1`` exactly
-        when ``r > 0`` (bug 17): the covariates fit ``y`` along ``Z`` whatever
-        ``h`` is, so the residual there is 0 while its variance goes to 0.  The
-        reduced model drops ``Z``: it is the exact Gaussian likelihood of the
+        ``r = dim Z``).  If ``r > 0`` the ML likelihood is unbounded as ``h ->
+        1`` (bug 17): the covariates fit ``y`` along ``Z`` whatever ``h`` is, so
+        the residual there is 0 while its variance goes to 0.  The reduced
+        model drops ``Z``: it is the exact Gaussian likelihood of the
         ``N - r`` contrasts ``Q'y`` with ``Q`` an orthonormal basis of the
         complement of ``Z`` (a partial REML that removes only ``Z``), with the
         ``q - r`` covariate directions that remain.  Because ``Z`` lies in the
@@ -2897,6 +2930,17 @@ class LMM:
         the null and alternative ML fits stay nested and their LRT valid.
         With no such direction (``r = 0``, e.g. a positive definite or
         uncentred ``K``) this is ``self``.  Computed once and cached.
+
+        ``r > 0`` is not the only way for ML to be unbounded.  The exact
+        condition is that the covariates' rows in the null block have full row
+        rank (`_check_ml_ill_posed`): they can then fit ``y`` exactly in every
+        null direction without spanning any of them alone (``r = 0``), e.g.
+        two animals of the same inbred strain and a covariate that differs
+        between them.  Dropping ``Z`` does not cure that case; `lrt_null_fit`
+        warns about it on the model it fits, and `lrt_batch` returns ``nan``
+        for a SNP whose rows complete that rank in the model with the SNP
+        (`_lrt_unbounded`).  Dropping the whole column space of those rows
+        would cover both; not done (a follow-up).
         """
         if self._lrt_cache is not None:
             return self._lrt_cache
@@ -2972,12 +3016,54 @@ class LMM:
             M = self._lrt_model()
             if M._lrt_null is None:
                 with warnings.catch_warnings():
-                    # the reduced model is never ill-posed; self may be, and is not used
+                    # fit's generic ML warning ("use REML") does not apply to the LRT;
+                    # the LRT's own is below
                     warnings.filterwarnings("ignore", message="the ML likelihood has no maximum")
                     h, _, _, ll = M._fit_copy(None, False, ngrids)
                 M._lrt_null = (float(h), float(ll))
+                if M._check_ml_ill_posed():
+                    warnings.warn(LRT_ILL_POSED_MESSAGE, stacklevel=2)
             self._lrt_null = M._lrt_null
         return self._lrt_null
+
+    def _lrt_unbounded(self, G: FloatArray) -> NDArray[np.bool_]:
+        """The SNPs (columns of ``G``, raw) whose model makes this ML model unbounded.
+
+        Called on the LRT's model (`_lrt_model`).  With ``d`` null (floored)
+        coordinates and the covariates' rows there of rank ``d - 1``, a SNP
+        whose rows have a part outside their column space brings the rows of
+        the design ``[X0, x]`` to full rank ``d``: that alternative model's ML
+        likelihood grows without bound as ``h -> 1`` (its fit sits at the
+        spike and the LRT is meaningless).  E.g. a centred kinship of inbred
+        strains with one strain of two animals, and a SNP whose call differs
+        between those two.  Only the ``d`` null rows of the rotated SNPs are
+        needed; the part in the covariates' span is removed first (it does
+        not change the rank).  A column is flagged when that part exceeds
+        ``1e-6`` of its norm.
+        """
+        m = G.shape[1]
+        null = self.kva <= 1e-6
+        d = int(null.sum())
+        flag = np.zeros(m, dtype=bool)
+        if not d or not m:
+            return flag
+        U = self._x0t_ortho
+        un = U[null]
+        if self.q:
+            left, sv, _ = np.linalg.svd(un, full_matrices=False)
+            k0 = int((sv > 1e-6).sum())
+            B = left[:, :k0]
+        else:
+            k0, B = 0, np.zeros((d, 0))
+        if k0 != d - 1:  # cannot be completed by one column (or the null model is ill-posed)
+            return flag
+        xn = _matrix_mult(self.kve[:, null].T, G)  # (d, m)
+        if self.q:
+            xn = xn - _matrix_mult(un, _matrix_mult(_matrix_mult(self.kve, U).T, G))
+        res = xn - _matrix_mult(B, _matrix_mult(B.T, xn))
+        norm = np.sqrt(np.einsum("ij,ij->j", G, G))
+        flag[:] = np.sqrt(np.einsum("ij,ij->j", res, res)) > 1e-6 * norm
+        return flag
 
     def _fit_copy(
         self, X: FloatArray | None, reml: bool, ngrids: int = 100
@@ -3039,13 +3125,31 @@ class LMM:
             (the Wald quantities at that SNP's ML ``h``, ``sigma2 = Q / N``,
             ``N`` the reduced sample size).
 
+        Warns
+        -----
+        UserWarning
+            If the null model's ML likelihood has no maximum even after the
+            reduction (`lrt_null_fit`), and once per call with the number of
+            SNPs set to ``nan`` because the model with the SNP has none
+            (`_lrt_unbounded`).  Both happen with kinships that have null
+            directions the covariates and the SNP can fit exactly: panels
+            where most strains have one animal and a few have two.  The Wald
+            test is then the safe choice.
+
         Notes
         -----
         ``l1 >= l0`` in exact arithmetic (the null model is nested); a
         negative ``stat`` from rounding is set to 0.  ``sims/studies/s9_tests.md``
         measures the calibration: about that of the Wald test from n = 300,
         mildly anti-conservative at n = 100 (chi2(1) has no small-sample
-        correction).
+        correction).  The SNPs set to ``nan`` are added to ``lrt_unbounded``.
+
+        For a SNP with missing calls `gwas` tests the called individuals with
+        their own model; that subset of a centred ``K`` is no longer centred,
+        nothing is dropped, and its null ML fit often reaches ``h = 1`` (S9's
+        reviewer: in about half the fits at n = 100 with 3% missing calls).
+        The calibration of those SNPs stayed acceptable there (lambda_GC 1.04
+        at h2 = 0, 0.99 at 0.3).
 
         Examples
         --------
@@ -3060,11 +3164,30 @@ class LMM:
         >>> bool(res.p[0] < 1e-3), res.t.shape
         (True, (20,))
         """
+        res, k = self._lrt_scan(self._snp_block(X), ll0, ngrids)
+        if k:
+            warnings.warn(_lrt_unbounded_message(k, res.t.shape[0]), stacklevel=2)
+        return res
+
+    def _lrt_scan(
+        self, G: FloatArray, ll0: float | None = None, ngrids: int = 100
+    ) -> tuple[AssociationResult, int]:
+        """`lrt_batch` without its warning: ``(result, number of SNPs set to nan as unbounded)``."""
         M = self._lrt_model()
         if ll0 is None:
             ll0 = self.lrt_null_fit(ngrids)[1]
-        f = M.fit_snps(X, reml=False, ngrids=ngrids)
-        return _lrt_result(f.ll, ll0, f.beta, f.beta_var)
+        bad = M._lrt_unbounded(G)
+        m = G.shape[1]
+        out = [np.full(m, np.nan) for _ in range(4)]
+        ok = np.flatnonzero(~bad)
+        if len(ok):
+            f = M.fit_snps(G[:, ok], reml=False, ngrids=ngrids)
+            r = _lrt_result(f.ll, ll0, f.beta, f.beta_var)
+            for k in range(4):
+                out[k][ok] = r[k]
+        k = int(bad.sum())
+        self.lrt_unbounded += k
+        return AssociationResult(*out), k
 
     def association_tests(
         self,
@@ -3073,6 +3196,7 @@ class LMM:
         reml: bool = True,
         refit: bool = False,
         batch: bool = True,
+        counts: dict[str, int] | None = None,
     ) -> AssociationResult:
         """Test every column of ``X`` with the Wald or the likelihood-ratio test.
 
@@ -3108,6 +3232,12 @@ class LMM:
             Refit ``h`` with each SNP (the Wald test; the LRT always does).
         batch : bool, default True
             Test the block at once (see above).
+        counts : dict, optional
+            For the LRT: ``counts["lrt_unbounded"]`` is increased by the number
+            of SNPs set to ``nan`` because the model with the SNP has no ML
+            maximum (see `lrt_batch`), and no warning is issued (the caller
+            reports the total once, as `gwas` does).  Without it, `lrt_batch`'s
+            warning.
 
         Returns
         -------
@@ -3139,10 +3269,18 @@ class LMM:
         """
         check_test(test, refit, self.legacy_fit)
         G = self._snp_block(X)
+        if test == "lrt":
+            if self.legacy_fit or not batch:
+                res, k = self._lrt_per_snp(G)
+            else:
+                res, k = self._lrt_scan(G)
+            if counts is not None:
+                counts["lrt_unbounded"] = counts.get("lrt_unbounded", 0) + k
+            elif k:
+                warnings.warn(_lrt_unbounded_message(k, G.shape[1]), stacklevel=2)
+            return res
         if self.legacy_fit or not batch:
             return self._association_tests_per_snp(G, test, reml, refit)
-        if test == "lrt":
-            return self.lrt_batch(G)
         if refit:
             f = self.fit_snps(G, reml=reml)
             return AssociationResult(f.t, f.p, f.beta, f.beta_var)
@@ -3158,19 +3296,6 @@ class LMM:
         """
         m = G.shape[1]
         out = [np.full(m, np.nan) for _ in range(4)]
-        if test == "lrt":
-            M = self._lrt_model()
-            ll0 = self.lrt_null_fit()[1]
-            for j in range(m):
-                x = G[:, [j]]
-                hj, _, _, ll1 = M._fit_copy(x, False)
-                saved = M.x0t_stack[:, M.q].copy()
-                _, _, beta, beta_var = M.association(x, float(hj), reml=False, return_beta=True)
-                M.x0t_stack[:, M.q] = saved
-                r = _lrt_result(np.array([ll1]), ll0, np.array([beta]), np.array([beta_var]))
-                for k in range(4):
-                    out[k][j] = r[k][0]
-            return AssociationResult(*out)
         h0 = getattr(self, "opt_h", None)
         for j in range(m):
             x = G[:, [j]]
@@ -3181,6 +3306,26 @@ class LMM:
                 ts, ps, beta, beta_var = self.association(x, h0, reml=reml, return_beta=True)
             out[0][j], out[1][j], out[2][j], out[3][j] = ts, ps, beta, beta_var
         return AssociationResult(*out)
+
+    def _lrt_per_snp(self, G: FloatArray) -> tuple[AssociationResult, int]:
+        """`_lrt_scan` one SNP at a time, with ``fit(X=x)`` (``batch=False``)."""
+        m = G.shape[1]
+        out = [np.full(m, np.nan) for _ in range(4)]
+        M = self._lrt_model()
+        ll0 = self.lrt_null_fit()[1]
+        bad = M._lrt_unbounded(G)
+        for j in np.flatnonzero(~bad):
+            x = G[:, [j]]
+            hj, _, _, ll1 = M._fit_copy(x, False)
+            saved = M.x0t_stack[:, M.q].copy()
+            _, _, beta, beta_var = M.association(x, float(hj), reml=False, return_beta=True)
+            M.x0t_stack[:, M.q] = saved
+            r = _lrt_result(np.array([ll1]), ll0, np.array([beta]), np.array([beta_var]))
+            for k in range(4):
+                out[k][j] = r[k][0]
+        k = int(bad.sum())
+        self.lrt_unbounded += k
+        return AssociationResult(*out), k
 
     def tstat(
         self,
