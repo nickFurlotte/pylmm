@@ -25,8 +25,9 @@ effect allele is **ALT**, as in plink2 `--glm omit-ref`, REGENIE and GWAS-SSF. (
 you pass `--keep-allele-order`. After converting, always look at the `.bim` and record which allele is
 A1.
 
-A PGEN read with `--pfile` follows the same rule: pylmm counts **REF** (the genotype is `1 - ALT dosage /
-2`, and `variants.a2` is REF, `a1` ALT), so a PGEN reads exactly as `plink2 --pfile X --make-bed` of it,
+A PGEN read with `--pfile` follows the same rule: the genotype counts **REF** (`1 - ALT dosage / 2`;
+`variants.a2` is REF, `a1` ALT) and the reported effect allele is **ALT**, with its frequency from the
+dosages, so a PGEN reads exactly as `plink2 --pfile X --make-bed` of it,
 and a BED converted with `plink2 --bfile X --make-pgen` reads as the BED. To change which allele is REF,
 use plink2's `--ref-allele` / `--ref-from-fa` before reading. A multiallelic variant is an error: drop
 (`--max-alleles 2`) or split (`bcftools norm -m -any`) them first.

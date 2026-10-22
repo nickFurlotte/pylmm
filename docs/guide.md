@@ -650,7 +650,9 @@ with `-o /dev/stdout` (or a pipe) there is none unless `--run-record` asks for i
   dropped (with a warning).
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
 * `--pfile P` reads a PLINK 2 PGEN file set instead of `--bfile` (the `pgen` extra; dosages included,
-  `--hardcalls` for the hard calls only); so does `pylmm kinship --pfile P`. The effect allele is REF.
+  `--hardcalls` for the hard calls only); so does `pylmm kinship --pfile P`. The genotype counts REF,
+  and the reported `effect_allele` is A1 = ALT (its frequency from the dosages), as for a BED that
+  plink2 wrote; `--output-format legacy` reports BETA for REF.
 * `--id-match iid` matches on IID alone; `--ml`, `--refit`, `--remove-missing-genotypes` as in the
   library; `--eigen` reuses a decomposition (section 11).
 * EMMA input has no positions or alleles: those columns of the output are `NA` unless `--emma-map` gives

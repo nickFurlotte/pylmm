@@ -69,7 +69,7 @@ def add_pfile_options(source: Any, geno: Any) -> None:
         "--pfile",
         metavar="PREFIX",
         help="PLINK 2 genotypes PREFIX.pgen/.pvar (or .pvar.zst)/.psam, dosages included; "
-        "the counted allele is REF.  Needs the optional pgenlib: pip install pgenlib (from a clone: uv sync --extra pgen)",
+        "the genotype counts REF and the effect allele is A1 = ALT.  Needs the optional pgenlib: pip install pgenlib (from a clone: uv sync --extra pgen)",
     )
     geno.add_argument(
         "--hardcalls",

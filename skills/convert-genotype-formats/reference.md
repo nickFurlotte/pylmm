@@ -14,10 +14,11 @@ from documentation only is marked *docs only*.
 | genotypes | hard calls, 2 bits | hard calls + dosages (1/16384), phase, multiallelic |
 | alleles | `.bim` A1 (col 5), A2 (col 6); no REF/ALT | `.pvar` REF and ALT explicit |
 | sample IDs | `.fam` FID IID (both required) | `.psam` `#IID` or `#FID IID` header |
-| pylmm | **reads it** (counts A2) | **reads it** with pgenlib installed (`--pfile`; counts REF; dosages kept; biallelic only), else convert to BED (lossy for dosages) |
+| pylmm | **reads it** (counts A2) | **reads it** with pgenlib installed (`--pfile`; counts REF, reports effects for ALT; dosages kept; biallelic only), else convert to BED (lossy for dosages) |
 
 * **plink2 `--make-bed` writes A1 = ALT, A2 = REF** (*checked*: `.bim` of a VCF with REF `A`, ALT `G`
-  reads `G A`). pylmm counts A2, so its effect allele is REF. A VCF `0/0` (REF/REF) reads as 1.0 in
+  reads `G A`). pylmm's genotype counts A2 = REF, and `pylmm gwas` reports its effects for A1 = ALT
+  (`--output-format legacy`: for REF). A VCF `0/0` (REF/REF) reads as 1.0 in
   pylmm (*checked*).
 * plink2 reading a BED treats A2 as REF (provisionally) and A1 as ALT (*checked* with `--freq`).
 * **plink 1.9** reorders alleles so A1 is the minor allele unless `--keep-allele-order` (*docs only*).

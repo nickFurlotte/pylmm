@@ -31,9 +31,11 @@ to BED.  So for a PGEN the counted allele is **REF**: a genotype is
 ``a1 = ALT``.  The values (and the variant metadata) are then exactly those
 `PlinkReader` reads from ``plink2 --pfile X --make-bed`` of the same file, and
 a BED converted to PGEN by plink2 (which takes A2 as REF) reads back as the
-original BED.  The effect allele of ``pylmm gwas`` is therefore REF, the
-opposite of ``plink2 --glm``, which counts ALT: the t statistic has the
-opposite sign, the p-value is the same.
+original BED.  ``pylmm gwas`` reports its effects per copy of A1 (its
+``effect_allele`` column), which for a PGEN is **ALT**, as ``plink2 --glm``,
+REGENIE and GWAS-SSF report them; ``effect_allele_frequency`` is the mean ALT
+dosage / 2 (dosages included).  Only ``--output-format legacy`` reports BETA
+for the counted allele, REF.
 
 Hard calls and dosages
 ----------------------

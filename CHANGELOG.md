@@ -68,10 +68,12 @@ maps them).
   `pylmm.pgen.PgenSource` (a `GenotypeSource`) and `PlinkReader(prefix, type="pgen")`. They read
   `.pgen` + `.pvar` (or `.pvar.zst`) + `.psam`. Dosages are read where stored (`--hardcalls` /
   `dosage=False`: hard calls only). The genotype is the fraction of copies of **REF** (`1 - ALT dosage/2`;
-  `variants.a2` = REF, `a1` = ALT), so a PGEN reads bit for bit as the BED `plink2 --make-bed` writes from
+  `variants.a2` = REF, `a1` = ALT; the reported `effect_allele` is A1 = ALT, its frequency from the
+  dosages), so a PGEN reads bit for bit as the BED `plink2 --make-bed` writes from
   it, and `pylmm gwas`/`pylmm kinship` give byte-identical output with `--pfile` and `--bfile` of the two
   (checked on plink2-written fixtures; also with `--loco`, whose chromosomes come from the `.pvar`, and
-  `--grm`). A `.psam` without FID gives FID `0` (as plink2's `.fam`); its SID column is ignored and a
+  `--grm`, in both `--output-format`s); the run record lists the `.pgen`, `.pvar` and `.psam` with their
+  SHA-256. A `.psam` without FID gives FID `0` (as plink2's `.fam`); its SID column is ignored and a
   sample listed twice is an `InputError`. Multiallelic variants are an `InputError` naming the first one.
   An IBS kinship on dosages suggests `--hardcalls`. Also `pylmm.pgen.write_pgen` (genotypes
   to PGEN, for tests and small conversions; dosages outside [0, 1] are a `ValueError`) and `sims/bench/pgen_read.py` (read throughput vs BED:
