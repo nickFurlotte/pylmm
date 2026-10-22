@@ -514,6 +514,39 @@ class AssociationResult(NamedTuple):
     beta_var: FloatArray
 
 
+class GwasResult(NamedTuple):
+    """The result of ``gwas(..., return_details=True)``: one entry per SNP in each field.
+
+    The effects are per unit of the columns of ``X`` as passed (per SD for
+    standardised genotypes); `pylmm.sumstats.SumStats.from_genotypes` turns
+    them into per-allele summary statistics.
+
+    Attributes
+    ----------
+    t : (m,) array
+        Wald t statistics (nan for a SNP that cannot be tested).
+    p : (m,) array
+        Two-sided p-values from ``t(n - q - 1)``.
+    beta : (m,) array
+        SNP effect estimates.
+    beta_se : (m,) array
+        Their standard errors.
+    n : (m,) array
+        The individuals each SNP was tested on (with a phenotype and a
+        called genotype); nan where ``t`` is.
+    neg_log10_p : (m,) array
+        ``-log10 p``: from ``p`` where it is at least 1e-300, else from ``t``
+        (`neg_log10_pvalue`), so finite where ``p`` underflows to 0.
+    """
+
+    t: FloatArray
+    p: FloatArray
+    beta: FloatArray
+    beta_se: FloatArray
+    n: FloatArray
+    neg_log10_p: FloatArray
+
+
 def _log_beta_tail(t: FloatArray, df: FloatArray) -> FloatArray:
     """``log I_x(df/2, 1/2)`` with ``x = df / (df + t^2)``: the log two-sided t p-value.
 
@@ -655,7 +688,8 @@ def gwas(
     batch: bool = True,
     block_size: int = DEFAULT_BLOCK_SIZE,
     legacy_fit: bool = False,
-) -> tuple[list[float], list[float]]:
+    return_details: bool = False,
+) -> Any:
     """Scan SNPs with the mixed model (a Wald test per SNP, in blocks of SNPs).
 
     For each column of ``X`` the model ``y = X0 b + x a + u + e`` (see the
@@ -717,6 +751,10 @@ def gwas(
         Fit ``h`` as pylmm 1.0.0 did (see `LMM`): every null fit and refit,
         and so every statistic, as in 1.0.0.  With ``batch=False`` the
         results are those of pylmm 1.0.0.
+    return_details : bool, default False
+        Return a `GwasResult` (t, p, beta, its SE, the individuals tested
+        and -log10 p, as arrays) instead of ``(t_stats, p_values)``; for
+        `pylmm.sumstats.SumStats.from_genotypes`.
 
     Returns
     -------
@@ -817,6 +855,9 @@ def gwas(
         kve = None
 
     if len(Y) == 0:
+        if return_details:
+            nan = np.full(m, np.nan)
+            return GwasResult(nan, nan.copy(), nan.copy(), nan.copy(), nan.copy(), nan.copy())
         return [np.nan] * m, [np.nan] * m
 
     X0 = check_covariates(X0, len(Y))
@@ -828,6 +869,9 @@ def gwas(
 
     t_stats: list[float] = [np.nan] * m
     p_values: list[float] = [np.nan] * m
+    betas = np.full(m, np.nan)
+    beta_vars = np.full(m, np.nan)
+    n_used = np.full(m, np.nan)
     counts: dict[str, int] = {}
 
     n = X.shape[0]
@@ -843,17 +887,21 @@ def gwas(
         for j in start + np.where(~complete)[0]:  # one SNP at a time
             res = _gwas_one_snp(X[:, [j]], Y, K, X0, Q0, L, reml, refit, counts)
             if res is not None:
-                t_stats[j], p_values[j] = res
+                t_stats[j], p_values[j], betas[j], beta_vars[j], n_used[j] = res
         # the complete, estimable SNPs of this block, tested together
         cand = start + np.where(complete)[0]
         batched = [int(i) for i in cand[snp_estimable_columns(X[:, cand], X0, Q0)]]
         if batched:
             r = L.association_batch(X[:, batched], reml=reml)
             for k, i in enumerate(batched):
+                n_used[i] = n
                 if np.isfinite(r.t[k]):
                     t_stats[i], p_values[i] = r.t[k], r.p[k]
+                    betas[i], beta_vars[i] = r.beta[k], r.beta_var[k]
                 else:  # not expected for an estimable SNP; keep the per-SNP answer
-                    t_stats[i], p_values[i] = L.association(X[:, i], reml=reml)
+                    t_stats[i], p_values[i], betas[i], beta_vars[i] = L.association(
+                        X[:, i], reml=reml, return_beta=True
+                    )
 
     if counts.get("collinear"):
         warnings.warn(
@@ -861,6 +909,16 @@ def gwas(
             "the covariates are no longer of full rank" % (counts["collinear"], m),
             stacklevel=2,
         )
+    if return_details:
+        t_arr = np.asarray(t_stats, dtype=np.float64)
+        p_arr = np.asarray(p_values, dtype=np.float64)
+        n_used[~np.isfinite(t_arr)] = np.nan
+        with np.errstate(divide="ignore", invalid="ignore"):
+            nl10 = -np.log10(p_arr)
+            tiny = (p_arr < 1e-300) & np.isfinite(t_arr)
+            nl10[tiny] = neg_log10_pvalue(t_arr[tiny], n_used[tiny] - X0.shape[1] - 1)
+            se = np.sqrt(beta_vars)
+        return GwasResult(t_arr, p_arr, betas, se, n_used, nl10)
     return t_stats, p_values
 
 
@@ -874,8 +932,10 @@ def _gwas_one_snp(
     reml: bool,
     refit: bool,
     counts: dict[str, int],
-) -> tuple[np.float64, np.float64] | None:
+) -> tuple[Any, Any, Any, Any, int] | None:
     """Test one SNP column ``x`` (n, 1) of `gwas` on its own; None if it cannot be tested.
+
+    Returns ``(t, p, beta, beta_var, n)``, ``n`` the individuals it was tested on.
 
     A SNP with missing calls is tested on the called individuals (a new
     `LMM` on that subset); a complete one with ``L`` (refitted if ``refit``).
@@ -894,12 +954,14 @@ def _gwas_one_snp(
             ls.fit(X=xs, reml=reml)
         else:
             ls.fit(reml=reml)
-        return ls.association(xs, reml=reml)
+        t, p, b, bv = ls.association(xs, reml=reml, return_beta=True)
+        return t, p, b, bv, len(ys)
     if not snp_estimable(x, X0, Q=Q0):
         return None
     if refit:
         L.fit(X=x, reml=reml)
-    return L.association(x, reml=reml)
+    t, p, b, bv = L.association(x, reml=reml, return_beta=True)
+    return t, p, b, bv, len(Y)
 
 
 def subset_testable(

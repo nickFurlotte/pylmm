@@ -232,6 +232,12 @@ PLINK2_GLM_RTOL = 1e-5
 # not).  Measured (80 x 300 synthetic, h = 0.62): beta max relative 4.8e-9 (2.4e-11
 # absolute); every column passes at rtol = atol/max = 5e-9.  20x.
 SUMSTATS_GLS_RTOL = 1e-7
+# SUMSTATS_LIB_CLI_RTOL: the table of library gwas(return_details=True) on raw genotypes
+# (SumStats.from_genotypes) vs pylmm gwas --remove-missing-genotypes (which tests the
+# complete SNPs raw too and standardises the others): the same fits, the per-SNP scale
+# applied before or after.  Measured (80 x 300 synthetic): max relative 1.6e-13 (beta,
+# a2_fraction vs the CLI), 3.9e-13 (a1_count vs a2_fraction).  ~25x.
+SUMSTATS_LIB_CLI_RTOL = 1e-11
 
 # Structural invariants.
 SYM_ATOL = 1e-12  # |K - K.T|

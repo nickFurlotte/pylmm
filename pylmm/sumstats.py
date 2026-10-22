@@ -102,7 +102,6 @@ import gzip
 import io
 import math
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from typing import IO, Any, Literal
 
@@ -344,7 +343,7 @@ class SumStats:
         >>> y = 0.5 * C[:, 0] + rng.normal(size=100)
         >>> res = gwas(y, C, calculate_kinship(C), return_details=True)
         >>> table = SumStats.from_genotypes(res, C, coding="a1_count")
-        >>> bool(abs(table.beta[0] - 0.5) < 0.3), table.n[0]
+        >>> bool(abs(table.beta[0] - 0.5) < 0.3), float(table.n[0])
         (True, 100.0)
         """
         X = np.asarray(X, dtype=np.float64)
@@ -631,8 +630,66 @@ def write_sumstats(path: str, table: SumStats) -> None:
         w.write(table)
 
 
-def concat(tables: Sequence[SumStats]) -> SumStats:
-    """The rows of ``tables`` one after the other."""
-    return SumStats(
-        **{f.name: np.concatenate([getattr(t, f.name) for t in tables]) for f in fields(SumStats)}
-    )
+TEXT_COLUMNS = frozenset(("chromosome", "effect_allele", "other_allele", "variant_id", "rsid"))
+"""The columns `read_sumstats` returns as text; every other column is numeric."""
+
+
+def read_sumstats(path: str) -> dict[str, NDArray[Any]]:
+    """Read a summary-statistics table (`write_sumstats`, ``pylmm gwas``) into numpy columns.
+
+    Parameters
+    ----------
+    path : str
+        The table, gzip-compressed if the name ends in ``.gz``.
+
+    Returns
+    -------
+    dict
+        One array per column, in file order: `TEXT_COLUMNS` as ``str``
+        arrays (``"NA"`` kept as is), every other column float64 with nan for
+        ``NA`` (``p_value`` below the double range reads as 0.0: use
+        ``neg_log_10_p_value``).  Columns pylmm does not know are read as text.
+        ``pandas.read_csv(path, sep="\t")`` reads the same file.
+
+    Raises
+    ------
+    ValueError
+        If a line has another number of fields than the header, or a numeric
+        column holds something that is not a number.
+
+    Examples
+    --------
+    >>> import os, tempfile
+    >>> from pylmm.genotypes import Variants
+    >>> from pylmm.sumstats import SumStats, read_sumstats, write_sumstats
+    >>> t = SumStats.from_variants(
+    ...     Variants(snp=["rs1"], chrom=["1"], bp=[5], a1=["A"], a2=["G"]), beta=[0.5],
+    ...     standard_error=[0.1], t_stat=[5.0], p_value=[0.0], neg_log_10_p_value=[400.0],
+    ...     effect_allele_frequency=[0.2], n=[90], missing_rate=[0.0], beta_std=[0.3])
+    >>> path = os.path.join(tempfile.mkdtemp(), "t.tsv.gz")
+    >>> write_sumstats(path, t)
+    >>> r = read_sumstats(path)
+    >>> str(r["variant_id"][0]), float(r["beta"][0]), float(r["neg_log_10_p_value"][0]), str(r["rsid"][0])
+    ('rs1', 0.5, 400.0, 'rs1')
+    """
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as f:
+        header = f.readline().rstrip("\n").split("\t")
+        rows = [line.rstrip("\n").split("\t") for line in f if line.strip()]
+    for k, r in enumerate(rows):
+        if len(r) != len(header):
+            raise ValueError(
+                "%s, line %d: %d fields, the header has %d" % (path, k + 2, len(r), len(header))
+            )
+    out: dict[str, NDArray[Any]] = {}
+    known = set(SUMSTATS_COLUMNS)
+    for j, name in enumerate(header):
+        values = [r[j] for r in rows]
+        if name in TEXT_COLUMNS or name not in known:
+            out[name] = np.array(values, dtype=str)
+            continue
+        try:
+            out[name] = np.array([np.nan if v == NA else float(v) for v in values])
+        except ValueError as e:
+            raise ValueError("%s, column %s: %s" % (path, name, e)) from e
+    return out

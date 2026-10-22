@@ -731,3 +731,56 @@ def test_write_failure_is_an_error_and_keeps_the_lines_before(synth, tmp_path, m
     cols, _ = _read_table(out)
     assert len(cols["variant_id"]) == 100  # the first block, complete; the gzip stream closed
     assert _record(out)["status"] == "error"
+
+
+def test_library_table_matches_the_cli(synth, tmp_path):
+    # gwas(return_details=True) on the raw A2 fractions -> SumStats.from_genotypes: the table of
+    # `pylmm gwas --remove-missing-genotypes` (the library tests SNPs with missing calls on
+    # their called individuals, as that option does)
+    from pylmm.lmm import gwas
+    from pylmm.plink_io import PlinkReader
+
+    base = synth["base"]
+    with PlinkReader(base, norm_genotype=False, pheno_file=base + ".pheno") as r:
+        G = np.hstack([g for g, _ in r.iter_blocks(1000)])
+        variants = r.variants
+        y = r.phenos[:, 0]  # as the CLI reads it (written with 10 decimals)
+    res = gwas(y, G, synth["K"], return_details=True)
+    table = sumstats.SumStats.from_genotypes(res, G, variants, coding="a2_fraction")
+    out = str(tmp_path / "lib.tsv.gz")
+    sumstats.write_sumstats(out, table)
+    cli = str(tmp_path / "cli.tsv.gz")
+    _run(
+        [
+            "--bfile",
+            base,
+            "--pheno",
+            base + ".pheno",
+            "--kinship",
+            base + ".kin",
+            "--remove-missing-genotypes",
+            "-o",
+            cli,
+        ]
+    )
+    a, b = sumstats.read_sumstats(out), sumstats.read_sumstats(cli)
+    for c in (
+        "chromosome",
+        "base_pair_location",
+        "effect_allele",
+        "other_allele",
+        "variant_id",
+        "n",
+    ):
+        np.testing.assert_array_equal(a[c], b[c], err_msg=c)
+    for c in ("effect_allele_frequency", "missing_rate"):  # the same mean, other roundings
+        np.testing.assert_allclose(a[c], b[c], rtol=1e-14, err_msg=c)
+    for c in ("beta", "standard_error", "t_stat", "p_value", "beta_std", "neg_log_10_p_value"):
+        h.assert_close(a[c], b[c], rtol=h.SUMSTATS_LIB_CLI_RTOL, atol=0, what=c)
+    # and with 0/1/2 counts of A1 (e.g. an ALT dosage)
+    C = 2.0 - 2.0 * G
+    res_c = gwas(y, C, synth["K"], return_details=True)
+    t_c = sumstats.SumStats.from_genotypes(res_c, C, variants, coding="a1_count")
+    h.assert_close(t_c.beta, a["beta"], rtol=h.SUMSTATS_LIB_CLI_RTOL, atol=0, what="a1_count")
+    with pytest.raises(ValueError, match=r"outside 0\.\.1"):
+        sumstats.SumStats.from_genotypes(res, (G - 0.5) * 3, variants)
