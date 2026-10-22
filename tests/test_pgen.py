@@ -13,8 +13,10 @@ missing-pgenlib errors are tested everywhere.
 
 import contextlib
 import filecmp
+import hashlib
 import importlib.util
 import io
+import json
 import os
 import shutil
 import sys
@@ -27,6 +29,7 @@ from pylmm.genotypes import ArraySource, Variants
 from pylmm.pgen import PgenSource, pgen_paths, read_psam, read_pvar, write_pgen
 from pylmm.plink_io import PlinkReader
 from pylmm.samples import InputError
+from pylmm.sumstats import read_sumstats
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pgen")
 HAVE_PGENLIB = importlib.util.find_spec("pgenlib") is not None
@@ -425,8 +428,9 @@ def _gwas(inputs, geno, name, extra=()):
     ],
 )
 @pytest.mark.parametrize(("pgen", "bed"), [("hc", "hc"), ("swap", "swap")])
-def test_gwas_pfile_is_byte_identical_to_bfile(inputs, extra, pgen, bed):
-    extra = tuple(inputs["covar"] if x == "COVAR" else x for x in extra)
+@pytest.mark.parametrize("fmt", ["sumstats", "legacy"])
+def test_gwas_pfile_is_byte_identical_to_bfile(inputs, extra, pgen, bed, fmt):
+    extra = (*(inputs["covar"] if x == "COVAR" else x for x in extra), "--output-format", fmt)
     a, err_a = _gwas(inputs, ["--bfile", p(bed)], "bed.tsv", extra)
     b, err_b = _gwas(inputs, ["--pfile", p(pgen)], "pgen.tsv", extra)
     assert filecmp.cmp(a, b, shallow=False)
@@ -435,9 +439,25 @@ def test_gwas_pfile_is_byte_identical_to_bfile(inputs, extra, pgen, bed):
         assert len(f.readlines()) == 41
 
 
+@needs_pgenlib
+def test_run_record_lists_the_pgen_files(inputs):
+    """The run record names the .pgen/.pvar/.psam (base names) with their SHA-256."""
+    out, _ = _gwas(inputs, ["--pfile", p("hc")], "rec.tsv")
+    with open(str(inputs["dir"] / "rec.json")) as f:
+        rec = json.load(f)["inputs"]
+    for role, ext in (("pgen", ".pgen"), ("pvar", ".pvar"), ("psam", ".psam")):
+        with open(p("hc" + ext), "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        assert rec[role]["path"] == "hc" + ext and rec[role]["sha256"] == digest, role
+    assert not {"bed", "bim", "fam", "emma_geno"} & set(rec)
+    _gwas(inputs, ["--pfile", p("hczst")], "zst.tsv")
+    with open(str(inputs["dir"] / "zst.json")) as f:
+        assert json.load(f)["inputs"]["pvar"]["path"] == "hczst.pvar.zst"
+
+
 def _results(fn):
-    rows = [line.rstrip("\n").split("\t") for line in open(fn)][1:]
-    return [r[0] for r in rows], np.array([[float(x) for x in r[1:]] for r in rows])
+    """The summary-statistics table of `pylmm gwas` (the default output format), as columns."""
+    return read_sumstats(fn)
 
 
 @needs_pgenlib
@@ -453,19 +473,28 @@ def test_gwas_dosage_pgen(tmp_path):
     _run(["kinship", "--bfile", p("dos"), "-o", kin])
     common = ["--kinship", kin, "--pheno", pheno, "-o"]
     out = {k: str(tmp_path / k) for k in ("bed", "hc", "dos")}
-    _run(["gwas", "--bfile", p("dos"), *common, out["bed"]])
-    _run(["gwas", "--pfile", p("dos"), "--hardcalls", *common, out["hc"]])
+    for fmt in ("legacy", "sumstats"):  # out["hc"] is left in the default format
+        fo = ["--output-format", fmt]
+        _run(["gwas", "--bfile", p("dos"), *fo, *common, out["bed"]])
+        _run(["gwas", "--pfile", p("dos"), "--hardcalls", *fo, *common, out["hc"]])
+        assert filecmp.cmp(out["bed"], out["hc"], shallow=False), fmt
     _run(["gwas", "--pfile", p("dos"), *common, out["dos"]])
-    assert filecmp.cmp(out["bed"], out["hc"], shallow=False)
-    snps, res_dos = _results(out["dos"])
-    _, res_hc = _results(out["hc"])
-    assert snps == ["v%d" % (k + 1) for k in range(12)]
-    p_dos, p_hc = res_dos[:, 3], res_hc[:, 3]
+    res_dos, res_hc = _results(out["dos"]), _results(out["hc"])
+    assert res_dos["variant_id"].tolist() == ["v%d" % (k + 1) for k in range(12)]
+    p_dos, p_hc = res_dos["p_value"], res_hc["p_value"]
     assert np.all((p_dos > 0) & (p_dos <= 1))
     assert np.argmin(p_dos) == 2 and p_dos[2] < 1e-6
     assert p_dos[2] < p_hc[2]  # the phenotype follows the dosage, not the hard call
-    # BETA > 0: y rises with the REF dosage fraction pylmm counts
-    assert res_dos[2, 0] > 0
+    # the reported effect allele is A1 = ALT (the genotype counts REF): y rises with REF,
+    # so the per-ALT-copy beta is negative
+    v = read_pvar(p("dos.pvar"))
+    assert res_dos["effect_allele"].tolist() == v.a1.tolist()
+    assert res_dos["other_allele"].tolist() == v.a2.tolist()
+    assert res_dos["beta"][2] < 0
+    # effect_allele_frequency: the mean ALT dosage / 2 over the called samples (dosages)
+    eaf = np.nanmean(1.0 - D, axis=0)
+    assert np.allclose(res_dos["effect_allele_frequency"], eaf, rtol=0, atol=1e-12)
+    assert not np.allclose(res_hc["effect_allele_frequency"], eaf, rtol=0, atol=1e-3)
 
 
 @needs_pgenlib
@@ -562,9 +591,10 @@ def test_iid_only_psam_suggests_id_match_iid(tmp_path):
 @needs_pgenlib
 @pytest.mark.parametrize("extra", [(), ("--kinship-type", "ibs"), ("--covar", "COVAR")])
 @pytest.mark.parametrize(("pgen", "bed"), [("hc", "hc"), ("hczst", "hc"), ("swap", "swap")])
-def test_gwas_loco_pfile_is_byte_identical_to_bfile(inputs, extra, pgen, bed):
+@pytest.mark.parametrize("fmt", ["sumstats", "legacy"])
+def test_gwas_loco_pfile_is_byte_identical_to_bfile(inputs, extra, pgen, bed, fmt):
     """--loco takes each SNP's chromosome from the .pvar (chromosomes 1, 2, 22 here)."""
-    extra = tuple(inputs["covar"] if x == "COVAR" else x for x in extra)
+    extra = (*(inputs["covar"] if x == "COVAR" else x for x in extra), "--output-format", fmt)
     out = {}
     for flag, prefix in (("--bfile", p(bed)), ("--pfile", p(pgen))):
         out[flag] = str(inputs["dir"] / ("loco%s.tsv" % flag))
@@ -588,21 +618,37 @@ def test_gwas_loco_dosage_pgen(tmp_path):
     _run(["gwas", "--pfile", p("dos"), "--hardcalls", *base, out["hc"]])
     _run(["gwas", "--pfile", p("dos"), *base, out["dos"]])
     assert filecmp.cmp(out["bed"], out["hc"], shallow=False)
-    snps, res = _results(out["dos"])
-    assert snps == ["v%d" % (k + 1) for k in range(12)]
+    res = _results(out["dos"])
+    assert res["variant_id"].tolist() == ["v%d" % (k + 1) for k in range(12)]
+    assert res["effect_allele"].tolist() == read_pvar(p("dos.pvar")).a1.tolist()
     assert not filecmp.cmp(out["hc"], out["dos"], shallow=False)
-    pv = res[:, 3][np.isfinite(res[:, 3])]
+    pv = res["p_value"][np.isfinite(res["p_value"])]
     assert len(pv) >= 10 and np.all((pv > 0) & (pv <= 1))
 
 
 @needs_pgenlib
 @pytest.mark.parametrize(("pgen", "bed"), [("hc", "hc"), ("swap", "swap")])
-def test_gwas_grm_pfile_is_byte_identical_to_bfile(inputs, pgen, bed):
+@pytest.mark.parametrize("fmt", ["sumstats", "legacy"])
+def test_gwas_grm_pfile_is_byte_identical_to_bfile(inputs, pgen, bed, fmt):
     """--grm (a GCTA GRM from pylmm kinship --pfile) with --pfile, as with --bfile."""
     grm = str(inputs["dir"] / "g")
     _run(["kinship", "--pfile", p(pgen), "--out-format", "grm", "-o", grm])
     out = {}
     for flag, prefix in (("--bfile", p(bed)), ("--pfile", p(pgen))):
         out[flag] = str(inputs["dir"] / ("grm%s.tsv" % flag))
-        _run(["gwas", flag, prefix, "--grm", grm, "--pheno", inputs["pheno"], "-o", out[flag]])
+        _run(
+            [
+                "gwas",
+                flag,
+                prefix,
+                "--grm",
+                grm,
+                "--pheno",
+                inputs["pheno"],
+                "-o",
+                out[flag],
+                "--output-format",
+                fmt,
+            ]
+        )
     assert filecmp.cmp(out["--bfile"], out["--pfile"], shallow=False)

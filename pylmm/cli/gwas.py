@@ -40,7 +40,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
 
-from pylmm import kinship_io, plink_io, samples, sumstats
+from pylmm import kinship_io, pgen, plink_io, samples, sumstats
 from pylmm.cli import run_record
 from pylmm.cli._common import (
     UsageError,
@@ -2454,12 +2454,14 @@ def _input_files(args: argparse.Namespace) -> list[tuple[str, str]]:
         files += [("tped", args.tfile + ".tped"), ("tfam", args.tfile + ".tfam")]
         meta = args.tfile + (".bim" if os.path.isfile(args.tfile + ".bim") else ".map")
         files.append(("map" if meta.endswith(".map") else "bim", meta))
+    elif args.pfile:
+        files += list(zip(("pgen", "pvar", "psam"), pgen.pgen_paths(args.pfile)))
     else:
         files.append(("emma_geno", args.emma_geno))
     if args.emma_pheno:
         files.append(("pheno", args.emma_pheno))
     else:
-        base = args.bfile or args.tfile or args.emma_geno
+        base = args.bfile or args.tfile or args.pfile or args.emma_geno
         files.append(("pheno", args.pheno or base + ".phenos"))
     if args.covar or args.emma_covar:
         files.append(("covar", args.covar or args.emma_covar))
