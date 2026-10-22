@@ -50,9 +50,12 @@ from pylmm import kinship_io, plink_io, samples
 from pylmm.cli._common import (
     UsageError,
     add_logging_options,
+    add_pfile_options,
     check_log_file,
+    check_pfile_args,
     check_writable,
     genotype_source,
+    hardcalls_hint,
     log,
     positive_int,
 )
@@ -124,6 +127,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="FILE",
         help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
     )
+    add_pfile_options(source, geno)
     geno.add_argument(
         "--emma-num-snps",
         metavar="M",
@@ -168,7 +172,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         "GCTA binary GRM, FILE.grm.bin (the lower triangle in float32, about 7 significant "
         "digits), FILE.grm.N.bin (the number of SNPs) and FILE.grm.id, as gcta --make-grm "
         "and plink2 --make-grm-bin write it (for `pylmm gwas --grm FILE`, GCTA, plink2; "
-        "needs --bfile or --tfile: EMMA genotypes have no IDs) (default: text)",
+        "needs --bfile, --tfile or --pfile: EMMA genotypes have no IDs) (default: text)",
     )
     output.add_argument(
         "--eigen-text",
@@ -215,13 +219,14 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     if args.out_format == "grm" and args.emma_geno:
         parser.error(
             "--out-format grm needs sample IDs (FILE.grm.id), and EMMA genotypes have none: "
-            "use --bfile or --tfile, or --out-format text"
+            "use --bfile, --tfile or --pfile, or --out-format text"
         )
+    check_pfile_args(parser, args)
     check_log_file(parser, args)
 
 
 def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
-    """Open the genotype input (``--bfile``, ``--tfile`` or ``--emma-geno``).
+    """Open the genotype input (``--bfile``, ``--tfile``, ``--pfile`` or ``--emma-geno``).
 
     Raises
     ------
@@ -231,7 +236,9 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
     flag, base, kind = genotype_source(args)
     try:
         # Raw genotypes: the kinship standardises (or not) each SNP itself.
-        return plink_io.PlinkReader(base, type=kind, norm_genotype=False)
+        return plink_io.PlinkReader(base, type=kind, norm_genotype=False, dosage=not args.hardcalls)
+    except ImportError as e:  # --pfile without pgenlib: the message says how to install it
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except OSError as e:  # e.g. a missing .fam: name the option
         raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except ValueError as e:  # the message names the file
@@ -331,7 +338,9 @@ def compute_kinship(
         try:
             acc.add(snp)
         except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
-            raise UsageError("--kinship-type %s, SNP %d: %s" % (kind, acc.n_snps, e)) from e
+            raise UsageError(
+                "--kinship-type %s, SNP %d: %s%s" % (kind, acc.n_snps, e, hardcalls_hint(reader))
+            ) from e
         # Progress at INFO every 10000 SNPs, else at DEBUG every block.
         if acc.n_snps >= next_report:
             log.info("Processing first %d SNPs", acc.n_snps)

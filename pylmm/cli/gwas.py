@@ -40,14 +40,17 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
 
-from pylmm import kinship_io, plink_io, samples, sumstats
+from pylmm import kinship_io, pgen, plink_io, samples, sumstats
 from pylmm.cli import run_record
 from pylmm.cli._common import (
     UsageError,
     add_logging_options,
+    add_pfile_options,
     check_log_file,
+    check_pfile_args,
     check_writable,
     genotype_source,
+    hardcalls_hint,
     log,
     positive_int,
 )
@@ -186,6 +189,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="FILE",
         help="EMMA genotype matrix: one SNP per row, one individual per column, no IDs",
     )
+    add_pfile_options(source, geno)
 
     geno.add_argument(
         "--emma-coding",
@@ -258,7 +262,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         metavar="FILE",
         help="n x n kinship matrix, whitespace-separated text (or .gz), from "
         "`pylmm kinship`.  "
-        "With --bfile/--tfile its rows are matched to the genotypes by the IDs in FILE.id if "
+        "With --bfile/--tfile/--pfile its rows are matched to the genotypes by the IDs in FILE.id if "
         "that exists; otherwise they are assumed to be in genotype order (with a warning).  "
         "With --emma-geno, which has no IDs, the rows are always in genotype order: no "
         "warning without FILE.id, and a FILE.id is ignored (with a warning).  A plink2 "
@@ -298,7 +302,7 @@ def add_parser(commands: Any) -> argparse.ArgumentParser:
         help="test the SNPs of each chromosome with a kinship built from the SNPs of the other "
         "chromosomes (like GCTA --mlma-loco), computed from the genotypes in one pass (no "
         "--kinship): one eigendecomposition and null fit per chromosome.  Needs each SNP's "
-        "chromosome (the .bim or .map file; --emma-map for --emma-geno; labels such as chr1, "
+        "chromosome (the .bim, .map or .pvar file; --emma-map for --emma-geno; labels such as chr1, "
         "01 and 1 are one chromosome) and the SNPs of a chromosome together in the file.  "
         "Memory: about (chromosomes + 6) x n^2 x 8 bytes (logged); time: about the standard "
         "run at n ~ 1200, several times it for larger n.  The genotypes are read in full "
@@ -473,6 +477,7 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error("--pheno-name needs --pheno (EMMA phenotype files have no names)")
     if args.emma_geno and args.id_match != "fid-iid":
         parser.error("--id-match iid needs PLINK genotypes; EMMA genotypes have no IDs")
+    check_pfile_args(parser, args)
     if args.loco and args.loco_max_chroms is None:
         args.loco_max_chroms = LOCO_MAX_CHROMS
     if args.loco:
@@ -505,7 +510,9 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     if args.emma_coding != "fraction" and not args.emma_geno:
         parser.error("--emma-coding applies only to --emma-geno")
     if args.emma_map and not args.emma_geno:
-        parser.error("--emma-map applies only to --emma-geno (PLINK input has a .bim or .map)")
+        parser.error(
+            "--emma-map applies only to --emma-geno (PLINK input has a .bim, .map or .pvar)"
+        )
     if args.grm is not None:
         # The GRM is read as a kinship file named PREFIX.grm.bin (kinship_io.kinship_format).
         args.kinship = kinship_io.grm_prefix(args.grm) + ".grm.bin"
@@ -849,7 +856,7 @@ def _usage(fn: Any, *a: Any, **kw: Any) -> Any:
 
 
 def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
-    """Open the genotype input (``--bfile``, ``--tfile`` or ``--emma-geno``).
+    """Open the genotype input (``--bfile``, ``--tfile``, ``--pfile`` or ``--emma-geno``).
 
     The reader also reads the ``--pheno`` file (or ``PREFIX.phenos``).  It
     returns raw genotypes (``norm_genotype=False``): the scan standardises
@@ -869,7 +876,10 @@ def open_genotypes(args: argparse.Namespace) -> plink_io.PlinkReader:
             pheno_file=args.pheno,
             norm_genotype=False,
             id_match=ID_MATCH_CHOICES[args.id_match],
+            dosage=not args.hardcalls,
         )
+    except ImportError as e:  # --pfile without pgenlib: the message says how to install it
+        raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except OSError as e:  # e.g. a missing .fam: name the option
         raise UsageError("%s %s: %s" % (flag, base, e)) from e
     except ValueError as e:  # the message names the file (genotype or phenotype)
@@ -2023,7 +2033,7 @@ def read_emma_map_variants(fn: str, m: int) -> Variants:
 def loco_chromosomes(args: argparse.Namespace, reader: plink_io.PlinkReader) -> NDArray[np.object_]:
     """The chromosome of each SNP for ``--loco``, normalised and checked.
 
-    From the ``.bim`` / ``.map`` file (`pylmm.plink_io.PlinkReader.variants`),
+    From the ``.bim`` / ``.map`` / ``.pvar`` file (`pylmm.plink_io.PlinkReader.variants`),
     or for EMMA input from ``--emma-map``.  Labels are normalised
     (`pylmm.loco.normalize_chrom`: ``chr1``, ``01`` and ``1`` are one
     chromosome, with a warning when a file mixes spellings).  Logs the
@@ -2159,7 +2169,8 @@ def compute_loco_kinship(
             loco.add_block(G, chroms[start : start + b])
         except ValueError as e:  # an IBS genotype that is not 0, 0.5 or 1
             raise UsageError(
-                "--kinship-type %s, SNPs %d-%d: %s" % (kind, start + 1, start + b, e)
+                "--kinship-type %s, SNPs %d-%d: %s%s"
+                % (kind, start + 1, start + b, e, hardcalls_hint(reader))
             ) from e
         start += b
         del G
@@ -2443,12 +2454,14 @@ def _input_files(args: argparse.Namespace) -> list[tuple[str, str]]:
         files += [("tped", args.tfile + ".tped"), ("tfam", args.tfile + ".tfam")]
         meta = args.tfile + (".bim" if os.path.isfile(args.tfile + ".bim") else ".map")
         files.append(("map" if meta.endswith(".map") else "bim", meta))
+    elif args.pfile:
+        files += list(zip(("pgen", "pvar", "psam"), pgen.pgen_paths(args.pfile)))
     else:
         files.append(("emma_geno", args.emma_geno))
     if args.emma_pheno:
         files.append(("pheno", args.emma_pheno))
     else:
-        base = args.bfile or args.tfile or args.emma_geno
+        base = args.bfile or args.tfile or args.pfile or args.emma_geno
         files.append(("pheno", args.pheno or base + ".phenos"))
     if args.covar or args.emma_covar:
         files.append(("covar", args.covar or args.emma_covar))

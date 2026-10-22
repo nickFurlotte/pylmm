@@ -20,7 +20,7 @@ import os
 import sys
 import warnings
 from collections.abc import Iterator
-from typing import TextIO
+from typing import Any, TextIO
 
 LOGGER_NAME = "pylmm"
 log = logging.getLogger(LOGGER_NAME)
@@ -58,7 +58,38 @@ def genotype_source(args: argparse.Namespace) -> tuple[str, str, str]:
         return "--bfile", args.bfile, "b"
     if args.tfile:
         return "--tfile", args.tfile, "t"
+    if args.pfile:
+        return "--pfile", args.pfile, "pgen"
     return "--emma-geno", args.emma_geno, "emma"
+
+
+def add_pfile_options(source: Any, geno: Any) -> None:
+    """Add ``--pfile`` to the genotype `source` group and ``--hardcalls`` to `geno`."""
+    source.add_argument(
+        "--pfile",
+        metavar="PREFIX",
+        help="PLINK 2 genotypes PREFIX.pgen/.pvar (or .pvar.zst)/.psam, dosages included; "
+        "the genotype counts REF and the effect allele is A1 = ALT.  Needs the optional pgenlib: pip install pgenlib (from a clone: uv sync --extra pgen)",
+    )
+    geno.add_argument(
+        "--hardcalls",
+        action="store_true",
+        help="with --pfile: read the hard calls and ignore the dosages (the genotypes "
+        "plink2 --make-bed writes)",
+    )
+
+
+def hardcalls_hint(reader: Any) -> str:
+    """For an IBS kinship error: the hint to add ``--hardcalls`` when ``--pfile`` reads dosages."""
+    if getattr(reader, "type", None) == "pgen" and getattr(reader, "dosage", False):
+        return " (--pfile reads the dosages: add --hardcalls to use the 0/1/2 hard calls)"
+    return ""
+
+
+def check_pfile_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """A usage error (exit 2) for ``--hardcalls`` without ``--pfile``."""
+    if args.hardcalls and not args.pfile:
+        parser.error("--hardcalls applies only to --pfile")
 
 
 def check_writable(flag: str, path: str) -> None:

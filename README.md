@@ -31,6 +31,18 @@ uv sync           # then prefix commands with `uv run`
 
 The `main` branch holds the current code; the older `master` branch keeps the original Python 2 code.
 
+To read PLINK 2 PGEN genotypes (`pylmm gwas --pfile`, imputed dosages included), also install plink2's
+reader [pgenlib](https://pypi.org/project/Pgenlib/), which is LGPL-3.0-only (see [License](#license)):
+`pip install pgenlib` next to pylmm, or the optional `pgen` extra:
+
+```bash skip-ci: network
+pip install "pylmm[pgen] @ git+https://github.com/nickFurlotte/pylmm@main"   # or, in a clone: uv sync --extra pgen
+```
+
+pgenlib publishes wheels for Linux (manylinux, x86-64 and aarch64) and macOS only. On Windows or musl
+Linux (Alpine), pip builds it from source, which needs a C++ compiler; without one, convert PGEN to BED
+with plink2 (the `convert-genotype-formats` skill).
+
 ## Quick start
 
 ### Command line
@@ -152,3 +164,8 @@ this repository" button reads it).
 ## License
 
 Code: MIT (see [LICENSE](LICENSE)). Example data in `data/`: see [data/README.md](data/README.md).
+
+The optional `pgen` extra installs [pgenlib](https://pypi.org/project/Pgenlib/), which is licensed under
+the **LGPL-3.0-only**, not MIT. pylmm does not include or modify pgenlib's code. It imports the separately
+installed package only when a PGEN file is read, and everything else works without it. If you redistribute
+pylmm together with pgenlib (in a container image, for example), the LGPL's terms apply to pgenlib.

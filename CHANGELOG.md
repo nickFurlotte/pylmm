@@ -61,6 +61,23 @@ maps them).
   ten other configurations), and `--output-format legacy --legacy-fit --no-batch` the 1.0.0 output.
 
 ### Added
+- PLINK 2 PGEN input, with the optional plink2 reader pgenlib (`pip install pgenlib`; from a clone, `uv sync --extra pgen`)
+  (LGPL-3.0-only, imported only when a PGEN is read; without it nothing changes; wheels for Linux and
+  macOS only, elsewhere pip builds it with a C++ compiler). PGEN files: not readable
+  (convert to BED, losing dosages) -> `pylmm gwas --pfile PREFIX`, `pylmm kinship --pfile PREFIX`,
+  `pylmm.pgen.PgenSource` (a `GenotypeSource`) and `PlinkReader(prefix, type="pgen")`. They read
+  `.pgen` + `.pvar` (or `.pvar.zst`) + `.psam`. Dosages are read where stored (`--hardcalls` /
+  `dosage=False`: hard calls only). The genotype is the fraction of copies of **REF** (`1 - ALT dosage/2`;
+  `variants.a2` = REF, `a1` = ALT; the reported `effect_allele` is A1 = ALT, its frequency from the
+  dosages), so a PGEN reads bit for bit as the BED `plink2 --make-bed` writes from
+  it, and `pylmm gwas`/`pylmm kinship` give byte-identical output with `--pfile` and `--bfile` of the two
+  (checked on plink2-written fixtures; also with `--loco`, whose chromosomes come from the `.pvar`, and
+  `--grm`, in both `--output-format`s); the run record lists the `.pgen`, `.pvar` and `.psam` with their
+  SHA-256. A `.psam` without FID gives FID `0` (as plink2's `.fam`); its SID column is ignored and a
+  sample listed twice is an `InputError`. Multiallelic variants are an `InputError` naming the first one.
+  An IBS kinship on dosages suggests `--hardcalls`. Also `pylmm.pgen.write_pgen` (genotypes
+  to PGEN, for tests and small conversions; dosages outside [0, 1] are a `ValueError`) and `sims/bench/pgen_read.py` (read throughput vs BED:
+  0.5-0.9x unstandardised, 0.8-1.2x standardised).
 - Variant metadata: `PlinkReader.variants` -> the `.bim` columns of every SNP (`chrom`, `snp`, `cm`, `bp`,
   `a1`, `a2`) as a `pylmm.genotypes.Variants`: read-only numpy columns (text as Python `str` objects, `cm`
   float64, `bp` int64); `variants[k]` is a `Variant` named tuple. Before, the reader kept only the SNP ID.
@@ -202,6 +219,9 @@ maps them).
   `KinshipAccumulator`, factored out (K unchanged, bit for bit).
 
 ### Changed
+- A phenotype or covariate file that matches no individual on FID and IID: the error now says how many
+  match on the IID alone and suggests `--id-match iid` (the usual cause is a genotype file without FIDs,
+  read as FID `0`, such as plink2's IID-only `.psam`, and a phenotype file with FID = IID).
 - `pylmm gwas` without `--kinship` or `--grm`: argparse's "one of the arguments --kinship --grm is
   required" -> the same message from `check_args`, which also suggests `--loco`; exit code 2 as before.
 - `pylmm.kinship.finish_kinship` with no SNP used raises `ValueError` (it divided by zero).

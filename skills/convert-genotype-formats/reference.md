@@ -14,10 +14,11 @@ from documentation only is marked *docs only*.
 | genotypes | hard calls, 2 bits | hard calls + dosages (1/16384), phase, multiallelic |
 | alleles | `.bim` A1 (col 5), A2 (col 6); no REF/ALT | `.pvar` REF and ALT explicit |
 | sample IDs | `.fam` FID IID (both required) | `.psam` `#IID` or `#FID IID` header |
-| pylmm | **reads it** (counts A2) | convert to BED (lossy for dosages) |
+| pylmm | **reads it** (counts A2) | **reads it** with pgenlib installed (`--pfile`; counts REF, reports effects for ALT; dosages kept; biallelic only), else convert to BED (lossy for dosages) |
 
 * **plink2 `--make-bed` writes A1 = ALT, A2 = REF** (*checked*: `.bim` of a VCF with REF `A`, ALT `G`
-  reads `G A`). pylmm counts A2, so its effect allele is REF. A VCF `0/0` (REF/REF) reads as 1.0 in
+  reads `G A`). pylmm's genotype counts A2 = REF, and `pylmm gwas` reports its effects for A1 = ALT
+  (`--output-format legacy`: for REF). A VCF `0/0` (REF/REF) reads as 1.0 in
   pylmm (*checked*).
 * plink2 reading a BED treats A2 as REF (provisionally) and A1 as ALT (*checked* with `--freq`).
 * **plink 1.9** reorders alleles so A1 is the minor allele unless `--keep-allele-order` (*docs only*).
@@ -68,8 +69,10 @@ plink2 --pfile imp --hard-call-threshold 0.1 --make-bed --out imp_hc
   (`bcftools view -M2`) them first.
 * `dosage=HDS` for Minimac4 haplotype dosages; `dosage=GP` reads probabilities (*docs only*).
 * BED stores hard calls: with `--hard-call-threshold 0.1`, dosages more than 0.1 from 0/1/2 become
-  missing (and 0.5 / 1.5 always do). pylmm cannot read dosages today; a PGEN reader is planned. Alternatively, read dosages with any Python library and pass the matrix to
-  `pylmm.lmm.gwas` directly (it takes any numeric coding).
+  missing (and 0.5 / 1.5 always do). To keep the dosages, read the PGEN itself with the optional
+  package pgenlib (`pip install pgenlib`, then `pylmm gwas --pfile imp`; *checked*: the dosages read are
+  `1 - DS/2` to 2^-16, and `--hardcalls` reads exactly the `imp_hc` BED). Alternatively, read dosages
+  with any Python library and pass the matrix to `pylmm.lmm.gwas` directly (it takes any numeric coding).
 
 ## BGEN → PGEN / BED (*checked*)
 
@@ -85,11 +88,16 @@ plink2 --pfile g --max-alleles 2 --make-bed --out g_hc         # hard calls (los
 * `--sample` is optional for BGEN v1.2+ files with embedded sample IDs. Add `--keep`, `--extract`,
   `--maf` to subset; convert one chromosome at a time to bound memory.
 
-## PGEN → BED
+## PGEN → BED (only without pgenlib)
 
 ```bash skip-ci: needs plink2
 plink2 --pfile in --max-alleles 2 --make-bed --out out
 ```
+
+With pgenlib installed there is no need to convert: `pylmm gwas --pfile in` reads the same genotypes
+(*checked* on plink2-written fixtures, `tests/data/pgen/`: hard calls bit for bit those of the BED
+`--make-bed` writes, and `pylmm gwas` / `pylmm kinship` output byte-identical to `--bfile out`), plus
+the dosages where the file has them. Multiallelic variants are an error there too.
 
 ## VCF Zarr → BED (*checked*)
 

@@ -1,12 +1,15 @@
 ---
 name: convert-genotype-formats
-description: Convert genotype data to the PLINK 1 BED/BIM/FAM files pylmm reads - from VCF/BCF (bcftools + plink2), imputed VCF and BGEN (via PGEN, with the dosage and REF/ALT caveats), PGEN, VCF Zarr (vcztools view-plink), Hail MatrixTables and plain genotype tables (numpy, with the bundled plink_tools.py) - and prepare the other inputs, phenotype and covariate files (FID IID header, NA missing codes, matching IDs) and a kinship from another tool (GCTA .grm.bin and plink2 .rel are read natively, with their IDs; GEMMA text needs an .id file). Explains PLINK 1 vs PLINK 2 allele conventions and which allele pylmm counts. Use when the data is not already a PLINK BED file set, when downloading public genotype data for pylmm, or when preparing phenotype, covariate or kinship files.
+description: Convert genotype data to the files pylmm reads - PLINK 1 BED/BIM/FAM, or PLINK 2 PGEN (read natively with the optional pgenlib package, `pylmm gwas --pfile`, which keeps imputed dosages) - from VCF/BCF (bcftools + plink2), imputed VCF and BGEN (to PGEN for dosages, or BED for hard calls, with the dosage and REF/ALT caveats), PGEN without pgenlib, VCF Zarr (vcztools view-plink), Hail MatrixTables and plain genotype tables (numpy, with the bundled plink_tools.py) - and prepare the other inputs, phenotype and covariate files (FID IID header, NA missing codes, matching IDs) and a kinship from another tool (GCTA .grm.bin and plink2 .rel are read natively, with their IDs; GEMMA text needs an .id file). Explains PLINK 1 vs PLINK 2 allele conventions and which allele pylmm counts. Use when the data is not already a PLINK BED file set, when downloading public genotype data for pylmm, or when preparing phenotype, covariate or kinship files.
 ---
 
 # Convert genotype data for pylmm
 
-pylmm reads **PLINK 1 BED/BIM/FAM** (SNP-major, biallelic, hard calls), PLINK TPED and EMMA text. Convert
-everything else to BED with standard tools. Full recipes, every caveat and how each was verified:
+pylmm reads **PLINK 1 BED/BIM/FAM** (SNP-major, biallelic, hard calls), PLINK TPED and EMMA text, and,
+with plink2's reader pgenlib installed (`pip install pgenlib`; LGPL-3.0-only), **PLINK 2
+PGEN/PVAR/PSAM** (`pylmm gwas --pfile`, `pylmm.pgen.PgenSource`), biallelic, **dosages included**. Imputed
+data (dosage VCF, BGEN) should go to PGEN and be read with pgenlib: a BED keeps hard calls only. Without
+pgenlib, convert to BED as below. Full recipes, every caveat and how each was verified:
 [reference.md](reference.md).
 
 Blocks marked `skip-ci` need plink2 (≥ 2.0 alpha 6; checked with v2.0.0-a.7.13), bcftools (checked
@@ -22,6 +25,13 @@ effect allele is **ALT**, as in plink2 `--glm omit-ref`, REGENIE and GWAS-SSF. (
 you pass `--keep-allele-order`. After converting, always look at the `.bim` and record which allele is
 A1.
 
+A PGEN read with `--pfile` follows the same rule: the genotype counts **REF** (`1 - ALT dosage / 2`;
+`variants.a2` is REF, `a1` ALT) and the reported effect allele is **ALT**, with its frequency from the
+dosages, so a PGEN reads exactly as `plink2 --pfile X --make-bed` of it,
+and a BED converted with `plink2 --bfile X --make-pgen` reads as the BED. To change which allele is REF,
+use plink2's `--ref-allele` / `--ref-from-fa` before reading. A multiallelic variant is an error: drop
+(`--max-alleles 2`) or split (`bcftools norm -m -any`) them first.
+
 ## Recipes (summary)
 
 **VCF/BCF, called genotypes → BED**
@@ -33,20 +43,28 @@ plink2 --bcf split.bcf --set-all-var-ids '@:#:$r:$a' --new-id-max-allele-len 100
   --autosome --snps-only just-acgt --maf 0.01 --geno 0.05 --make-bed --out geno
 ```
 
-**Imputed VCF (DS) → PGEN → BED (hard calls; lossy)**
+**Imputed VCF (DS) → PGEN (dosages; read it with `--pfile`) → BED (hard calls; lossy)**
 
 ```bash skip-ci: needs plink2
 plink2 --bcf split.bcf dosage=DS --vcf-half-call missing --extract-if-info 'R2 >= 0.3' \
   --set-all-var-ids '@:#:$r:$a' --double-id --make-pgen --out imp
-plink2 --pfile imp --hard-call-threshold 0.1 --make-bed --out imp_hc
+pylmm gwas --pfile imp --kinship K --pheno y.txt -o imp.tsv          # with pgenlib: dosages
+plink2 --pfile imp --hard-call-threshold 0.1 --make-bed --out imp_hc  # without it: hard calls
 ```
 
-**BGEN → PGEN → BED**
+**BGEN → PGEN (→ BED)**
 
 ```bash skip-ci: needs plink2
-plink2 --bgen in.bgen ref-first --sample in.sample --set-all-var-ids '@:#:$r:$a' --make-pgen --out g
-plink2 --pfile g --max-alleles 2 --make-bed --out g_hc
+plink2 --bgen in.bgen ref-first --sample in.sample --set-all-var-ids '@:#:$r:$a' \
+  --max-alleles 2 --make-pgen --out g                                  # pylmm gwas --pfile g
+plink2 --pfile g --make-bed --out g_hc                                 # without pgenlib
 ```
+
+**PGEN with pgenlib**: `pylmm gwas --pfile PREFIX` / `pylmm kinship --pfile PREFIX` read
+`PREFIX.pgen`, `PREFIX.pvar` (or `.pvar.zst`) and `PREFIX.psam` directly; `--hardcalls` ignores the
+dosages (the genotypes `--make-bed` would keep). `pylmm kinship --kinship-type ibs` needs hard calls.
+pgenlib has wheels for Linux (manylinux x86-64, aarch64) and macOS only; on Windows or Alpine pip
+builds it from source (a C++ compiler is needed), or convert to BED instead.
 
 **VCF Zarr → BED**
 
@@ -66,13 +84,17 @@ Key caveats (details in reference.md):
   import is under development"): split or filter them with bcftools first.
 * BED holds hard calls only: with `--hard-call-threshold 0.1`, dosages farther than 0.1 from an integer
   become **missing**. pylmm then mean-imputes them (or drops them with `--remove-missing-genotypes`).
+  Reading the PGEN with `--pfile` (the `pgen` extra) avoids that loss.
 * plink2 now requires a REF/ALT mode for BGEN: `ref-first`, `ref-last` or `ref-unknown` (its message:
   raw UK Biobank files are ref-first, older and PLINK-exported ones more likely ref-last). Check the
   provider's documentation; a wrong choice swaps every allele.
-* VCFs without IDs give `.` for every SNP; pylmm would name all SNPs `.`. Use `--set-all-var-ids` (or
+* VCFs without IDs give `.` for every SNP; pylmm would name all SNPs `.` (with `--bfile` and
+  `--pfile` alike: pylmm uses the `.bim` / `.pvar` IDs as they are). Use `--set-all-var-ids` (or
   rewrite `.bim` column 2; vcztools has no ID option).
 * `--double-id` makes FID = IID; without it plink2 writes FID `0` for VCF samples. Whatever you choose,
-  the phenotype file must use the **same FID**, or run `pylmm gwas --id-match iid`.
+  the phenotype file must use the **same FID**, or run `pylmm gwas --id-match iid`. A `.psam` with
+  only an IID column (plink2's default for a VCF) is read with FID `0`, as plink2 writes its `.fam`;
+  a phenotype file with FID = IID then matches nobody, and the error suggests `--id-match iid`.
 * Download public data with `curl -LO` (or `wget`), check the published checksum (`shasum -a 256`), and
   note the genome build and the source URL next to the files. If a site blocks scripted access (e.g.
   the Dryad landing page loads but `file_stream` returns 403), do not work around it: write the handoff
