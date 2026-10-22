@@ -246,14 +246,18 @@ print(token["BTBR T<+> Itpr3<tf>/J"], "|", bim["a1"][0], bim["a2"][0], "|", bim[
 ```
 
 ```bash
-pylmm gwas --bfile panel --kinship panel.kin --pheno panel.pheno -o panel.tsv -v 2>&1 | grep "null model"
+pylmm gwas --bfile panel --kinship panel.kin --pheno panel.pheno -o panel.tsv.gz -v 2>&1 | grep "null model"
 ```
 
 The CLI imputes over animals, so it matches `ps_animal` (section 5), not `ps`:
 
 ```python
-cli = np.genfromtxt("panel.tsv", names=True, dtype=None, encoding="utf-8")
-assert np.allclose(np.log10(cli["P_VALUE"]), np.log10(ps_animal), atol=1e-6)
+from pylmm.sumstats import read_sumstats
+
+cli = read_sumstats("panel.tsv.gz")
+assert np.allclose(cli["neg_log_10_p_value"], -np.log10(ps_animal), atol=1e-6)
+# effect_allele is A1, the allele coded 0 here (write_bed was given copies of A2, the allele coded 1)
+assert list(cli["effect_allele"][:2]) == [bim["a1"][0], bim["a1"][1]]
 ```
 
 ## 7. Unequal replicates and heritability
@@ -293,12 +297,14 @@ with open("strains.order.txt", "w") as f:
 ```
 
 ```bash
-pylmm gwas --emma-geno strains.geno --emma-pheno strains.pheno --kinship strains.kin -o strains.tsv -v 2>&1 | grep "null model"
+pylmm gwas --emma-geno strains.geno --emma-pheno strains.pheno --kinship strains.kin -o strains.tsv.gz -v 2>&1 | grep "null model"
 ```
 
-The output names SNPs `SNP_1, SNP_2, ...` in genotype row order: join positions back from your marker
-table (for the bundled HMDP matrix, the `row` column of `data/hmdp.liver.snps.map.tsv`, before any QC
-subsetting).
+The output names SNPs `SNP_1, SNP_2, ...` in genotype row order, with `NA` chromosome, position and
+alleles: pass a marker map with one line per genotype row (`--emma-map`, header `chr`, `bp` or
+`bp_<build>`, `allele0`, `allele1`; for the bundled HMDP matrix `data/hmdp.liver.snps.map.tsv`, before any
+QC subsetting) and they are filled in, the effect allele being the allele coded 1 (`--emma-coding count`
+if the values are 0/1/2 counts rather than the fraction 0/0.5/1).
 
 ## 9. On the bundled HMDP matrix
 

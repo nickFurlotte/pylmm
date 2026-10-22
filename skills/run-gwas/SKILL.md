@@ -76,8 +76,21 @@ aliases, expanding strains to animals, IDs with spaces, imputing over strains ra
 ## 2. Scan
 
 ```bash
-pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name trait -o trait.tsv -v 2> trait.log
+pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name trait -o trait.tsv.gz -v 2> trait.log
 grep "null model" trait.log
+```
+
+`trait.tsv.gz` is the results table (GWAS-SSF column order; `beta` per copy of the effect allele A1,
+`.bim` column 5; `interpret-gwas-results` explains the columns) and `trait.json` the run record: inputs
+with checksums, individuals used and dropped by reason, the null fit, λ_GC, SNPs not tested and why,
+and every warning. Read the record before the table:
+
+```python
+import json
+
+run = json.load(open("trait.json"))
+print(run["samples"], run["null_fit"]["h"], run["results"]["lambda_gc"], run["warnings"])
+assert run["status"] == "ok"
 ```
 
 Covariates come from a file with the same layout; with a `FID IID name ...` header, pick columns by name
@@ -90,7 +103,7 @@ plink_tools.write_pheno("geno.covar", ids, cov, ["sex", "batch"])
 ```
 
 ```bash
-pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name trait --covar geno.covar --covar-name sex -o trait_sex.tsv -v 2> trait_sex.log
+pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-name trait --covar geno.covar --covar-name sex -o trait_sex.tsv.gz -v 2> trait_sex.log
 grep -i "covariate\|individuals\|null model" trait_sex.log
 ```
 
@@ -100,11 +113,12 @@ Options that matter:
 |---|---|---|
 | `--reml` / `--ml` | REML | ML only to match a method that used ML; ML is ill-posed for a centred K from more SNPs than individuals |
 | `--refit` | off (fit h once, EMMAX/P3D) | strong-effect loci (the null fit absorbs part of a big SNP's effect, so P3D is conservative there), or to match EMMA / GEMMA (`-lmm 1`); the exact per-SNP fit, a block at a time (12-24x the cost of the default scan; `--no-batch` or `--legacy-fit`: the old grid search per SNP, 11-61x slower still). A little more power than the default (S9), mildly anti-conservative at n ~ 100 (1.2-1.4x at 1e-4 / 1e-5). (pylmm ≤ 1.0.0's per-SNP fits crashed for 0.25–2.8% of SNPs at h² 0.8–0.99, [phase4](../../docs/phase4-simulations.md); fixed since) |
-| `--test wald\|lrt` | `wald` | `lrt`: likelihood ratio of ML fits with and without the SNP, chi2(1), always ML (`--reml`/`--ml`/`--refit` do not apply), with the kinship's null directions that the covariates span left out so that ML has a maximum (pylmm's centred K and an intercept: one direction). Calibrated and powered like `--refit` ([S9](../../sims/studies/s9_tests.md)); 7.5-15x the default scan's cost. **Panels where most strains have one animal and a few have two**: the LRT can be ill-posed (a warning about the null model, or `nan` for SNPs whose calls differ within a strain, with a count); use the Wald test. With `--remove-missing-genotypes` the subset kinships are not centred and nothing is dropped (calibration still acceptable in the review's check). `F_STAT` is then the signed root of the statistic (`interpret-gwas-results`). The score test is the library's `LMM.score_batch` (GEMMA `-lmm 3` comparisons only) |
+| `--test wald\|lrt` | `wald` | `lrt`: likelihood ratio of ML fits with and without the SNP, chi2(1), always ML (`--reml`/`--ml`/`--refit` do not apply), with the kinship's null directions that the covariates span left out so that ML has a maximum (pylmm's centred K and an intercept: one direction). Calibrated and powered like `--refit` ([S9](../../sims/studies/s9_tests.md)); 7.5-15x the default scan's cost. **Panels where most strains have one animal and a few have two**: the LRT can be ill-posed (a warning about the null model, or `nan` for SNPs whose calls differ within a strain, with a count); use the Wald test. With `--remove-missing-genotypes` the subset kinships are not centred and nothing is dropped (calibration still acceptable in the review's check). `t_stat` is then the signed root of the statistic, not `beta / standard_error` (`interpret-gwas-results`). The score test is the library's `LMM.score_batch` (GEMMA `-lmm 3` comparisons only) |
 | `--covar F --covar-name a b` | none | covariates; the intercept is added unless `--no-intercept` |
 | `--pheno-name N` / `--pheno-col N` | first column | `--pheno-col` is 1-based |
 | `--id-match iid` | `fid-iid` | the phenotype/covariate/kinship FIDs differ from the `.fam` |
-| `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; changes BETA's scale) |
+| `--remove-missing-genotypes` | mean-impute | test each SNP on its called individuals (slower; `n` is then per SNP) |
+| `--output-format legacy` | `sumstats` | pylmm 1.0.0's five columns (`SNP_ID BETA BETA_SD F_STAT P_VALUE`, BETA per SD of A2), for old pipelines |
 | `--loco` | off (`--kinship` K for every SNP) | test each chromosome's SNPs with a K built from the other chromosomes (below); **recommended for inbred panels**; costs one eigendecomposition per chromosome |
 | `--eigen eig.npz` | recompute | many phenotypes on the same individuals (`pylmm kinship --eigen-npz`; the file carries the sample IDs, which must be the tested individuals: an error otherwise) |
 | `--block-size N` | 1024 | SNPs read (a BED file is decoded a block at a time) and tested together (one matrix product per block); lower it if memory is tight (about 6-8 × n × N floats, with `--refit` and `--test lrt` too) |
@@ -125,7 +139,7 @@ plink_tools.subset_bed(SRC, "geno3", three)
 ```
 
 ```bash
-pylmm gwas --bfile geno3 --loco --pheno geno.pheno --pheno-name trait -o trait_loco.tsv -v 2> trait_loco.log
+pylmm gwas --bfile geno3 --loco --pheno geno.pheno --pheno-name trait -o trait_loco.tsv.gz -v 2> trait_loco.log
 grep "chromosome\|null model" trait_loco.log
 ```
 
@@ -148,8 +162,13 @@ with PlinkReader("geno", k_file="geno.kin", pheno_file="geno.pheno") as r:   # K
     W = np.column_stack([g for g, _ in r.iter_snps()])
     Y, K = r.phenos[:, 0], r.K
 ts, ps = gwas(Y, W, K)                     # X0 defaults to the intercept; REML
-out = np.genfromtxt("trait.tsv", names=True, dtype=None, encoding="utf-8")
-assert np.allclose(ps, out["P_VALUE"], rtol=1e-6, equal_nan=True)   # the CLI and the library agree
+from pylmm.sumstats import read_sumstats
+
+out = read_sumstats("trait.tsv.gz")
+assert np.allclose(ps, out["p_value"], rtol=1e-6, equal_nan=True)   # the CLI and the library agree
+# W is standardised (per SD of A2), the table per copy of A1: t flips sign (the two runs agree
+# to about 1e-7, not bit for bit: the null h of two processes can differ in its last digits)
+assert np.allclose(ts, -out["t_stat"], rtol=1e-6, atol=1e-6, equal_nan=True)
 ```
 
 With covariates in Python, prepend the intercept yourself:
@@ -159,22 +178,23 @@ covariate first). Without it the model has no intercept.
 ## 3. Check the result
 
 ```bash
-uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py trait.tsv --bfile geno --top 5
+uv run python skills/interpret-gwas-results/scripts/summarize_gwas.py trait.tsv.gz --top 5
 ```
 
 ```python
 sys.path.insert(0, "skills/interpret-gwas-results/scripts")
 import summarize_gwas
 
-s = summarize_gwas.summarize(summarize_gwas.read_results("trait.tsv"))
+s = summarize_gwas.summarize(summarize_gwas.read_results("trait.tsv.gz"))
 print("lambda_GC %.2f, min p %.1e, top %s" % (s["lambda_gc"], s["min_p"], s["top"][0]["snp"]))
 assert s["top"][0]["p"] < 1e-10
 ```
 
 Checklist:
 
-1. **Sample counts.** `-v` logs how many individuals were read and dropped (missing phenotype or
-   covariate, not in the kinship). Unexpected drops usually mean an ID mismatch.
+1. **Sample counts.** The run record's `samples` (and the `-v` log) give how many individuals were read
+   and dropped, by reason (missing phenotype or covariate, not in the kinship). Unexpected drops usually
+   mean an ID mismatch. Its `warnings` list everything the run warned about.
 2. **The null fit** line (`null model: heritability=..., sigma=...`): h at 0 or 1 is a boundary estimate
    (see `estimate-heritability`).
 3. **λ_GC** near 1 for a polygenic trait. Inflation (> 1.1) with an LMM suggests a missing covariate or a
@@ -191,8 +211,8 @@ Checklist:
 4. **QQ plot** (`--plot out.png`): deviation only in the tail is signal; a shifted whole curve is
    inflation.
 5. **Top hits**: are they clusters of SNPs in LD (expected) or isolated singletons with rare genotypes
-   (suspect: check the minor allele count)? `nan` rows are untestable SNPs (constant, collinear, all
-   missing).
+   (suspect: check `effect_allele_frequency` × `n`)? `NA` rows are untestable SNPs (constant, collinear,
+   all missing; counted by reason in the record's `results.not_tested`).
 6. Thresholds and effect directions: the `interpret-gwas-results` skill.
 
 ## 4. Errors and fixes
@@ -200,7 +220,7 @@ Checklist:
 Errors are one line, `pylmm: error: ...`, exit code 2:
 
 ```bash
-pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-col 2 -o x.tsv 2> err.txt || echo "exit code $?"
+pylmm gwas --bfile geno --kinship geno.kin --pheno geno.pheno --pheno-col 2 -o x.tsv.gz 2> err.txt || echo "exit code $?"
 cat err.txt
 ```
 

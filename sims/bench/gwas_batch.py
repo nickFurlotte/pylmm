@@ -175,6 +175,20 @@ def read_output(fn: str) -> tuple[list[str], list[str], np.ndarray]:
     return lines, [r[0] for r in rows], np.array([[float(v) for v in r[1:]] for r in rows])
 
 
+def _legacy_flag(env: dict[str, str], workdir: str) -> list[str]:
+    """``--output-format legacy`` if the pylmm on ``env``'s path has it (the 1.0.0 columns,
+    which `read_output` parses and the baseline comparison expects), else nothing."""
+    help_text = subprocess.run(
+        [sys.executable, "-m", "pylmm", "gwas", "--help"],
+        env=env,
+        cwd=workdir,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return ["--output-format", "legacy"] if "--output-format" in help_text else []
+
+
 def run_cli(
     m: int, repeats: int, workdir: str, baseline: str | None = None
 ) -> dict[str, Any] | None:
@@ -235,6 +249,7 @@ def run_cli(
             "-o",
             out,
             *extra,
+            *_legacy_flag(env, workdir),
         ]
         timings[tag] = median_time(
             lambda cmd=cmd, env=env: subprocess.run(

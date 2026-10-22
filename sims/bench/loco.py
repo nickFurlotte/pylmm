@@ -168,7 +168,7 @@ def run_simulated(threads: int | None, workdir: str, kin: str) -> dict:
             fn = os.path.join(workdir, "sim_%s_%s.tsv" % (trait, name))
             _, log = _pylmm(
                 ["gwas", "--bfile", BED_BASE, *flags, "--pheno", pheno, "--pheno-name", trait,
-                 "-o", fn], workdir, threads,
+                 "--output-format", "legacy", "-o", fn], workdir, threads,
             )  # fmt: skip
             hs = [float(x) for x in re.findall(r"heritability=(\S+),", log)]
             p = _read(fn)[1][:, 3][sel]
@@ -195,12 +195,37 @@ def run(quick: bool, threads: int | None, workdir: str) -> dict:
     loco_out = os.path.join(workdir, "loco.tsv")
     t_kin, _ = _pylmm(["kinship", "--bfile", base, "-o", kin], workdir, threads)
     t_gwas, log_std = _pylmm(
-        ["gwas", "--bfile", base, "--kinship", kin, "--pheno", pheno, "-o", std_out],
+        [
+            "gwas",
+            "--bfile",
+            base,
+            "--kinship",
+            kin,
+            "--pheno",
+            pheno,
+            "--output-format",
+            "legacy",
+            "-o",
+            std_out,
+        ],
         workdir,
         threads,
     )
     t_loco, log_loco = _pylmm(
-        ["gwas", "--bfile", base, "--loco", "--pheno", pheno, "-o", loco_out], workdir, threads
+        [
+            "gwas",
+            "--bfile",
+            base,
+            "--loco",
+            "--pheno",
+            pheno,
+            "--output-format",
+            "legacy",
+            "-o",
+            loco_out,
+        ],
+        workdir,
+        threads,
     )
     built = re.search(r"Built the kinships of .* in (\S+)s", log_loco)
     h_std = [float(x) for x in re.findall(r"heritability=(\S+),", log_std)]

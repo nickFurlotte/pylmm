@@ -527,6 +527,50 @@ class AssociationResult(NamedTuple):
     beta_var: FloatArray
 
 
+class GwasResult(NamedTuple):
+    """The result of ``gwas(..., return_details=True)``: one entry per SNP in each field.
+
+    The effects are per unit of the columns of ``X`` as passed (per SD for
+    standardised genotypes); `pylmm.sumstats.SumStats.from_genotypes` turns
+    them into per-allele summary statistics.
+
+    Attributes
+    ----------
+    t : (m,) array
+        Wald t statistics (nan for a SNP that cannot be tested).
+    p : (m,) array
+        Two-sided p-values from ``t(n - q - 1)``.
+    beta : (m,) array
+        SNP effect estimates.
+    beta_se : (m,) array
+        Their standard errors.
+    n : (m,) array
+        The individuals each SNP was tested on (with a phenotype and a
+        called genotype); nan where ``t`` is.
+    neg_log10_p : (m,) array
+        ``-log10 p``: from ``p`` where it is at least 1e-300, else from the
+        statistic (`neg_log10_p_for`: the t tail for the Wald test, chi2(1)
+        for the LRT), so finite where ``p`` underflows to 0.
+    x_sd : (m,) array
+        The SD of each tested column over the individuals with a phenotype
+        (called values): a fingerprint `SumStats.from_genotypes` checks the
+        genotypes it is given against, so that a scan of standardised
+        genotypes cannot be converted as if they were raw.
+    test : str
+        ``"wald"`` or ``"lrt"``: for the LRT ``t`` is the signed square root
+        of the chi2(1) statistic, not ``beta / beta_se``.
+    """
+
+    t: FloatArray
+    p: FloatArray
+    beta: FloatArray
+    beta_se: FloatArray
+    n: FloatArray
+    neg_log10_p: FloatArray
+    x_sd: FloatArray
+    test: str = "wald"
+
+
 class SnpFitResult(NamedTuple):
     """The result of `LMM.fit_snps` (a tuple: ``h, ll, t, p, beta, beta_var = ...``).
 
@@ -777,6 +821,61 @@ def neg_log10_pvalue(t: ArrayLike, df: ArrayLike) -> Any:
     return -log_pvalue(t, df) / np.log(10.0)
 
 
+def _column_sd(X: FloatArray) -> FloatArray:
+    """The population SD of each column of ``X`` over its non-nan values (nan if none)."""
+    R = np.ascontiguousarray(X.T)
+    ok = ~np.isnan(R)
+    k = ok.sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = np.where(ok, R, 0.0).sum(axis=1) / k
+        var = np.where(ok, (R - mean[:, None]) ** 2, 0.0).sum(axis=1) / k
+    out: FloatArray = np.sqrt(var)
+    return out
+
+
+P_DIRECT_MIN = 1e-300
+"""`neg_log10_p_for` takes ``-log10 p`` from ``p`` at or above this, from the statistic below it."""
+
+
+def neg_log10_p_for(t: ArrayLike, p: ArrayLike, df: ArrayLike, test: str = "wald") -> FloatArray:
+    """``-log10 p`` of a scan's p-values, finite where ``p`` underflows.
+
+    From ``p`` where it is at least `P_DIRECT_MIN` (so it agrees with ``p``
+    exactly), else from the statistic ``t``: the two-sided ``t(df)`` tail
+    (`neg_log10_pvalue`) for the Wald test, the ``chi2(1)`` tail of ``t**2``
+    (the normal tail of ``|t|``) for the LRT, whose ``t`` is the signed
+    square root of its statistic.  Never ``-0.0``; nan where ``p`` is nan.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pylmm.lmm import neg_log10_p_for
+    >>> neg_log10_p_for([2.0, 50.0, np.nan], [0.05, 0.0, np.nan], 100).round(2).tolist()
+    [1.3, 71.84, nan]
+    >>> float(neg_log10_p_for([40.0], [0.0], 100, test="lrt")[0]) > 300
+    True
+    >>> neg_log10_p_for([0.0], [1.0], 10).tolist()
+    [0.0]
+    """
+    t_arr, p_arr, df_arr = np.broadcast_arrays(
+        np.asarray(t, dtype=np.float64),
+        np.asarray(p, dtype=np.float64),
+        np.asarray(df, dtype=np.float64),
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        nl = -np.log10(p_arr)
+    tiny = (p_arr < P_DIRECT_MIN) & np.isfinite(t_arr)
+    if tiny.any():
+        if test == "lrt":
+            at = np.abs(t_arr[tiny])
+            nl[tiny] = -(np.log(2.0) + stats.norm.logsf(at)) / np.log(10.0)
+        else:
+            nl[tiny] = neg_log10_pvalue(t_arr[tiny], df_arr[tiny])
+    out: FloatArray = nl + 0.0  # -0.0 (p = 1) -> 0.0
+    return out
+
+
+@overload
 def gwas(
     Y: ArrayLike,
     X: ArrayLike,
@@ -792,7 +891,48 @@ def gwas(
     block_size: int = DEFAULT_BLOCK_SIZE,
     legacy_fit: bool = False,
     test: str = "wald",
-) -> tuple[list[float], list[float]]:
+    return_details: Literal[False] = False,
+) -> tuple[list[float], list[float]]: ...
+
+
+@overload
+def gwas(
+    Y: ArrayLike,
+    X: ArrayLike,
+    K: FloatArray,
+    kva: ArrayLike | None = None,
+    kve: ArrayLike | None = None,
+    X0: ArrayLike | None = None,
+    reml: bool = True,
+    refit: bool = False,
+    ids: Sequence[Any] | None = None,
+    kinship_ids: Sequence[Any] | None = None,
+    batch: bool = True,
+    block_size: int = DEFAULT_BLOCK_SIZE,
+    legacy_fit: bool = False,
+    test: str = "wald",
+    *,
+    return_details: Literal[True],
+) -> GwasResult: ...
+
+
+def gwas(
+    Y: ArrayLike,
+    X: ArrayLike,
+    K: FloatArray,
+    kva: ArrayLike | None = None,
+    kve: ArrayLike | None = None,
+    X0: ArrayLike | None = None,
+    reml: bool = True,
+    refit: bool = False,
+    ids: Sequence[Any] | None = None,
+    kinship_ids: Sequence[Any] | None = None,
+    batch: bool = True,
+    block_size: int = DEFAULT_BLOCK_SIZE,
+    legacy_fit: bool = False,
+    test: str = "wald",
+    return_details: bool = False,
+) -> tuple[list[float], list[float]] | GwasResult:
     """Scan SNPs with the mixed model (a Wald or likelihood-ratio test per SNP).
 
     For each column of ``X`` the model ``y = X0 b + x a + u + e`` (see the
@@ -874,6 +1014,10 @@ def gwas(
         (`LMM.lrt_batch`: with K's null directions that the covariates span
         dropped, so that ML has a maximum).  The score test is
         `LMM.score_batch` (library only).
+    return_details : bool, default False
+        Return a `GwasResult` (the statistic, p, beta, its SE, the
+        individuals tested and -log10 p, as arrays) instead of
+        ``(t_stats, p_values)``; for `pylmm.sumstats.SumStats.from_genotypes`.
 
     Returns
     -------
@@ -977,6 +1121,11 @@ def gwas(
         kve = None
 
     if len(Y) == 0:
+        if return_details:
+            nan = np.full(m, np.nan)
+            return GwasResult(
+                nan, nan.copy(), nan.copy(), nan.copy(), nan.copy(), nan.copy(), nan.copy(), test
+            )
         return [np.nan] * m, [np.nan] * m
 
     X0 = check_covariates(X0, len(Y))
@@ -987,6 +1136,9 @@ def gwas(
 
     t_stats: list[float] = [np.nan] * m
     p_values: list[float] = [np.nan] * m
+    betas = np.full(m, np.nan)
+    beta_vars = np.full(m, np.nan)
+    n_used = np.full(m, np.nan)
     counts: dict[str, int] = {}
 
     n = X.shape[0]
@@ -1003,7 +1155,7 @@ def gwas(
         for j in start + np.where(~complete)[0]:  # one SNP at a time
             res = _gwas_one_snp(X[:, [j]], Y, K, X0, Q0, L, reml, refit, counts, test, batch)
             if res is not None:
-                t_stats[j], p_values[j] = res
+                t_stats[j], p_values[j], betas[j], beta_vars[j], n_used[j] = res
         # the complete, estimable SNPs of this block, tested together
         cand = start + np.where(complete)[0]
         batched = [int(i) for i in cand[snp_estimable_columns(X[:, cand], X0, Q0)]]
@@ -1013,10 +1165,14 @@ def gwas(
             else:
                 r = L.association_tests(X[:, batched], test, reml, refit, counts=counts)
             for k, i in enumerate(batched):
+                n_used[i] = n
                 if np.isfinite(r.t[k]):
                     t_stats[i], p_values[i] = r.t[k], r.p[k]
+                    betas[i], beta_vars[i] = r.beta[k], r.beta_var[k]
                 elif test == "wald" and not refit:  # not expected for an estimable SNP
-                    t_stats[i], p_values[i] = L.association(X[:, i], reml=reml)
+                    t_stats[i], p_values[i], betas[i], beta_vars[i] = L.association(
+                        X[:, i], reml=reml, return_beta=True
+                    )
                 elif test == "lrt":
                     pass  # nan by design: no ML maximum with the SNP (counted)
                 else:
@@ -1024,6 +1180,7 @@ def gwas(
                         X[:, [i]], test, reml, refit, batch=False, counts=counts
                     )
                     t_stats[i], p_values[i] = r1.t[0], r1.p[0]
+                    betas[i], beta_vars[i] = r1.beta[0], r1.beta_var[0]
 
     if counts.get("collinear"):
         warnings.warn(
@@ -1033,6 +1190,14 @@ def gwas(
         )
     if counts.get("lrt_unbounded"):
         warnings.warn(_lrt_unbounded_message(counts["lrt_unbounded"], m), stacklevel=2)
+    if return_details:
+        t_arr = np.asarray(t_stats, dtype=np.float64)
+        p_arr = np.asarray(p_values, dtype=np.float64)
+        n_used[~np.isfinite(t_arr)] = np.nan
+        nl10 = neg_log10_p_for(t_arr, p_arr, n_used - X0.shape[1] - 1, test)
+        with np.errstate(invalid="ignore"):
+            se = np.sqrt(beta_vars)
+        return GwasResult(t_arr, p_arr, betas, se, n_used, nl10, _column_sd(X), test)
     return t_stats, p_values
 
 
@@ -1048,8 +1213,10 @@ def _gwas_one_snp(
     counts: dict[str, int],
     test: str = "wald",
     batch: bool = True,
-) -> tuple[np.float64, np.float64] | None:
+) -> tuple[Any, Any, Any, Any, int] | None:
     """Test one SNP column ``x`` (n, 1) of `gwas` on its own; None if it cannot be tested.
+
+    Returns ``(t, p, beta, beta_var, n)``, ``n`` the individuals it was tested on.
 
     A SNP with missing calls is tested on the called individuals (a new
     `LMM` on that subset); a complete one with ``L`` (refitted if ``refit``).
@@ -1071,20 +1238,22 @@ def _gwas_one_snp(
         if not old:
             _fit_null(ls, test, reml, refit)
             r = ls.association_tests(xs, test, reml, refit, batch, counts)
-            return r.t[0], r.p[0]
+            return r.t[0], r.p[0], r.beta[0], r.beta_var[0], len(ys)
         if refit:
             ls.fit(X=xs, reml=reml)
         else:
             ls.fit(reml=reml)
-        return ls.association(xs, reml=reml)
+        t, p, b, bv = ls.association(xs, reml=reml, return_beta=True)
+        return t, p, b, bv, len(ys)
     if not snp_estimable(x, X0, Q=Q0):
         return None
     if not old:
         r = L.association_tests(x, test, reml, refit, batch, counts)
-        return r.t[0], r.p[0]
+        return r.t[0], r.p[0], r.beta[0], r.beta_var[0], len(Y)
     if refit:
         L.fit(X=x, reml=reml)
-    return L.association(x, reml=reml)
+    t, p, b, bv = L.association(x, reml=reml, return_beta=True)
+    return t, p, b, bv, len(Y)
 
 
 def _fit_null(L: LMM, test: str, reml: bool, refit: bool) -> None:

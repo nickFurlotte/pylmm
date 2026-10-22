@@ -585,10 +585,18 @@ plink_tools.write_pheno("sim.covar", ids, cov, ["sex", "age"])
 ```bash
 pylmm gwas --bfile mini --kinship data/snps.132k.clean.noX.pylmm.kin \
     --pheno sim.pheno --pheno-name trait --covar sim.covar --covar-name sex age \
-    -o trait.tsv -v 2> trait.log
+    -o trait.tsv.gz -v 2> trait.log
 grep "null model" trait.log
-head -3 trait.tsv
+gzip -dc trait.tsv.gz | cut -f 1-8 | sed -n 1,3p
 ```
+
+It writes `trait.tsv.gz`, the results (section 10), and `trait.json`, a record of the run. A name
+without `.gz` gives an uncompressed table; `--output-format legacy` writes pylmm 1.0.0's five columns
+instead. The record keeps only the base names of the input files (with their sizes and SHA-256) and of
+the paths on the command line, and no host or user name, so it can be shared with the results
+(`--run-record-full-paths` keeps the paths). `trait.tsv.gz`, `trait.tsv` and `trait` all have the record
+`trait.json` (overwritten, with a warning); `--run-record PATH` and `--no-run-record` change that, and
+with `-o /dev/stdout` (or a pipe) there is none unless `--run-record` asks for it.
 
 * `--kinship K` uses `K.id`, if it exists, to align K by ID; without it, it warns and assumes genotype
   order. With `--emma-geno` there are no IDs: K is in genotype order, with no warning (and `K.id`, if
@@ -610,45 +618,74 @@ head -3 trait.tsv
 * `--pheno-col N` is 1-based (like plink2 `--pheno-col-nums`); `--pheno-name` picks by header name.
 * `--id-match iid` matches on IID alone; `--ml`, `--refit`, `--remove-missing-genotypes` as in the
   library; `--eigen` reuses a decomposition (section 11).
+* EMMA input has no positions or alleles: those columns of the output are `NA` unless `--emma-map` gives
+  them (a header with `chr`, `bp` or `bp_<build>`, `allele0`, `allele1`, as
+  `data/hmdp.liver.snps.map.tsv`). Its effect allele is the allele coded 1; `--emma-coding count` says
+  the values are 0/1/2 copies of it rather than the fraction 0/0.5/1 (the default).
 * Exit code 0 on success, 2 for a usage or input error (one `pylmm: error: ...` line), 1 for an unexpected
   error (rerun with `--debug` for the traceback).
 * `pylmm gwas --help` lists every option, with examples.
 
 ## 10. Reading the results
 
-The output is tab-separated, one line per SNP, in `.bim` order:
+The output is a tab-separated table, one line per SNP in genotype-file order, with a header. Its first
+eight columns are the mandatory columns of the GWAS Catalog summary-statistics format (GWAS-SSF), in its
+order:
 
 | column | meaning |
 |---|---|
-| `SNP_ID` | `.bim` column 2 |
-| `BETA` | the SNP effect, **per SD of the standardised genotype** of the A2 allele (`.bim` column 6) |
-| `BETA_SD` | the **standard error** of `BETA` (despite the name) |
-| `F_STAT` | the signed **Wald t statistic**, `BETA / BETA_SD` (despite the name; t² is the F) |
-| `P_VALUE` | two-sided, from t(n - q - 1) |
+| `chromosome`, `base_pair_location` | as in the `.bim` (`.map`; `--emma-map`) |
+| `effect_allele` | the allele `beta` is the effect of: **A1**, `.bim` column 5 (ALT for plink2-written files) |
+| `other_allele` | A2, `.bim` column 6 |
+| `beta` | the SNP effect **per copy of the effect allele** |
+| `standard_error` | its standard error |
+| `effect_allele_frequency` | over the tested individuals with a called genotype |
+| `p_value` | two-sided; below 1e-300 written from `neg_log_10_p_value` (e.g. `3.16228e-401`), never 0 |
+| `variant_id` | the SNP ID (`.bim` column 2) |
+| `rsid` | the SNP ID if it is an rsID, else `NA` |
+| `n` | the individuals the SNP was tested on |
+| `t_stat` | the Wald t, `beta / standard_error` (signed for the effect allele); `--test lrt`: the signed square root of the chi2(1) statistic |
+| `neg_log_10_p_value` | -log10 p, accurate where p underflows |
+| `missing_rate` | share of the tested individuals without a call |
+| `beta_std` | `beta` × the SD of the effect allele count over the called genotypes of the individuals tested: the effect of one SD of the genotype |
 
-With `--test lrt`, `F_STAT` is the signed square root of the LRT statistic and `P_VALUE` its chi2(1)
-p-value; `BETA` and `BETA_SD` are those of the ML fit with the SNP (so `BETA / BETA_SD` is not `F_STAT`).
-
-`nan` in all four value columns marks a SNP that cannot be tested.
+`NA` marks a missing value; a SNP that cannot be tested has `NA` in `beta` to `p_value`. The effect is per
+copy of A1, the `.bim` column 5 (ALT for plink2-written files; plink2 `--glm` reports the same allele only
+with `omit-ref`, by default its A1 is the minor allele): compare the alleles before comparing signs with
+another tool. With `--test lrt`, `t_stat` is the signed square root of the LRT statistic (the sign of
+`beta`) and `p_value` its chi2(1) p-value; `beta` and `standard_error` are those of the ML fit with the
+SNP, so `beta / standard_error` is not `t_stat` there. `pylmm.sumstats.read_sumstats` reads the table
+into numpy arrays (`pandas.read_csv(path, sep="\t")` works too):
 
 ```python
-res = np.genfromtxt("trait.tsv", names=True, dtype=None, encoding="utf-8")
-assert np.allclose(res["F_STAT"], res["BETA"] / res["BETA_SD"], equal_nan=True)
-best = res[np.nanargmin(res["P_VALUE"])]
-print(best["SNP_ID"], "%.2e" % best["P_VALUE"])
-assert res["P_VALUE"][100] < 1e-10
+from pylmm.sumstats import read_sumstats
+
+res = read_sumstats("trait.tsv.gz")
+assert np.allclose(res["t_stat"], res["beta"] / res["standard_error"], equal_nan=True)   # Wald
+best = int(np.nanargmax(res["neg_log_10_p_value"]))
+print(res["variant_id"][best], res["effect_allele"][best], "%.3f" % res["beta"][best],
+      "-log10 p = %.1f" % res["neg_log_10_p_value"][best])
+assert res["p_value"][100] < 1e-10
 ```
 
-**Per-allele effects.** To compare `BETA` with tools that report the effect per copy of A1 (plink2 `--glm`,
-GEMMA, GCTA and REGENIE count A1 = ALT), divide by the SD of the 0/1/2 dosage *over the called
-individuals* (the SD the reader standardised by) and flip the sign: `beta_A1 = -BETA / np.nanstd(2 *
-g_raw)`, with `g_raw` the `norm_genotype=False` values over the individuals of the genotype file (after
-any dropped by the kinship). `BETA_SD` converts the same way; t and p need no conversion (only the sign of
-t flips with the allele). Do not compare raw `BETA` values between runs with and without
-`--remove-missing-genotypes` (section 12).
+The run record `trait.json` holds what produced the table: the command, the input files (with SHA-256),
+the individuals used and dropped by reason, the null fit (h, σ², log-likelihood), λ_GC, the SNPs not
+tested by reason and the warnings logged:
 
-The same conversion, checked with the library on the causal SNP (`x_causal` is the standardised SNP 100,
-`model` the fit of section 5):
+```python
+import json
+
+with open("trait.json") as f:
+    run = json.load(f)
+print(run["null_fit"]["h"], run["samples"]["n_analysed"], run["results"]["lambda_gc"])
+assert run["status"] == "ok" and run["results"]["n_variants"] == len(res["beta"])
+```
+
+**How `beta` relates to the model.** The model is fitted on the standardised genotype
+`x = (g - m) / s` of the A2 fraction `g` (0, 0.5, 1), so its coefficient is per SD; per copy of A1
+(`c = 2 - 2g`) it is `beta = -beta_x / (2 s)`, with `s` the SD the genotype was standardised by. The
+same conversion with the library, on the causal SNP (`x_causal` is the standardised SNP 100, `model` the
+fit of section 5):
 
 ```python
 with PlinkReader(BED, norm_genotype=False) as reader:
@@ -659,6 +696,46 @@ _, _, b_std, _ = model.association(x_causal, return_beta=True)
 _, _, b_a1, _ = model.association(dosage_a1, return_beta=True)
 print("per SD of A2: %.4f   per copy of A1: %.4f   -b_std / sd: %.4f" % (b_std, b_a1, -b_std / sd_called))
 assert np.isclose(b_a1, -b_std / sd_called)
+```
+
+**The same table from the library.** `gwas(..., return_details=True)` returns a `GwasResult` (t, p,
+beta, its SE, the individuals tested and -log10 p, per unit of the columns you pass), and
+`SumStats.from_genotypes` turns it into the table, given the *raw* genotypes and their coding
+(`"a2_fraction"`, as `PlinkReader(norm_genotype=False)` reads them, or `"a1_count"`, e.g. an ALT dosage):
+
+```python
+from pylmm.sumstats import SumStats, write_sumstats
+
+with PlinkReader(BED, norm_genotype=False) as reader:
+    g_block, v_block = next(reader.iter_blocks(200))                 # raw A2 fractions, 200 SNPs
+detail = gwas(Y, g_block, K, return_details=True)
+table = SumStats.from_genotypes(detail, g_block, v_block, coding="a2_fraction")
+write_sumstats("first200.tsv.gz", table)
+print(table.effect_allele[100], "%.3f" % table.beta[100], "%.1f" % table.neg_log_10_p_value[100])
+```
+
+The library tests a SNP with missing calls on its called individuals (as `--remove-missing-genotypes`),
+so this matches that run of `pylmm gwas`, to rounding.
+
+The legacy output (`--output-format legacy`) has pylmm 1.0.0's columns: `SNP_ID`, `BETA` (per SD of
+the standardised A2 genotype), `BETA_SD` (its standard error), `F_STAT` (the signed t) and `P_VALUE`
+(0.0 where it underflows). Per copy of A1, `beta = -BETA / (2 s)` with `s` the SD of the A2 fraction
+(0, 0.5, 1) over the called genotypes of every genotyped individual (the SD the scan standardised by;
+`sd_called` above is that of the 0/1/2 dosage, `2 s`), and `t_stat = -F_STAT`:
+
+```bash
+pylmm gwas --bfile mini --kinship data/snps.132k.clean.noX.pylmm.kin \
+    --pheno sim.pheno --pheno-name trait --covar sim.covar --covar-name sex age \
+    --output-format legacy -o trait_legacy.tsv
+```
+
+```python
+legacy = np.genfromtxt("trait_legacy.tsv", names=True, dtype=None, encoding="utf-8")
+with PlinkReader("mini", norm_genotype=False) as reader:
+    g_mini = np.hstack([g for g, _ in reader.iter_blocks(1000)])    # A2 fraction, all genotyped
+s = np.nanstd(g_mini, axis=0)
+assert np.allclose(-legacy["BETA"] / (2 * s), res["beta"], rtol=1e-10, equal_nan=True)
+assert np.array_equal(-legacy["F_STAT"], res["t_stat"], equal_nan=True)
 ```
 
 The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when to distrust a scan.
@@ -686,7 +763,7 @@ The `interpret-gwas-results` skill covers λ_GC, QQ plots, thresholds and when t
 
 ```bash
 pylmm kinship --bfile mini -o mini.kin --eigen-npz mini.eig.npz -v
-pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.pheno -o fast.tsv -v
+pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.pheno -o fast.tsv.gz -v
 ```
 
 ## 12. Pitfalls
@@ -700,10 +777,13 @@ pylmm gwas --bfile mini --kinship mini.kin --eigen mini.eig.npz --pheno sim.phen
    `--id-match iid` / `id_match="iid"`.
 4. **`#FID` headers** (plink2 style) are not recognised as headers; write `FID IID ...`.
 5. **`-9` in covariates** is a value, not missing (only `NA` is). In phenotypes `-9` is missing.
-6. **Effect allele and scale.** BETA is per SD of the A2 allele (REF for plink2-written files, the
-   *major* allele for plink 1.9 without `--keep-allele-order`), opposite in sign to plink2 `--glm`.
-   With `--remove-missing-genotypes`, SNPs without missing calls are tested on the raw 0–1 scale and SNPs
-   with missing calls on the standardised scale, so BETA is not comparable across SNPs (t and p are fine).
+6. **Effect allele and scale.** `beta` is per copy of A1, the `.bim` column 5: ALT for plink2-written
+   files, but the *minor* allele for plink 1.9 without `--keep-allele-order`, and whatever the file says
+   otherwise. Match alleles, not columns, against another study. (pylmm 1.0.0 and `--output-format
+   legacy` report BETA per SD of A2, opposite in sign; with `--remove-missing-genotypes` that BETA is on
+   the raw 0–1 scale for SNPs without missing calls and per SD for the others. The default table has one
+   scale for every SNP.) Library `gwas` and `LMM.association` report the effect per unit of the column
+   you pass.
 7. **`h` at a boundary.** 1 means no residual variance detected, 0 none due to K; neither is a precise
    estimate (use a profile-likelihood interval, `estimate-heritability` skill). ML can run to 1 for a
    centred K from more SNPs than individuals (`fit` warns); use REML. (pylmm 1.0.0 and `--legacy-fit`

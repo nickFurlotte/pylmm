@@ -121,21 +121,25 @@ plink_tools.write_kinship("sim.kin", kin.K, fid_iid)              # K from the k
 ```
 
 ```bash
-pylmm gwas --bfile sim --kinship sim.kin --pheno sim.pheno --covar sim.covar -o sim.tsv -v
+pylmm gwas --bfile sim --kinship sim.kin --pheno sim.pheno --covar sim.covar -o sim.tsv.gz -v
 ```
 
 Keep `-v` in such checks: it logs how many individuals were read, matched and dropped, and the null fit;
-`-q` would hide the warnings that reveal an ID mismatch.
+`-q` would hide the warnings that reveal an ID mismatch. The run record `sim.json` has the same counts and
+every warning, whatever `-v`/`-q` say.
 
 ```python
-res = np.genfromtxt("sim.tsv", names=True, dtype=None, encoding="utf-8")
-assert np.allclose(res["P_VALUE"], ps, rtol=1e-5)                 # CLI == library
-assert np.all(np.sign(res["BETA"][causal]) == np.sign(ph.beta))  # write_bed counts A2 = the sim allele
-print("pipeline OK: causal p =", ["%.1e" % p for p in res["P_VALUE"][causal]])
+from pylmm.sumstats import read_sumstats
+
+res = read_sumstats("sim.tsv.gz")
+assert np.allclose(res["p_value"], ps, rtol=1e-5)                 # CLI == library
+# write_bed counts A2 = the simulated allele; beta is per copy of the effect allele A1: opposite sign
+assert np.all(np.sign(res["beta"][causal]) == -np.sign(ph.beta))
+print("pipeline OK: causal p =", ["%.1e" % p for p in res["p_value"][causal]])
 ```
 
 Things such a check catches: an ID mismatch (individuals dropped or misaligned), a missing intercept, a
-flipped allele (BETA signs flip), a kinship for other samples (λ off, h wrong).
+flipped allele (`beta` signs flip: check `effect_allele`), a kinship for other samples (λ off, h wrong).
 
 ## 6. Real genotypes (the `bed` source) and inbred panels
 
