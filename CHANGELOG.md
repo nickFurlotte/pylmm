@@ -20,7 +20,8 @@ maps them).
   `dosage=False`: hard calls only). The genotype is the fraction of copies of **REF** (`1 - ALT dosage/2`;
   `variants.a2` = REF, `a1` = ALT), so a PGEN reads bit for bit as the BED `plink2 --make-bed` writes from
   it, and `pylmm gwas`/`pylmm kinship` give byte-identical output with `--pfile` and `--bfile` of the two
-  (checked on plink2-written fixtures). A `.psam` without FID gives FID `0` (as plink2's `.fam`).
+  (checked on plink2-written fixtures; also with `--loco`, whose chromosomes come from the `.pvar`, and
+  `--grm`). A `.psam` without FID gives FID `0` (as plink2's `.fam`).
   Multiallelic variants are an `InputError` naming the first one. Also `pylmm.pgen.write_pgen` (genotypes
   to PGEN, for tests and small conversions) and `sims/bench/pgen_read.py` (read throughput vs BED:
   0.5-0.9x unstandardised, 0.8-1.2x standardised).
@@ -111,8 +112,35 @@ maps them).
   `.rel.bin`): prefer `--make-rel bin`. A kinship whose FIDs are all `0` (plink2, no FID column) that
   matches nothing under `--id-match fid-iid` gets an error suggesting `--id-match iid`.
 - `kinship_io.read_eigen` / `write_eigen`: eigendecomposition `.npz` files with sample IDs.
+- Leave-one-chromosome-out (LOCO) scans. Library: `pylmm.loco.LocoKinship` builds every `K_{-c}` (the
+  kinship of all chromosomes but `c`) in one pass over the raw genotypes, for each kind (standardized,
+  centered, ibs; not `legacy`), keeping one n × n sum per chromosome; `K_{-c}` equals `calculate_kinship`
+  of the other chromosomes' SNPs up to summation order (measured ≤ 2.6e-15 of max |K|).
+  `pylmm.loco.gwas_loco(Y, X, chroms, kinships=None, ...)` fits the null model on each `K_{-c}` and tests
+  that chromosome's SNPs with `gwas` -> `LocoResult(t_stats, p_values, h)`. Command line: `pylmm gwas
+  --loco` (instead of `--kinship`/`--grm`/`--eigen`) reads the genotypes once for the kinships and once to
+  scan, one null fit per chromosome (logged with each `K_{-c}`'s SNP count and scale); `--kinship-type`
+  picks the kind, `--emma-map FILE` gives EMMA rows their chromosomes (e.g. `data/hmdp.liver.snps.map.tsv`).
+  Same output columns, file order. Each chromosome's SNPs must be together in the file; labels are
+  normalised (`chr1`, `01`, `1` are one chromosome; `pylmm.loco.normalize_chrom`); more than
+  `--loco-max-chroms` (default 100) chromosomes, or one chromosome per SNP, is an error; the memory
+  estimate, about (chromosomes + 6) n² × 8 bytes, is logged first. A genotype read error stops `--loco`
+  before any output. Opt-in: the default scan is unchanged, and without `--kinship`/`--grm`/`--loco` the
+  usage error names `--loco`. Evidence (`sims/studies/s8_loco.md`): on a null phenotype both kinships are
+  calibrated (LOCO λ_GC 0.94-1.02); on chromosomes without causal variants K from all SNPs is
+  conservative (λ_GC down to 0.57 on an inbred panel) and LOCO is not (0.97-1.06); the power of a q2 =
+  0.05 QTL at 1e-3 roughly doubles on inbred panels. With causal variants on every chromosome, LOCO's
+  λ_GC of a polygenic trait is above 1 (1.1-2.8; linked signal, not confounding): do not use it as a
+  calibration check and never apply genomic control to a LOCO scan. Cost: one eigendecomposition per
+  chromosome; 14 s vs 11 s on the README data (n = 1219), 199 s vs 27 s at n = 3000 with 10
+  chromosomes.
+- `pylmm.kinship.snp_columns` and `finish_kinship`: the per-SNP step and the final scaling of
+  `KinshipAccumulator`, factored out (K unchanged, bit for bit).
 
 ### Changed
+- `pylmm gwas` without `--kinship` or `--grm`: argparse's "one of the arguments --kinship --grm is
+  required" -> the same message from `check_args`, which also suggests `--loco`; exit code 2 as before.
+- `pylmm.kinship.finish_kinship` with no SNP used raises `ValueError` (it divided by zero).
 - `pylmm kinship --eigen-npz`: arrays `Kva`, `Kve` -> also `fid`, `iid` (the samples of Kve's rows; not for
   EMMA input) and `kinship_type` (plain arrays, no pickle; 1.0.0 readers still find `Kva` and `Kve`).
 - `pylmm gwas --eigen`: the decomposition was used only if no individual was dropped or reordered, its rows
