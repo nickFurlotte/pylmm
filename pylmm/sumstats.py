@@ -421,12 +421,14 @@ def allele_count_stats(C: ArrayLike) -> tuple[FloatArray, FloatArray, FloatArray
     if A.ndim == 1:
         A = A.reshape(-1, 1)
     n, m = A.shape
-    called = ~np.isnan(A)
-    k = called.sum(axis=0)
+    # One SNP per contiguous row, summed along it: the same sums (bit for bit) whatever the
+    # memory layout of C.
+    R = np.ascontiguousarray(A.T)
+    called = ~np.isnan(R)
+    k = called.sum(axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
-        Z = np.where(called, A, 0.0)
-        mean = Z.sum(axis=0) / k
-        var = np.where(called, (A - mean) ** 2, 0.0).sum(axis=0) / k
+        mean = np.where(called, R, 0.0).sum(axis=1) / k
+        var = np.where(called, (R - mean[:, None]) ** 2, 0.0).sum(axis=1) / k
         missing = 1.0 - k / n if n else np.full(m, np.nan)
     mean = np.where(k > 0, mean, np.nan)
     sd = np.where(k > 0, np.sqrt(var), np.nan)

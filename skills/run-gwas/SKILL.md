@@ -165,8 +165,9 @@ from pylmm.sumstats import read_sumstats
 
 out = read_sumstats("trait.tsv.gz")
 assert np.allclose(ps, out["p_value"], rtol=1e-6, equal_nan=True)   # the CLI and the library agree
-# W is standardised (per SD of A2), the table per copy of A1: t flips sign
-assert np.allclose(ts, -out["t_stat"], rtol=1e-6, equal_nan=True)
+# W is standardised (per SD of A2), the table per copy of A1: t flips sign (the two runs agree
+# to about 1e-7, not bit for bit: the null h of two processes can differ in its last digits)
+assert np.allclose(ts, -out["t_stat"], rtol=1e-6, atol=1e-6, equal_nan=True)
 ```
 
 With covariates in Python, prepend the intercept yourself:

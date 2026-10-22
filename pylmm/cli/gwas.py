@@ -1255,7 +1255,15 @@ class ScanOutput:
             self.copies = -2.0
         else:
             self.copies = 2.0 if self.emma_coding == "fraction" else 1.0
-        self.meta = inputs.emma_variants
+        # The metadata of every SNP of the file, in file order, when known: the --emma-map, or
+        # the .bim/.map (so that SNPs read one at a time after a failed block, which carry
+        # only their IDs, still get positions and alleles).  None: each block's own.
+        self.meta: Variants | None = inputs.emma_variants
+        if self.meta is None and not self.emma and not self.legacy:
+            try:
+                self.meta = inputs.reader.variants
+            except _READ_ERRORS:  # a .bim the metadata reader rejects: IDs only
+                self.meta = None
         self.index = 0
         self.p_values: list[FloatArray] = []
         self.neg_log10: list[FloatArray] = []
@@ -1290,11 +1298,9 @@ class ScanOutput:
                 scale = np.where(called == n_t, 1.0, g_sd)
                 n_used = called
             else:
-                ok = ~np.isnan(G)
-                k = ok.sum(axis=0)
-                mean = np.where(ok, G, 0.0).sum(axis=0) / k
-                var = np.where(ok, (G - mean) ** 2, 0.0).sum(axis=0) / k
-                scale = np.where(var > 0, np.sqrt(var), 1.0)
+                # over the reader's individuals, as the standardisation; layout-independent sums
+                _, sd_all, _ = sumstats.allele_count_stats(G)
+                scale = np.where(sd_all > 0, sd_all, 1.0)
                 n_used = np.full(G.shape[1], float(n_t))
         mean_g = 2.0 * g_half  # the mean raw value
         top = 2.0 / abs(self.copies)  # the largest raw value: 1 (fraction) or 2 (count)
